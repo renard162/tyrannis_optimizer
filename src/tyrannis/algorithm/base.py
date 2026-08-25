@@ -10,15 +10,15 @@ class ParticleBase(ABC):
         self,
         identifier: str,
         fitness_function: Callable[[dict[str, float]], float],
-        arguments: dict[str, float],
+        variables: dict[str, float],
         fitness: float | None = None,
     ) -> None:
         self._identifier = identifier
         self._fitness_function = fitness_function
-        self._arguments = arguments
+        self._variables = variables
         self._fitness = fitness
 
-        self._candidate_arguments = None
+        self._candidate_variables = None
         self._candidate_fitness = None
 
     @property
@@ -30,8 +30,8 @@ class ParticleBase(ABC):
         self._identifier = identifier
 
     @property
-    def arguments(self) -> dict[str, float]:
-        return self._arguments
+    def variables(self) -> dict[str, float]:
+        return self._variables
 
     @property
     def fitness(self) -> float | None:
@@ -44,39 +44,39 @@ class ParticleBase(ABC):
     def __call__(self) -> dict[str, str | dict[str, float] | float | None]:
         return {
             "identifier": self._identifier,
-            "arguments": self._arguments,
+            "variables": self._variables,
             "fitness": self._fitness,
         }
 
     def dump(self) -> str:
         return json.dumps(
             {
-                "arguments": self._arguments,
+                "variables": self._variables,
                 "fitness": self._fitness,
             }
         )
 
-    def update(self, arguments: dict[str, float]) -> None:
-        if arguments is None:
-            raise ValueError("Arguments cannot be None.")
+    def update(self, variables: dict[str, float]) -> None:
+        if variables is None:
+            raise ValueError("Variables cannot be None.")
 
-        self._candidate_arguments = None
+        self._candidate_variables = None
         self._candidate_fitness = None
 
-        candidate_fitness = self._fitness_function(arguments)
+        candidate_fitness = self._fitness_function(variables)
 
-        self._candidate_arguments = arguments
+        self._candidate_variables = variables
         self._candidate_fitness = candidate_fitness
 
     def consolidate(self, new: bool) -> None:
-        if self._candidate_arguments is None:
+        if self._candidate_variables is None:
             raise RuntimeError("No candidate solution available for consolidation.")
 
         if new or (self._fitness is None):
-            self._arguments = self._candidate_arguments
+            self._variables = self._candidate_variables
             self._fitness = self._candidate_fitness
 
-        self._candidate_arguments = None
+        self._candidate_variables = None
         self._candidate_fitness = None
 
 
@@ -128,13 +128,13 @@ class AlgorithmBase(ABC):
     def create_particle(
         self,
         identifier: str | None,
-        arguments: dict[str, float] | None,
+        variables: dict[str, float] | None,
         fitness: float | None,
     ) -> None:
         """
         Create and add a particle to the population.
 
-        When no arguments are provided, the particle must be created
+        When no variables are provided, the particle must be created
         according to the algorithm's initial particle generation rule.
 
         When particle data is provided, the arguments may be used to
