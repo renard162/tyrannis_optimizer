@@ -112,9 +112,17 @@ class AlgorithmBase(ABC):
     def lbest(self) -> ParticleBase | None:
         return self._lbest
 
+    @lbest.setter
+    def lbest(self, new_particle: ParticleBase) -> None:
+        self._lbest = new_particle
+
     @property
     def lworst(self) -> ParticleBase | None:
         return self._lworst
+
+    @lworst.setter
+    def lworst(self, new_particle: ParticleBase) -> None:
+        self._lworst = new_particle
 
     @abstractmethod
     def create_particle(
@@ -137,6 +145,21 @@ class AlgorithmBase(ABC):
         """
 
     @abstractmethod
+    def delete_particle(self, identifier: str | None) -> None:
+        """
+        Delete a particle from the population.
+
+        When an identifier is provided, the particle identified by it must
+        be removed according to the algorithm's deletion rules.
+
+        When no identifier is provided, the algorithm may select a particle
+        according to its own deletion rules. This allows dynamic population
+        management during algorithm execution, such as removing individuals
+        in evolutionary algorithms or removing particles during migration
+        between populations.
+        """
+
+    @abstractmethod
     def pre_iteration(self) -> None:
         """
         Prepare the algorithm state before updating the particles.
@@ -155,8 +178,10 @@ class AlgorithmBase(ABC):
         from the particle update.
         """
 
-    def update_population(self, population: list[ParticleBase]) -> None:
-        self._population = {particle.identifier: particle for particle in population}
+    def update_population(self, new_population: list[ParticleBase]) -> None:
+        self._population = {
+            particle.identifier: particle for particle in new_population
+        }
 
     @abstractmethod
     def post_iteration(self) -> None:
