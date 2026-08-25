@@ -9,8 +9,8 @@ class ParticleBase(ABC):
     def __init__(
         self,
         identifier: str,
-        fitness_function: Callable[[dict], float],
-        arguments: dict,
+        fitness_function: Callable[[dict[str, float]], float],
+        arguments: dict[str, float],
         fitness: float | None = None,
     ) -> None:
         self._identifier = identifier
@@ -26,7 +26,7 @@ class ParticleBase(ABC):
             self._fitness = fitness
 
     @property
-    def arguments(self) -> dict:
+    def arguments(self) -> dict[str, float]:
         return self._arguments
 
     @property
@@ -41,7 +41,7 @@ class ParticleBase(ABC):
     def identifier(self, identifier: str) -> None:
         self._identifier = identifier
 
-    def __call__(self) -> dict:
+    def __call__(self) -> dict[str, str | dict[str, float] | float | None]:
         return {
             "identifier": self._identifier,
             "arguments": self._arguments,
@@ -56,7 +56,7 @@ class ParticleBase(ABC):
             }
         )
 
-    def update(self, arguments: dict) -> float:
+    def update(self, arguments: dict[str, float]) -> float:
         if arguments is None:
             raise ValueError("Arguments cannot be None.")
 
