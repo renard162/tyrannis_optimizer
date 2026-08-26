@@ -179,9 +179,9 @@ class AlgorithmBase(ABC):
         """
 
     def update_population(self, new_population: list[ParticleBase]) -> None:
-        self._population = {
-            particle.identifier: particle for particle in new_population
-        }
+        self._population.update(
+            {particle.identifier: particle for particle in new_population}
+        )
 
     @abstractmethod
     def post_iteration(self) -> None:
