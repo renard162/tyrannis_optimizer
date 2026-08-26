@@ -93,8 +93,8 @@ class AlgorithmBase(ABC):
         self._fitness_function = fitness_function
         self._boundaries = boundaries
         self._population: dict[str, ParticleBase] = {}
-        self._lbest: ParticleBase | None = None
-        self._lworst: ParticleBase | None = None
+        self._local_best: ParticleBase | None = None
+        self._local_worst: ParticleBase | None = None
 
     @property
     def identifier(self) -> str:
@@ -109,20 +109,20 @@ class AlgorithmBase(ABC):
         return self._population
 
     @property
-    def lbest(self) -> ParticleBase | None:
-        return self._lbest
+    def local_best(self) -> ParticleBase | None:
+        return self._local_best
 
-    @lbest.setter
-    def lbest(self, new_particle: ParticleBase) -> None:
-        self._lbest = new_particle
+    @local_best.setter
+    def local_best(self, new_particle: ParticleBase) -> None:
+        self._local_best = new_particle
 
     @property
-    def lworst(self) -> ParticleBase | None:
-        return self._lworst
+    def local_worst(self) -> ParticleBase | None:
+        return self._local_worst
 
-    @lworst.setter
-    def lworst(self, new_particle: ParticleBase) -> None:
-        self._lworst = new_particle
+    @local_worst.setter
+    def local_worst(self, new_particle: ParticleBase) -> None:
+        self._local_worst = new_particle
 
     @abstractmethod
     def create_particle(
