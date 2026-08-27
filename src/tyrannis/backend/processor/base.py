@@ -10,7 +10,9 @@ from ...algorithm.base import AlgorithmBase
 
 @dataclass
 class StatusVariables:
-    population: list[str]
+    departure_particle_id: str
+    departure_particle_data: str
+    population: dict[str, float | None]
     actual_iter: int = -1
     best_fit: float = np.inf
     worst_fit: float = np.inf
@@ -42,7 +44,13 @@ class ControlVariables:
 class ProcessorBase(ABC):
     """Base class for processor agent."""
 
-    def __init__(self, algorithm: AlgorithmBase, n_iter: int) -> None:
+    def __init__(
+        self,
+        identifier: str,
+        algorithm: AlgorithmBase,
+        n_iter: int,
+        n_particles: int,
+    ) -> None:
         """
         Initialize the processor with an optimization algorithm.
 
@@ -61,10 +69,29 @@ class ProcessorBase(ABC):
         The provided algorithm is stored by the processor and is responsible
         for the optimization logic executed by the processor.
         """
+        self._identifier = identifier
         self._n_iter = n_iter
         self._algorithm = algorithm
+        self.init_particles(n_particles)
         self._control = ControlVariables()
-        self._status = StatusVariables(population=[])
+        self._status = StatusVariables(
+            population={},
+            departure_particle_id="",
+            departure_particle_data="",
+        )
+
+    def init_particles(self, n_particles: int) -> None:
+        for p_idx in range(n_particles):
+            self._algorithm.create_particle(
+                identifier=f"pro:{self._identifier}|par:{p_idx}",
+                variables=None,
+                fitness=None,
+            )
+
+    def update_population_status(self):
+        self._status.population = {
+            p_id: p.fitness for p_id, p in self._algorithm.population.items()
+        }
 
     @abstractmethod
     def run(self) -> None:
