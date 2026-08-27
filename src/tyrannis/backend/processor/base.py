@@ -3,8 +3,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from time import sleep
 
-import numpy as np
-
 from ...algorithm.base import AlgorithmBase
 
 
