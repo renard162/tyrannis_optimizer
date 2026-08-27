@@ -38,6 +38,10 @@ class ParticleBase(ABC):
         return self._fitness
 
     @property
+    def candidate_variables(self) -> dict[str, float] | None:
+        return self._candidate_variables
+
+    @property
     def candidate_fitness(self) -> float | None:
         return self._candidate_fitness
 
@@ -83,10 +87,12 @@ class AlgorithmBase(ABC):
         identifier: str,
         fitness_function: Callable[[dict[str, float]], float],
         boundaries: dict[str, tuple[float, float]],
+        seed: int,
     ) -> None:
         self._identifier = identifier
         self._fitness_function = fitness_function
         self._boundaries = boundaries
+        self._seed = seed
         self._population: dict[str, ParticleBase] = {}
         self._local_best: ParticleBase | None = None
         self._local_worst: ParticleBase | None = None
