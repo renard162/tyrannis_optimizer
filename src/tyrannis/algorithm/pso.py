@@ -19,6 +19,8 @@ class PSOParticle(ParticleBase):
         variables: dict[str, float],
         fitness: float | None = None,
         velocity: dict[str, float] | None = None,
+        personal_best_variables: dict[str, float] | None = None,
+        personal_best_fitness: float | None = None,
     ) -> None:
         super().__init__(
             identifier=identifier,
@@ -28,6 +30,8 @@ class PSOParticle(ParticleBase):
         )
 
         self._velocity = velocity
+        self._personal_best_variables = personal_best_variables
+        self._personal_best_fitness = personal_best_fitness
 
     @property
     def velocity(self) -> dict[str, float] | None:
@@ -36,6 +40,34 @@ class PSOParticle(ParticleBase):
     @velocity.setter
     def velocity(self, velocity: dict[str, float]) -> None:
         self._velocity = velocity
+
+    @property
+    def personal_best_variables(self) -> dict[str, float] | None:
+        return self._personal_best_variables
+
+    @property
+    def personal_best_fitness(self) -> float | None:
+        return self._personal_best_fitness
+
+    def __call__(self) -> dict[str, str | dict[str, float] | float | None]:
+        return {
+            "identifier": self._identifier,
+            "variables": self._variables,
+            "fitness": self._fitness,
+            "personal_best_variables": self._personal_best_variables,
+            "personal_best_fitness": self._personal_best_fitness,
+        }
+
+    def update_personal_best(self) -> None:
+        if self.fitness is None:
+            raise RuntimeError(f"Particle '{self.identifier}' does not have a fitness.")
+
+        if (
+            self._personal_best_fitness is None
+            or self.fitness < self._personal_best_fitness
+        ):
+            self._personal_best_variables = deepcopy(self.variables)
+            self._personal_best_fitness = self.fitness
 
 
 class PSO(AlgorithmBase):
@@ -61,8 +93,6 @@ class PSO(AlgorithmBase):
         self._inertia = inertia
         self._cognitive_coefficient = cognitive_coefficient
         self._social_coefficient = social_coefficient
-
-        self._personal_best: dict[str, ParticleBase] = {}
 
     def create_particle(
         self,
@@ -101,9 +131,6 @@ class PSO(AlgorithmBase):
 
         del self._population[identifier]
 
-        if identifier in self._personal_best:
-            del self._personal_best[identifier]
-
     def pre_iteration(self, actual_iter: int) -> None:
         return
 
@@ -122,21 +149,27 @@ class PSO(AlgorithmBase):
         if self._local_best is None:
             raise RuntimeError("Local best particle has not been initialized.")
 
-        personal_best = self._personal_best[identifier]
-        global_best = self._local_best
-
         if particle.velocity is None:
             raise RuntimeError(f"Particle '{identifier}' does not have a velocity.")
+
+        if particle.personal_best_variables is None:
+            raise RuntimeError(
+                f"Particle '{identifier}' does not have a personal best."
+            )
+
+        current_variables = particle.variables
+        personal_best_variables = particle.personal_best_variables
+        global_best_variables = self._local_best.variables
 
         new_velocity = {}
         new_variables = {}
 
         for name, (lower, upper) in self._boundaries.items():
-            current_variable = particle.variables[name]
+            current_variable = current_variables[name]
             current_velocity = particle.velocity[name]
 
-            personal_best_variable = personal_best.variables[name]
-            global_best_variable = global_best.variables[name]
+            personal_best_variable = personal_best_variables[name]
+            global_best_variable = global_best_variables[name]
 
             velocity = (
                 self._inertia * current_velocity
@@ -162,68 +195,72 @@ class PSO(AlgorithmBase):
 
         return particle
 
-    def update_population(self, new_population: list[ParticleBase]) -> None:
-        super().update_population(new_population)
-
     def post_iteration(self, actual_iter: int) -> None:
         if actual_iter == 0:
-            for identifier, particle in self._population.items():
+            for particle in self._population.values():
+                if not isinstance(particle, PSOParticle):
+                    raise TypeError(
+                        f"Particle '{particle.identifier}' must be an "
+                        "instance of PSOParticle."
+                    )
+
                 particle.consolidate(new=True)
-                self._personal_best[identifier] = deepcopy(particle)
+                particle.update_personal_best()
 
             self._local_best = deepcopy(
                 min(
                     self._population.values(),
-                    key=lambda particle: particle.fitness,
+                    key=self._get_fitness,
                 )
             )
 
             self._local_worst = deepcopy(
                 max(
                     self._population.values(),
-                    key=lambda particle: particle.fitness,
+                    key=self._get_fitness,
                 )
             )
 
             return
 
-        for identifier, particle in self._population.items():
+        for particle in self._population.values():
+            if not isinstance(particle, PSOParticle):
+                raise TypeError(
+                    f"Particle '{particle.identifier}' must be an "
+                    "instance of PSOParticle."
+                )
+
             if particle.candidate_fitness is None:
-                raise RuntimeError(f"Particle '{identifier}' has no candidate fitness.")
+                raise RuntimeError(
+                    f"Particle '{particle.identifier}' has no candidate fitness."
+                )
 
             if particle.fitness is None:
-                raise RuntimeError(f"Particle '{identifier}' has no current fitness.")
+                raise RuntimeError(
+                    f"Particle '{particle.identifier}' has no current fitness."
+                )
 
             particle.consolidate(
-                new=(particle.candidate_fitness < particle.fitness),
+                new=particle.candidate_fitness < particle.fitness,
             )
-
-            personal_best = self._personal_best[identifier]
-
-            if (
-                personal_best.fitness is None
-                or particle.fitness < personal_best.fitness
-            ):
-                self._personal_best[identifier] = deepcopy(particle)
+            particle.update_personal_best()
 
         best_particle = min(
             self._population.values(),
-            key=lambda particle: particle.fitness,
+            key=self._get_fitness,
         )
 
         worst_particle = max(
             self._population.values(),
-            key=lambda particle: particle.fitness,
+            key=self._get_fitness,
         )
 
-        if (
-            self._local_best is None
-            or best_particle.fitness != self._local_best.fitness
+        if (self._local_best is None) or (
+            best_particle.fitness != self._local_best.fitness
         ):
             self._local_best = deepcopy(best_particle)
 
-        if (
-            self._local_worst is None
-            or worst_particle.fitness != self._local_worst.fitness
+        if (self._local_worst is None) or (
+            worst_particle.fitness != self._local_worst.fitness
         ):
             self._local_worst = deepcopy(worst_particle)
