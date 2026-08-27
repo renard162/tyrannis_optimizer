@@ -35,6 +35,9 @@ class Serial(ProcessorBase):
 
     def run(self) -> None:
         for actual_iter in range(self._n_iter + 1):
+            if self._stop_signal.is_set():
+                break
+
             self.wait_sync(actual_iter)
 
             self.migration_control()
@@ -43,9 +46,15 @@ class Serial(ProcessorBase):
 
             processed_particles = []
             for particle_id in self._algorithm.population:
+                if self._stop_signal.is_set():
+                    break
                 processed_particles.append(self._algorithm.update_particle(particle_id))
             self._algorithm.update_population(processed_particles)
 
             self._algorithm.post_iteration(actual_iter)
 
             self.update_status()
+
+
+if __name__ == "__main__":
+    print("Breakpoint here")
