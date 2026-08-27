@@ -1,6 +1,7 @@
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from time import sleep
 
 import numpy as np
 
@@ -15,10 +16,10 @@ class StatusVariables:
     population: dict[str, float | None]
     actual_iter: int = -1
 
-    best_particle_id: str = ""
-    best_particle_fitness: float = np.inf
-    worst_particle_id: str = ""
-    worst_particle_fitness: float = np.inf
+    best_particle_data: str = ""
+    best_particle_fitness: float | None = None
+    worst_particle_data: str = ""
+    worst_particle_fitness: float | None = None
 
 
 @dataclass
@@ -93,7 +94,52 @@ class ProcessorBase(ABC):
                 fitness=None,
             )
 
-    def update_population_status(self):
+    def wait_sync(self, actual_iter: int) -> None:
+        if self._control.iter_until is None:
+            return
+
+        while actual_iter >= self._control.iter_until:
+            sleep(0.01)
+
+    def migration_control(self) -> None:
+        self._insert_arrival_particle()
+        self._departure_particle()
+
+    def _insert_arrival_particle(self) -> None:
+        if self._control.arrival_particle_id is None:
+            return
+
+        if self._control.arrival_particle_id not in self._algorithm.population:
+            self._algorithm.create_particle(
+                identifier=self._control.arrival_particle_id,
+                variables=self._control.arrival_particle_var,
+                fitness=self._control.arrival_particle_fit,
+            )
+
+    def _departure_particle(self) -> None:
+        """
+        Remove a departing particle from the algorithm population.
+
+        This method will be implemented after the interaction methods
+        between optimization islands have been defined.
+        """
+        return
+
+    def update_status(self) -> None:
+        self._update_population_status()
+        self._update_partial_result()
+
+    def _update_partial_result(self) -> None:
+        if (self._algorithm.local_best is None) or (
+            self._algorithm.local_worst is None
+        ):
+            return
+        self._status.best_particle_fitness = self._algorithm.local_best.fitness
+        self._status.best_particle_data = self._algorithm.local_best.dump()
+        self._status.worst_particle_fitness = self._algorithm.local_worst.fitness
+        self._status.worst_particle_data = self._algorithm.local_worst.dump()
+
+    def _update_population_status(self) -> None:
         self._status.population = {
             p_id: p.fitness for p_id, p in self._algorithm.population.items()
         }
@@ -122,23 +168,3 @@ class ProcessorBase(ABC):
         The algorithm iteration must then be executed according to the
         algorithm's defined iteration lifecycle.
         """
-
-    def insert_arrival_particle(self) -> None:
-        if self._control.arrival_particle_id is None:
-            return
-
-        if self._control.arrival_particle_id not in self._algorithm.population:
-            self._algorithm.create_particle(
-                identifier=self._control.arrival_particle_id,
-                variables=self._control.arrival_particle_var,
-                fitness=self._control.arrival_particle_fit,
-            )
-
-    def remove_departure_particle(self) -> None:
-        """
-        Remove a departing particle from the algorithm population.
-
-        This method will be implemented after the interaction methods
-        between optimization islands have been defined.
-        """
-        return
