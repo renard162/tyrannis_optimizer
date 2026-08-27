@@ -2,6 +2,8 @@ import json
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 
+import numpy as np
+
 
 class ParticleBase(ABC):
     """Base class for optimization particles."""
@@ -87,12 +89,12 @@ class AlgorithmBase(ABC):
         identifier: str,
         fitness_function: Callable[[dict[str, float]], float],
         boundaries: dict[str, tuple[float, float]],
-        seed: int,
+        seed: int | None,
     ) -> None:
         self._identifier = identifier
         self._fitness_function = fitness_function
         self._boundaries = boundaries
-        self._seed = seed
+        self._rng = np.random.default_rng(seed)
         self._population: dict[str, ParticleBase] = {}
         self._local_best: ParticleBase | None = None
         self._local_worst: ParticleBase | None = None
