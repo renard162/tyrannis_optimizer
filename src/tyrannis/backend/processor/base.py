@@ -1,7 +1,6 @@
 import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 
@@ -24,7 +23,6 @@ class ControlVariables:
     new_particle_var: dict[str, float] | None = None
     new_particle_fit: float | None = None
     iter_until: int | None = None
-    stop_signal: Any | None = None
 
     def load_new_particle(self, particle_data: str) -> None:
         """
