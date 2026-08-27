@@ -35,6 +35,8 @@ class Serial(ProcessorBase):
 
     def run(self) -> None:
         for actual_iter in range(self._n_iter + 1):
+            self.update_iter_counter(actual_iter)
+
             if self._stop_signal.is_set():
                 break
 
@@ -57,4 +59,21 @@ class Serial(ProcessorBase):
 
 
 if __name__ == "__main__":
+    from ...algorithm.pso import PSO
+
+    def sphere(x: dict):  # Continuous and NaN benchmark
+        # Sphere function
+        # Min: x=(0,0)
+        total = 0
+        for val in x.values():
+            total += val**2
+        return total
+
+    algo = PSO(
+        identifier="pso",
+        fitness_function=sphere,
+        boundaries={f"{n}": (-10, 10) for n in range(2)},
+        seed=42,
+    )
+
     print("Breakpoint here")

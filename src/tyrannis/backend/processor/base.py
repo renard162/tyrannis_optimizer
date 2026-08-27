@@ -89,7 +89,7 @@ class ProcessorBase(ABC):
     def _init_particles(self, n_particles: int) -> None:
         for p_idx in range(n_particles):
             self._algorithm.create_particle(
-                identifier=f"pro:{self._identifier}|par:{p_idx}",
+                identifier=f"island:{self._identifier}|particle:{p_idx}",
                 variables=None,
                 fitness=None,
             )
@@ -124,6 +124,9 @@ class ProcessorBase(ABC):
         between optimization islands have been defined.
         """
         return
+
+    def update_iter_counter(self, actual_iter: int) -> None:
+        self._status.actual_iter = actual_iter
 
     def update_status(self) -> None:
         self._update_population_status()
