@@ -46,6 +46,7 @@ class PSO(AlgorithmBase):
         identifier: str,
         fitness_function: Callable[[dict[str, float]], float],
         boundaries: dict[str, tuple[float, float]],
+        seed: int | None,
         inertia: float = 0.7,
         cognitive_coefficient: float = 1.5,
         social_coefficient: float = 1.5,
@@ -54,6 +55,7 @@ class PSO(AlgorithmBase):
             identifier=identifier,
             fitness_function=fitness_function,
             boundaries=boundaries,
+            seed=seed,
         )
 
         self._inertia = inertia
@@ -73,12 +75,12 @@ class PSO(AlgorithmBase):
 
         if variables is None:
             variables = {
-                name: np.random.uniform(lower, upper)
+                name: self._rng.uniform(lower, upper)
                 for name, (lower, upper) in self._boundaries.items()
             }
 
         velocity = {
-            name: np.random.uniform(
+            name: self._rng.uniform(
                 -(upper - lower),
                 upper - lower,
             )
@@ -139,10 +141,10 @@ class PSO(AlgorithmBase):
             velocity = (
                 self._inertia * current_velocity
                 + self._cognitive_coefficient
-                * np.random.random()
+                * self._rng.random()
                 * (personal_best_variable - current_variable)
                 + self._social_coefficient
-                * np.random.random()
+                * self._rng.random()
                 * (global_best_variable - current_variable)
             )
 
