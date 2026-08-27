@@ -160,9 +160,14 @@ class AlgorithmBase(ABC):
         """
 
     @abstractmethod
-    def pre_iteration(self) -> None:
+    def pre_iteration(self, actual_iter: int) -> None:
         """
         Prepare the algorithm state before updating the particles.
+
+        The current iteration number is provided through `actual_iter`.
+        Iteration 0 represents the initial population setup, in which the
+        initial states of the particles and the algorithm are established.
+        It does not represent the first actual optimization iteration.
 
         This method may modify the algorithm object and any objects contained
         by it.
@@ -184,9 +189,14 @@ class AlgorithmBase(ABC):
         )
 
     @abstractmethod
-    def post_iteration(self) -> None:
+    def post_iteration(self, actual_iter: int) -> None:
         """
         Process the results of the particle iteration.
+
+        The current iteration number is provided through `actual_iter`.
+        Iteration 0 represents the initial population setup, in which the
+        initial states of the particles and the algorithm are established.
+        It does not represent the first actual optimization iteration.
 
         This method may modify the algorithm object and any objects contained
         by it, including consolidating particle states and updating
