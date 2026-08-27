@@ -11,17 +11,22 @@ from ...algorithm.base import AlgorithmBase
 class StatusVariables:
     departure_particle_id: str
     departure_particle_data: str
+
     population: dict[str, float | None]
     actual_iter: int = -1
-    best_fit: float = np.inf
-    worst_fit: float = np.inf
+
+    best_particle_id: str = ""
+    best_particle_fitness: float = np.inf
+    worst_particle_id: str = ""
+    worst_particle_fitness: float = np.inf
 
 
 @dataclass
 class ControlVariables:
-    new_particle_id: str | None = None
-    new_particle_var: dict[str, float] | None = None
-    new_particle_fit: float | None = None
+    arrival_particle_id: str | None = None
+    arrival_particle_var: dict[str, float] | None = None
+    arrival_particle_fit: float | None = None
+
     iter_until: int | None = None
 
     def load_new_particle(self, particle_data: str) -> None:
@@ -33,10 +38,9 @@ class ControlVariables:
         loaded into the corresponding control variables.
         """
         data = json.loads(particle_data)
-
-        self.new_particle_id = data["identifier"]
-        self.new_particle_var = data["variables"]
-        self.new_particle_fit = data["fitness"]
+        self.arrival_particle_id = data["identifier"]
+        self.arrival_particle_var = data["variables"]
+        self.arrival_particle_fit = data["fitness"]
 
 
 class ProcessorBase(ABC):
@@ -66,11 +70,14 @@ class ProcessorBase(ABC):
 
         The provided algorithm is stored by the processor and is responsible
         for the optimization logic executed by the processor.
+
+        Implement the class-specific __init__ (including the stop_signal
+        implementation) and call the ProcessorBase initializer via super().
         """
         self._identifier = identifier
         self._n_iter = n_iter
         self._algorithm = algorithm
-        self.init_particles(n_particles)
+        self._init_particles(n_particles)
         self._control = ControlVariables()
         self._status = StatusVariables(
             population={},
@@ -78,7 +85,7 @@ class ProcessorBase(ABC):
             departure_particle_data="",
         )
 
-    def init_particles(self, n_particles: int) -> None:
+    def _init_particles(self, n_particles: int) -> None:
         for p_idx in range(n_particles):
             self._algorithm.create_particle(
                 identifier=f"pro:{self._identifier}|par:{p_idx}",
@@ -117,14 +124,14 @@ class ProcessorBase(ABC):
         """
 
     def insert_arrival_particle(self) -> None:
-        if self._control.new_particle_id is None:
+        if self._control.arrival_particle_id is None:
             return
 
-        if self._control.new_particle_id not in self._algorithm.population:
+        if self._control.arrival_particle_id not in self._algorithm.population:
             self._algorithm.create_particle(
-                identifier=self._control.new_particle_id,
-                variables=self._control.new_particle_var,
-                fitness=self._control.new_particle_fit,
+                identifier=self._control.arrival_particle_id,
+                variables=self._control.arrival_particle_var,
+                fitness=self._control.arrival_particle_fit,
             )
 
     def remove_departure_particle(self) -> None:
