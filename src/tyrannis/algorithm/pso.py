@@ -3,6 +3,7 @@ from copy import deepcopy
 
 import numpy as np
 
+from ..core.utils import get_fitness
 from .base import (
     AlgorithmBase,
     ParticleBase,
@@ -210,14 +211,14 @@ class PSO(AlgorithmBase):
             self._local_best = deepcopy(
                 min(
                     self._population.values(),
-                    key=self._get_fitness,
+                    key=get_fitness,
                 )
             )
 
             self._local_worst = deepcopy(
                 max(
                     self._population.values(),
-                    key=self._get_fitness,
+                    key=get_fitness,
                 )
             )
 
@@ -247,12 +248,12 @@ class PSO(AlgorithmBase):
 
         best_particle = min(
             self._population.values(),
-            key=self._get_fitness,
+            key=get_fitness,
         )
 
         worst_particle = max(
             self._population.values(),
-            key=self._get_fitness,
+            key=get_fitness,
         )
 
         if (self._local_best is None) or (
