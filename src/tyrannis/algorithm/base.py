@@ -49,12 +49,7 @@ class ParticleBase(ABC):
         }
 
     def dump(self) -> str:
-        return json.dumps(
-            {
-                "variables": self._variables,
-                "fitness": self._fitness,
-            }
-        )
+        return json.dumps(self())
 
     def update(self, variables: dict[str, float]) -> None:
         if variables is None:
