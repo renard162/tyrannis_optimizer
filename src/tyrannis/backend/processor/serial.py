@@ -60,22 +60,32 @@ class Serial(ProcessorBase):
 
 
 if __name__ == "__main__":
+    from time import perf_counter, sleep
+
     from ...algorithm.pso import PSO
     from ...examples.many_local_minima import ackley
-    from ...examples.steep_ridge_and_drops import michalewicz
+
+    def test_function(x):
+        sleep(0.1)
+        return ackley(x)
 
     algo = PSO(
         identifier="pso",
-        fitness_function=ackley,
+        fitness_function=test_function,
         boundaries={f"{n}": (-32.768, 32.768) for n in range(2)},
         seed=42,
     )
 
-    obj = Serial(
+    obj = Serial(  # execution time 104s
         identifier="1",
         algorithm=algo,
-        n_iter=500,
-        n_particles=50,
+        n_iter=40,
+        n_particles=25,
     )
+
+    start = perf_counter()
+    obj.run()
+    total_time = perf_counter() - start
+    print(f"{total_time=}")
 
     print("Breakpoint here")
