@@ -34,6 +34,7 @@ class Serial(ProcessorBase):
         )
 
     def run(self) -> None:
+        self._stop_signal.clear()
         for actual_iter in range(self._n_iter + 1):
             self.update_iter_counter(actual_iter)
 

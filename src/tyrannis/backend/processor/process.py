@@ -74,6 +74,8 @@ class ProcessPool(ProcessorBase):
 
                     self.update_status()
 
+        self._stop_signal = Event()
+
 
 if __name__ == "__main__":
     from time import perf_counter, sleep

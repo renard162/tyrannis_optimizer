@@ -30,6 +30,7 @@ class ThreadsPool(ProcessorBase):
         return self._algorithm.update_particle(particle_id)
 
     def run(self) -> None:
+        self._stop_signal.clear()
         with ThreadPool(processes=self._n_process) as pool:
             self._status.n_process = pool._processes  # type: ignore
             for actual_iter in range(self._n_iter + 1):
