@@ -1,7 +1,27 @@
-from multiprocessing import Event, Pool
+from functools import partial
+from multiprocessing import Event, Manager, Pool
+from typing import Protocol
 
 from ...algorithm.base import AlgorithmBase, ParticleBase
 from .base import ProcessorBase
+
+
+class StopSignal(Protocol):
+    """Just to use in _update_particle signature"""
+
+    def is_set(self) -> bool: ...
+    def set(self) -> None: ...
+    def clear(self) -> None: ...
+
+
+def _update_particle(
+    particle_id: str,
+    algorithm: AlgorithmBase,
+    stop_signal: StopSignal,
+) -> ParticleBase:
+    if stop_signal.is_set():
+        return algorithm.population[particle_id]
+    return algorithm.update_particle(particle_id)
 
 
 class ProcessPool(ProcessorBase):
@@ -14,7 +34,9 @@ class ProcessPool(ProcessorBase):
         n_process: int | None = None,
     ) -> None:
 
+        # Just a dummy, the real event is created when run method is called
         self._stop_signal = Event()
+
         self._n_process = n_process
         super().__init__(
             identifier=identifier,
@@ -24,28 +46,33 @@ class ProcessPool(ProcessorBase):
         )
 
     def run(self) -> None:
-        with Pool(processes=self._n_process) as pool:
-            self._status.n_process = pool._processes  # type: ignore
-            for actual_iter in range(self._n_iter + 1):
-                self.update_iter_counter(actual_iter)
+        with Manager() as manager:
+            self._stop_signal = manager.Event()
+            with Pool(processes=self._n_process) as pool:
+                self._status.n_process = pool._processes  # type: ignore
+                for actual_iter in range(self._n_iter + 1):
+                    self.update_iter_counter(actual_iter)
 
-                if self._stop_signal.is_set():
-                    break
+                    if self._stop_signal.is_set():
+                        break
 
-                self.wait_sync(actual_iter)
+                    self.wait_sync(actual_iter)
 
-                self.migration_control()
+                    self.migration_control()
 
-                self._algorithm.pre_iteration(actual_iter)
+                    self._algorithm.pre_iteration(actual_iter)
 
-                processed_particles = pool.map(
-                    self._algorithm.update_particle, self._algorithm.population
-                )
-                self._algorithm.update_population(processed_particles)
+                    worker = partial(
+                        _update_particle,
+                        stop_signal=self._stop_signal,
+                        algorithm=self._algorithm,
+                    )
+                    processed_particles = pool.map(worker, self._algorithm.population)
+                    self._algorithm.update_population(processed_particles)
 
-                self._algorithm.post_iteration(actual_iter)
+                    self._algorithm.post_iteration(actual_iter)
 
-                self.update_status()
+                    self.update_status()
 
 
 if __name__ == "__main__":
