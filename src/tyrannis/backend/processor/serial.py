@@ -62,12 +62,18 @@ class Serial(ProcessorBase):
 if __name__ == "__main__":
     from time import perf_counter, sleep
 
+    import numpy as np
+
     from ...algorithm.pso import PSO
     from ...examples.many_local_minima import ackley
 
     def test_function(x):
-        sleep(0.1)
-        return ackley(x)
+        sleep(0.25)
+        result = ackley(x)
+        for _ in range(5_000_001):
+            result = result * 1.0000001
+        result /= np.exp(1)
+        return float(result)
 
     algo = PSO(
         identifier="pso",
@@ -76,11 +82,11 @@ if __name__ == "__main__":
         seed=42,
     )
 
-    obj = Serial(  # execution time 104s
+    obj = Serial(  # execution time 238s
         identifier="1",
         algorithm=algo,
-        n_iter=40,
-        n_particles=25,
+        n_iter=30,
+        n_particles=13,
     )
 
     start = perf_counter()
