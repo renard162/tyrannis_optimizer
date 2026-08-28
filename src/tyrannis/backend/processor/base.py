@@ -103,6 +103,10 @@ class ProcessorBase(ABC):
             )
         self._fitness_failure_strategy = fitness_failure_strategy
 
+    @property
+    def local_best(self) -> str:
+        return self._status.best_particle_data
+
     def _init_particles(self, n_particles: int) -> None:
         for p_idx in range(n_particles):
             self._algorithm.create_particle(
