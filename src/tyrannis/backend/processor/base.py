@@ -13,6 +13,7 @@ class StatusVariables:
 
     population: dict[str, float | None]
     actual_iter: int = -1
+    n_process: int = 1
 
     best_particle_data: str = ""
     best_particle_fitness: float | None = None
