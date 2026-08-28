@@ -4,6 +4,8 @@ import numpy as np
 def bohachevsky_1(x: dict[str, float]) -> float:
     """Bohachevsky function N. 1 with a bowl-shaped surface.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: 2 (x1, x2).
     Recommended domain: x1, x2 ∈ [-100, 100].
     Global minimum: f(0, 0) = 0 at x = (0, 0).
@@ -22,6 +24,8 @@ def bohachevsky_1(x: dict[str, float]) -> float:
 def bohachevsky_2(x: dict[str, float]) -> float:
     """Bohachevsky function N. 2 with a bowl-shaped surface.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: 2 (x1, x2).
     Recommended domain: x1, x2 ∈ [-100, 100].
     Global minimum: f(0, 0) = 0 at x = (0, 0).
@@ -36,6 +40,8 @@ def bohachevsky_2(x: dict[str, float]) -> float:
 def bohachevsky_3(x: dict[str, float]) -> float:
     """Bohachevsky function N. 3 with a bowl-shaped surface.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: 2 (x1, x2).
     Recommended domain: x1, x2 ∈ [-100, 100].
     Global minimum: f(0, 0) = 0 at x = (0, 0).
@@ -49,6 +55,8 @@ def bohachevsky_3(x: dict[str, float]) -> float:
 
 def perm_0_d_beta(x: dict[str, float]) -> float:
     """Perm function 0,d,beta with a bowl-shaped surface.
+
+    www.sfu.ca/~ssurjano/optimization.html
 
     Number of inputs: Arbitrary (d >= 1).
     Recommended domain: xi ∈ [-d, d].
@@ -81,6 +89,8 @@ def rotated_hyper_ellipsoid(x: dict[str, float]) -> float:
     the Axis Parallel Hyper-Ellipsoid (Sum Squares) function by
     coupling the variables through cumulative sums.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: Arbitrary (d >= 1).
     Recommended domain: xi ∈ [-65.536, 65.536].
     Global minimum: f(0, ..., 0) = 0 at x = (0, ..., 0).
@@ -97,6 +107,8 @@ def sphere(x: dict[str, float]) -> float:
 
     The function is continuous, convex, and unimodal.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: Arbitrary (d >= 1).
     Recommended domain: xi ∈ [-5.12, 5.12].
     Global minimum: f(0, ..., 0) = 0 at x = (0, ..., 0).
@@ -111,6 +123,8 @@ def sum_of_different_powers(x: dict[str, float]) -> float:
 
     The function is unimodal and has increasing powers for successive
     variables.
+
+    www.sfu.ca/~ssurjano/optimization.html
 
     Number of inputs: Arbitrary (d >= 1).
     Recommended domain: xi ∈ [-1, 1].
@@ -129,6 +143,8 @@ def sum_squares(x: dict[str, float]) -> float:
     The function is continuous, convex, and unimodal, with no local
     minimum other than the global minimum.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: Arbitrary (d >= 1).
     Recommended domain: xi ∈ [-10, 10].
     Global minimum: f(0, ..., 0) = 0 at x = (0, ..., 0).
@@ -141,6 +157,8 @@ def sum_squares(x: dict[str, float]) -> float:
 
 def trid(x: dict[str, float]) -> float:
     """Trid function with a single global minimum.
+
+    www.sfu.ca/~ssurjano/optimization.html
 
     Number of inputs: Arbitrary (d >= 2).
     Recommended domain: xi ∈ [-d², d²].

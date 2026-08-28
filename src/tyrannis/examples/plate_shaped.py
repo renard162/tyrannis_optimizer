@@ -4,6 +4,8 @@ import numpy as np
 def booth(x: dict[str, float]) -> float:
     """Booth function with a plate-shaped surface.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: 2 (x1, x2).
     Recommended domain: x1, x2 ∈ [-10, 10].
     Global minimum: f(1, 3) = 0 at x = (1, 3).
@@ -18,6 +20,8 @@ def matyas(x: dict[str, float]) -> float:
 
     The function has no local minima other than the global minimum.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: 2 (x1, x2).
     Recommended domain: x1, x2 ∈ [-10, 10].
     Global minimum: f(0, 0) = 0 at x = (0, 0).
@@ -30,6 +34,8 @@ def matyas(x: dict[str, float]) -> float:
 def mccormick(x: dict[str, float]) -> float:
     """McCormick function with a plate-shaped surface.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: 2 (x1, x2).
     Recommended domain: x1 ∈ [-1.5, 4], x2 ∈ [-3, 4].
     Global minimum: f(-0.54719, -1.54719) ≈ -1.9133.
@@ -41,6 +47,8 @@ def mccormick(x: dict[str, float]) -> float:
 
 def power_sum(x: dict[str, float]) -> float:
     """Power Sum function with a plate-shaped surface.
+
+    www.sfu.ca/~ssurjano/optimization.html
 
     The function uses the standard recommended parameter vector
     b = (8, 18, 44, 114) for d = 4.
@@ -66,6 +74,8 @@ def zakharov(x: dict[str, float]) -> float:
     """Zakharov function with a plate-shaped surface.
 
     The function has no local minima other than the global minimum.
+
+    www.sfu.ca/~ssurjano/optimization.html
 
     Number of inputs: Arbitrary (d >= 1).
     Recommended domain: xi ∈ [-5, 10].

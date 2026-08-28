@@ -4,6 +4,8 @@ import numpy as np
 def ackley(x: dict[str, float]) -> float:
     """Ackley function with many local minima.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: Arbitrary (n >= 1).
     Recommended domain: xi ∈ [-32.768, 32.768].
     Global minimum: f(0, ..., 0) = 0 at x = (0, ..., 0).
@@ -25,6 +27,8 @@ def ackley(x: dict[str, float]) -> float:
 def bukin_6(x: dict[str, float]) -> float:
     """Bukin function N. 6 with a narrow, curved ridge.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: 2 (x1, x2).
     Recommended domain: x1 ∈ [-15, -5], x2 ∈ [-3, 3].
     Global minimum: f(-10, 1) = 0 at x = (-10, 1).
@@ -36,6 +40,8 @@ def bukin_6(x: dict[str, float]) -> float:
 
 def cross_in_tray(x: dict[str, float]) -> float:
     """Cross-in-Tray function with four global minima.
+
+    www.sfu.ca/~ssurjano/optimization.html
 
     Number of inputs: 2 (x1, x2).
     Recommended domain: x1, x2 ∈ [-10, 10].
@@ -54,6 +60,8 @@ def cross_in_tray(x: dict[str, float]) -> float:
 def drop_wave(x: dict[str, float]) -> float:
     """Drop-Wave function with many local minima.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: 2 (x1, x2).
     Recommended domain: x1, x2 ∈ [-5.12, 5.12].
     Global minimum: f(0, 0) = -1 at x = (0, 0).
@@ -70,6 +78,8 @@ def drop_wave(x: dict[str, float]) -> float:
 def eggholder(x: dict[str, float]) -> float:
     """Eggholder function with many local minima.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: 2 (x1, x2).
     Recommended domain: x1, x2 ∈ [-512, 512].
     Global minimum: f(512, 404.2319) ≈ -959.6407.
@@ -85,6 +95,8 @@ def eggholder(x: dict[str, float]) -> float:
 def gramacy_lee(x: dict[str, float]) -> float:
     """Gramacy & Lee (2012) function with multiple local minima.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: 1 (x).
     Recommended domain: x ∈ [0.5, 2.5].
     Global minimum: f(0.548563) ≈ -0.869011.
@@ -96,6 +108,8 @@ def gramacy_lee(x: dict[str, float]) -> float:
 
 def griewank(x: dict[str, float]) -> float:
     """Griewank function with many widespread local minima.
+
+    www.sfu.ca/~ssurjano/optimization.html
 
     Number of inputs: Arbitrary (n >= 1).
     Recommended domain: xi ∈ [-600, 600].
@@ -113,6 +127,8 @@ def griewank(x: dict[str, float]) -> float:
 def holder_table(x: dict[str, float]) -> float:
     """Holder Table function with four global minima.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: 2 (x1, x2).
     Recommended domain: x1, x2 ∈ [-10, 10].
     Global minima: f ≈ -19.2085 at
@@ -127,6 +143,8 @@ def holder_table(x: dict[str, float]) -> float:
 
 def langermann(x: dict[str, float]) -> float:
     """Langermann function with several unevenly distributed local minima.
+
+    www.sfu.ca/~ssurjano/optimization.html
 
     Number of inputs: 2 (x1, x2).
     Recommended domain: x1, x2 ∈ [0, 10].
@@ -148,6 +166,8 @@ def langermann(x: dict[str, float]) -> float:
 def levy(x: dict[str, float]) -> float:
     """Levy function with many local minima.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: Arbitrary (n >= 1).
     Recommended domain: xi ∈ [-10, 10].
     Global minimum: f(1, ..., 1) = 0 at x = (1, ..., 1).
@@ -167,6 +187,8 @@ def levy(x: dict[str, float]) -> float:
 def levy_13(x: dict[str, float]) -> float:
     """Levy function N. 13 with multiple local minima.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: 2 (x1, x2).
     Recommended domain: x1, x2 ∈ [-10, 10].
     Global minimum: f(1, 1) = 0 at x = (1, 1).
@@ -183,6 +205,8 @@ def levy_13(x: dict[str, float]) -> float:
 def rastrigin(x: dict[str, float]) -> float:
     """Rastrigin function with regularly distributed local minima.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: Arbitrary (n >= 1).
     Recommended domain: xi ∈ [-5.12, 5.12].
     Global minimum: f(0, ..., 0) = 0 at x = (0, ..., 0).
@@ -195,6 +219,8 @@ def rastrigin(x: dict[str, float]) -> float:
 
 def schaffer_2(x: dict[str, float]) -> float:
     """Schaffer function N. 2 with multiple local minima.
+
+    www.sfu.ca/~ssurjano/optimization.html
 
     Number of inputs: 2 (x1, x2).
     Recommended domain: x1, x2 ∈ [-100, 100].
@@ -212,6 +238,8 @@ def schaffer_2(x: dict[str, float]) -> float:
 
 def schaffer_4(x: dict[str, float]) -> float:
     """Schaffer function N. 4 with multiple local minima.
+
+    www.sfu.ca/~ssurjano/optimization.html
 
     Number of inputs: 2 (x1, x2).
     Recommended domain: x1, x2 ∈ [-100, 100].
@@ -232,6 +260,8 @@ def schaffer_4(x: dict[str, float]) -> float:
 def schwefel(x: dict[str, float]) -> float:
     """Schwefel function with many local minima.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: Arbitrary (n >= 1).
     Recommended domain: xi ∈ [-500, 500].
     Global minimum: f(420.968746, ..., 420.968746) ≈ 0.
@@ -246,6 +276,8 @@ def schwefel(x: dict[str, float]) -> float:
 
 def shubert(x: dict[str, float]) -> float:
     """Shubert function with multiple local minima.
+
+    www.sfu.ca/~ssurjano/optimization.html
 
     Number of inputs: 2 (x1, x2).
     Recommended domain: x1, x2 ∈ [-10, 10].

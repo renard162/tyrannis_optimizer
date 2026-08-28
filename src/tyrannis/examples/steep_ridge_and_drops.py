@@ -4,6 +4,8 @@ import numpy as np
 def dejong_5(x: dict[str, float]) -> float:
     """De Jong function N. 5 with very sharp drops on a flat surface.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: 2 (x1, x2).
     Recommended domain: x1, x2 ∈ [-65.536, 65.536].
     Global minimum: f(-32, -32) ≈ 0.998004.
@@ -28,6 +30,8 @@ def easom(x: dict[str, float]) -> float:
     The function is unimodal, although the global minimum occupies
     a very small region relative to the search domain.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: 2 (x1, x2).
     Recommended domain: x1, x2 ∈ [-100, 100].
     Global minimum: f(π, π) = -1 at x = (π, π).
@@ -44,6 +48,8 @@ def michalewicz(x: dict[str, float]) -> float:
 
     The function has d! local minima. The parameter m controls the
     steepness of the valleys and ridges; the recommended value is m=10.
+
+    www.sfu.ca/~ssurjano/optimization.html
 
     Number of inputs: Arbitrary (d >= 1).
     Recommended domain: xi ∈ [0, π].

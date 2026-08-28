@@ -4,6 +4,8 @@ import numpy as np
 def beale(x: dict[str, float]) -> float:
     """Beale function with sharp peaks near the domain boundaries.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: 2 (x1, x2).
     Recommended domain: x1, x2 ∈ [-4.5, 4.5].
     Global minimum: f(3, 0.5) = 0 at x = (3, 0.5).
@@ -19,6 +21,8 @@ def beale(x: dict[str, float]) -> float:
 
 def branin(x: dict[str, float]) -> float:
     """Branin-Hoo function with three global minima.
+
+    www.sfu.ca/~ssurjano/optimization.html
 
     Number of inputs: 2 (x1, x2).
     Recommended domain: x1 ∈ [-5, 10], x2 ∈ [0, 15].
@@ -40,6 +44,8 @@ def branin(x: dict[str, float]) -> float:
 def colville(x: dict[str, float]) -> float:
     """Colville function with strong variable interactions.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: 4 (x1, x2, x3, x4).
     Recommended domain: xi ∈ [-10, 10].
     Global minimum: f(1, 1, 1, 1) = 0 at x = (1, 1, 1, 1).
@@ -60,6 +66,8 @@ def forrester(x: dict[str, float]) -> float:
     """Forrester et al. (2008) function with one global minimum,
     one local minimum, and a zero-gradient inflection point.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: 1 (x).
     Recommended domain: x ∈ [0, 1].
     Global minimum: f(0.757249) ≈ -6.020740.
@@ -71,6 +79,8 @@ def forrester(x: dict[str, float]) -> float:
 
 def goldstein_price(x: dict[str, float]) -> float:
     """Goldstein-Price function with several local minima.
+
+    www.sfu.ca/~ssurjano/optimization.html
 
     Number of inputs: 2 (x1, x2).
     Recommended domain: x1, x2 ∈ [-2, 2].
@@ -91,6 +101,8 @@ def goldstein_price(x: dict[str, float]) -> float:
 
 def hartmann_3(x: dict[str, float]) -> float:
     """Hartmann 3-dimensional function with four local minima.
+
+    www.sfu.ca/~ssurjano/optimization.html
 
     Number of inputs: 3 (x1, x2, x3).
     Recommended domain: xi ∈ (0, 1).
@@ -129,6 +141,8 @@ def hartmann_3(x: dict[str, float]) -> float:
 
 def hartmann_4(x: dict[str, float]) -> float:
     """Hartmann 4-dimensional function.
+
+    www.sfu.ca/~ssurjano/optimization.html
 
     Number of inputs: 4 (x1, x2, x3, x4).
     Recommended domain: xi ∈ [0, 1].
@@ -170,6 +184,8 @@ def hartmann_4(x: dict[str, float]) -> float:
 def hartmann_6(x: dict[str, float]) -> float:
     """Hartmann 6-dimensional function with six local minima.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: 6 (x1, x2, x3, x4, x5, x6).
     Recommended domain: xi ∈ (0, 1).
     Global minimum: f ≈ -3.04246 at approximately
@@ -210,6 +226,8 @@ def hartmann_6(x: dict[str, float]) -> float:
 def perm_d_beta(x: dict[str, float]) -> float:
     """Perm function d, beta.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: Arbitrary (d >= 1).
     Recommended domain: xi ∈ [-d, d].
     Default parameter: beta = 0.5.
@@ -237,6 +255,8 @@ def perm_d_beta(x: dict[str, float]) -> float:
 def powell(x: dict[str, float]) -> float:
     """Powell function with groups of four interacting variables.
 
+    www.sfu.ca/~ssurjano/optimization.html
+
     Number of inputs: Arbitrary multiples of 4 (d = 4k).
     Recommended domain: xi ∈ [-4, 5].
     Global minimum: f(0, ..., 0) = 0 at x = (0, ..., 0).
@@ -262,6 +282,8 @@ def powell(x: dict[str, float]) -> float:
 
 def shekel(x: dict[str, float]) -> float:
     """Shekel function with multiple local minima.
+
+    www.sfu.ca/~ssurjano/optimization.html
 
     Number of inputs: 4 (x1, x2, x3, x4).
     Recommended domain: xi ∈ [0, 10].
@@ -300,6 +322,8 @@ def shekel(x: dict[str, float]) -> float:
 
 def styblinski_tang(x: dict[str, float]) -> float:
     """Styblinski-Tang function with multiple local minima.
+
+    www.sfu.ca/~ssurjano/optimization.html
 
     Number of inputs: Arbitrary (d >= 1).
     Recommended domain: xi ∈ [-5, 5].
