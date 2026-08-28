@@ -30,41 +30,45 @@ class ThreadsPool(ProcessorBase):
         return self._algorithm.update_particle(particle_id)
 
     def run(self) -> None:
-        for actual_iter in range(self._n_iter + 1):
-            self.update_iter_counter(actual_iter)
+        with ThreadPool(processes=self._n_process) as pool:
+            self._status.n_process = pool._processes  # type: ignore
+            for actual_iter in range(self._n_iter + 1):
+                self.update_iter_counter(actual_iter)
 
-            if self._stop_signal.is_set():
-                break
+                if self._stop_signal.is_set():
+                    break
 
-            self.wait_sync(actual_iter)
+                self.wait_sync(actual_iter)
 
-            self.migration_control()
+                self.migration_control()
 
-            self._algorithm.pre_iteration(actual_iter)
-
-            with ThreadPool(processes=self._n_process) as pool:
-                self._status.n_process = pool._processes  # type: ignore
+                self._algorithm.pre_iteration(actual_iter)
 
                 processed_particles = pool.imap_unordered(
                     self._update_particle, self._algorithm.population
                 )
-
                 self._algorithm.update_population(processed_particles)
 
-            self._algorithm.post_iteration(actual_iter)
+                self._algorithm.post_iteration(actual_iter)
 
-            self.update_status()
+                self.update_status()
 
 
 if __name__ == "__main__":
     from time import perf_counter, sleep
 
+    import numpy as np
+
     from ...algorithm.pso import PSO
     from ...examples.many_local_minima import ackley
 
     def test_function(x):
-        sleep(0.1)
-        return ackley(x)
+        sleep(0.25)
+        result = ackley(x)
+        for _ in range(5_000_001):
+            result = result * 1.0000001
+        result /= np.exp(1)
+        return float(result)
 
     algo = PSO(
         identifier="pso",
@@ -73,11 +77,11 @@ if __name__ == "__main__":
         seed=42,
     )
 
-    obj = ThreadsPool(  # execution time 17s with 8 process
+    obj = ThreadsPool(  # execution time 138s with 8 threads
         identifier="1",
         algorithm=algo,
-        n_iter=40,
-        n_particles=25,
+        n_iter=30,
+        n_particles=13,
     )
 
     start = perf_counter()
