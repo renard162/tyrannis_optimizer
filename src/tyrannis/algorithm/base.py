@@ -1,6 +1,6 @@
 import json
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 import numpy as np
 
@@ -186,7 +186,7 @@ class AlgorithmBase(ABC):
         from the particle update.
         """
 
-    def update_population(self, new_population: list[ParticleBase]) -> None:
+    def update_population(self, new_population: Iterable[ParticleBase]) -> None:
         self._population.update(
             {particle.identifier: particle for particle in new_population}
         )
