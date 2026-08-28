@@ -50,7 +50,8 @@ class Serial(ProcessorBase):
             for particle_id in self._algorithm.population:
                 if self._stop_signal.is_set():
                     break
-                processed_particles.append(self._algorithm.update_particle(particle_id))
+                new_particle = self._algorithm.update_particle(particle_id)
+                processed_particles.append(new_particle)
             self._algorithm.update_population(processed_particles)
 
             self._algorithm.post_iteration(actual_iter)
@@ -60,20 +61,21 @@ class Serial(ProcessorBase):
 
 if __name__ == "__main__":
     from ...algorithm.pso import PSO
-
-    def sphere(x: dict):  # Continuous and NaN benchmark
-        # Sphere function
-        # Min: x=(0,0)
-        total = 0
-        for val in x.values():
-            total += val**2
-        return total
+    from ...examples.many_local_minima import ackley
+    from ...examples.steep_ridge_and_drops import michalewicz
 
     algo = PSO(
         identifier="pso",
-        fitness_function=sphere,
-        boundaries={f"{n}": (-10, 10) for n in range(2)},
+        fitness_function=ackley,
+        boundaries={f"{n}": (-32.768, 32.768) for n in range(2)},
         seed=42,
+    )
+
+    obj = Serial(
+        identifier="1",
+        algorithm=algo,
+        n_iter=500,
+        n_particles=50,
     )
 
     print("Breakpoint here")
