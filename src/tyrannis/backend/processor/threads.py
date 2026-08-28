@@ -1,8 +1,9 @@
+from functools import partial
 from multiprocessing import Event
 from multiprocessing.pool import ThreadPool
 
 from ...algorithm.base import AlgorithmBase, ParticleBase
-from .base import ProcessorBase
+from .base import ProcessorBase, evaluate_particle
 
 
 class ThreadsPool(ProcessorBase):
@@ -13,6 +14,7 @@ class ThreadsPool(ProcessorBase):
         n_iter: int,
         n_particles: int,
         n_process: int | None = None,
+        fitness_failure_strategy: str = "invalidate",
     ) -> None:
 
         self._stop_signal = Event()
@@ -22,12 +24,8 @@ class ThreadsPool(ProcessorBase):
             algorithm=algorithm,
             n_iter=n_iter,
             n_particles=n_particles,
+            fitness_failure_strategy=fitness_failure_strategy,
         )
-
-    def _update_particle(self, particle_id) -> ParticleBase:
-        if self._stop_signal.is_set():
-            return self._algorithm.population[particle_id]
-        return self._algorithm.update_particle(particle_id)
 
     def run(self) -> None:
         self._stop_signal.clear()
@@ -45,8 +43,14 @@ class ThreadsPool(ProcessorBase):
 
                 self._algorithm.pre_iteration(actual_iter)
 
+                worker = partial(
+                    evaluate_particle,
+                    stop_signal=self._stop_signal,
+                    algorithm=self._algorithm,
+                    fitness_failure_strategy=self._fitness_failure_strategy,
+                )
                 processed_particles = pool.imap_unordered(
-                    self._update_particle, self._algorithm.population
+                    worker, self._algorithm.population
                 )
                 self._algorithm.update_population(processed_particles)
 

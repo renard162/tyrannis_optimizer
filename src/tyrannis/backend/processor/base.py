@@ -2,8 +2,19 @@ import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from time import sleep
+from typing import Protocol
 
-from ...algorithm.base import AlgorithmBase
+import numpy as np
+
+from ...algorithm.base import AlgorithmBase, ParticleBase
+
+
+class StopSignalDummy(Protocol):
+    """Just to use in _update_particle signature"""
+
+    def is_set(self) -> bool: ...
+    def set(self) -> None: ...
+    def clear(self) -> None: ...
 
 
 @dataclass
@@ -52,6 +63,7 @@ class ProcessorBase(ABC):
         algorithm: AlgorithmBase,
         n_iter: int,
         n_particles: int,
+        fitness_failure_strategy: str,
     ) -> None:
         """
         Initialize the processor with an optimization algorithm.
@@ -84,6 +96,12 @@ class ProcessorBase(ABC):
             departure_particle_id="",
             departure_particle_data="",
         )
+        if fitness_failure_strategy not in ("invalidate", "raise"):
+            raise ValueError(
+                f"Invalid fitness failure strategy {fitness_failure_strategy!r}. "
+                "The strategy must be either 'invalidate' or 'raise'."
+            )
+        self._fitness_failure_strategy = fitness_failure_strategy
 
     def _init_particles(self, n_particles: int) -> None:
         for p_idx in range(n_particles):
@@ -170,3 +188,21 @@ class ProcessorBase(ABC):
         The algorithm iteration must then be executed according to the
         algorithm's defined iteration lifecycle.
         """
+
+
+def evaluate_particle(
+    particle_id: str,
+    algorithm: AlgorithmBase,
+    stop_signal: StopSignalDummy,
+    fitness_failure_strategy: str,
+) -> ParticleBase:
+    if stop_signal.is_set():
+        return algorithm.population[particle_id]
+    try:
+        return algorithm.update_particle(particle_id)
+    except Exception:
+        if fitness_failure_strategy == "invalidate":
+            particle = algorithm.population[particle_id]
+            particle.candidate_fitness = np.inf
+            return particle
+        raise

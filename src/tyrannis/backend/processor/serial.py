@@ -1,5 +1,7 @@
+from functools import partial
+
 from ...algorithm.base import AlgorithmBase
-from .base import ProcessorBase
+from .base import ProcessorBase, evaluate_particle
 
 
 class Event:
@@ -23,6 +25,7 @@ class Serial(ProcessorBase):
         algorithm: AlgorithmBase,
         n_iter: int,
         n_particles: int,
+        fitness_failure_strategy: str = "invalidate",
     ) -> None:
 
         self._stop_signal = Event()
@@ -31,6 +34,7 @@ class Serial(ProcessorBase):
             algorithm=algorithm,
             n_iter=n_iter,
             n_particles=n_particles,
+            fitness_failure_strategy=fitness_failure_strategy,
         )
 
     def run(self) -> None:
@@ -47,12 +51,15 @@ class Serial(ProcessorBase):
 
             self._algorithm.pre_iteration(actual_iter)
 
-            processed_particles = []
-            for particle_id in self._algorithm.population:
-                if self._stop_signal.is_set():
-                    break
-                new_particle = self._algorithm.update_particle(particle_id)
-                processed_particles.append(new_particle)
+            worker = partial(
+                evaluate_particle,
+                stop_signal=self._stop_signal,
+                algorithm=self._algorithm,
+                fitness_failure_strategy=self._fitness_failure_strategy,
+            )
+            processed_particles = [
+                worker(particle_id) for particle_id in self._algorithm.population
+            ]
             self._algorithm.update_population(processed_particles)
 
             self._algorithm.post_iteration(actual_iter)
@@ -86,7 +93,7 @@ if __name__ == "__main__":
     obj = Serial(  # execution time 238s
         identifier="1",
         algorithm=algo,
-        n_iter=30,
+        n_iter=5,
         n_particles=13,
     )
 

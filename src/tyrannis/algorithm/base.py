@@ -47,6 +47,10 @@ class ParticleBase(ABC):
     def candidate_fitness(self) -> float | None:
         return self._candidate_fitness
 
+    @candidate_fitness.setter
+    def candidate_fitness(self, new_value: float) -> None:
+        self._candidate_fitness = new_value
+
     def __call__(self) -> dict[str, str | dict[str, float] | float | None]:
         return {
             "identifier": self._identifier,

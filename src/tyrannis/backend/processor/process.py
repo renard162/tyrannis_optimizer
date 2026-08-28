@@ -1,27 +1,11 @@
 from functools import partial
 from multiprocessing import Event, Manager, Pool
-from typing import Protocol
 
-from ...algorithm.base import AlgorithmBase, ParticleBase
-from .base import ProcessorBase
-
-
-class StopSignal(Protocol):
-    """Just to use in _update_particle signature"""
-
-    def is_set(self) -> bool: ...
-    def set(self) -> None: ...
-    def clear(self) -> None: ...
-
-
-def _update_particle(
-    particle_id: str,
-    algorithm: AlgorithmBase,
-    stop_signal: StopSignal,
-) -> ParticleBase:
-    if stop_signal.is_set():
-        return algorithm.population[particle_id]
-    return algorithm.update_particle(particle_id)
+from ...algorithm.base import AlgorithmBase
+from .base import (
+    ProcessorBase,
+    evaluate_particle,
+)
 
 
 class ProcessPool(ProcessorBase):
@@ -32,6 +16,7 @@ class ProcessPool(ProcessorBase):
         n_iter: int,
         n_particles: int,
         n_process: int | None = None,
+        fitness_failure_strategy: str = "invalidate",
     ) -> None:
 
         # Just a dummy, the real event is created when run method is called
@@ -43,6 +28,7 @@ class ProcessPool(ProcessorBase):
             algorithm=algorithm,
             n_iter=n_iter,
             n_particles=n_particles,
+            fitness_failure_strategy=fitness_failure_strategy,
         )
 
     def run(self) -> None:
@@ -63,9 +49,10 @@ class ProcessPool(ProcessorBase):
                     self._algorithm.pre_iteration(actual_iter)
 
                     worker = partial(
-                        _update_particle,
+                        evaluate_particle,
                         stop_signal=self._stop_signal,
                         algorithm=self._algorithm,
+                        fitness_failure_strategy=self._fitness_failure_strategy,
                     )
                     processed_particles = pool.map(worker, self._algorithm.population)
                     self._algorithm.update_population(processed_particles)
