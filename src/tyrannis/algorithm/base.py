@@ -209,3 +209,11 @@ class AlgorithmBase(ABC):
         by it, including consolidating particle states and updating
         population-level results.
         """
+
+    @staticmethod
+    def get_fitness(particle: ParticleBase) -> float:
+        if particle.fitness is None:
+            raise RuntimeError(
+                f"Particle '{particle.identifier}' does not have a fitness."
+            )
+        return particle.fitness
