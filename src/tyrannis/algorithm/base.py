@@ -107,12 +107,10 @@ class AlgorithmBase(ABC):
 
     def initialize_context(
         self,
-        identifier: str,
         fitness_function: Callable[[dict[str, float]], float],
         boundaries: dict[str, tuple[float, float]],
         seed: int | None,
     ) -> None:
-        self._identifier = identifier
         self._fitness_function = fitness_function
         self._boundaries = boundaries
         self._rng = np.random.default_rng(seed)
@@ -120,6 +118,9 @@ class AlgorithmBase(ABC):
         self._local_best: ParticleBase | None = None
         self._iter_best: ParticleBase | None = None
         self._iter_worst: ParticleBase | None = None
+
+    def set_identifier(self, identifier: str) -> None:
+        self._identifier = identifier
 
     @property
     def identifier(self) -> str:
