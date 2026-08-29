@@ -1,6 +1,7 @@
 import json
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable
+from typing import Any
 
 import numpy as np
 
@@ -11,12 +12,10 @@ class ParticleBase(ABC):
     def __init__(
         self,
         identifier: str,
-        fitness_function: Callable[[dict[str, float]], float],
         variables: dict[str, float],
         fitness: float | None = None,
     ) -> None:
         self._identifier = identifier
-        self._fitness_function = fitness_function
         self._variables = variables
         self._fitness = fitness
 
@@ -26,10 +25,6 @@ class ParticleBase(ABC):
     @property
     def identifier(self) -> str:
         return self._identifier
-
-    @identifier.setter
-    def identifier(self, identifier: str) -> None:
-        self._identifier = identifier
 
     @property
     def variables(self) -> dict[str, float]:
@@ -61,17 +56,24 @@ class ParticleBase(ABC):
     def dump(self) -> str:
         return json.dumps(self())
 
-    def update(self, variables: dict[str, float]) -> None:
+    def recreate(self, variables: dict[str, float], fitness: float | None) -> None:
+        self._variables = variables
+        self._fitness = fitness
+        self._candidate_variables = None
+        self._candidate_fitness = None
+
+    def update(
+        self,
+        variables: dict[str, float],
+        fitness_function: Callable[[dict[str, float]], float],
+    ) -> None:
         if variables is None:
             raise ValueError("Variables cannot be None.")
 
         self._candidate_variables = None
         self._candidate_fitness = None
-
-        candidate_fitness = self._fitness_function(variables)
-
         self._candidate_variables = variables
-        self._candidate_fitness = candidate_fitness
+        self._candidate_fitness = fitness_function(variables)
 
     def consolidate(self, new: bool) -> None:
         if self._candidate_variables is None:
@@ -88,7 +90,22 @@ class ParticleBase(ABC):
 class AlgorithmBase(ABC):
     """Base class for optimization algorithm."""
 
-    def __init__(
+    @abstractmethod
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Initialize the parameters and execution state specific to the optimization algorithm.
+
+        This method must define and initialize all parameters and internal variables
+        required for the execution of the optimization algorithm. Each algorithm
+        implementation is responsible for initializing its own algorithm-specific
+        configuration parameters and execution state. Parameters and variables that
+        are common to the optimization process as a whole should not be initialized
+        here.
+
+        Examples of algorithm-specific parameters include inertia and cognitive and
+        social coefficients in Particle Swarm Optimization.
+        """
+
+    def initialize_context(
         self,
         identifier: str,
         fitness_function: Callable[[dict[str, float]], float],
@@ -101,15 +118,12 @@ class AlgorithmBase(ABC):
         self._rng = np.random.default_rng(seed)
         self._population: dict[str, ParticleBase] = {}
         self._local_best: ParticleBase | None = None
-        self._local_worst: ParticleBase | None = None
+        self._iter_best: ParticleBase | None = None
+        self._iter_worst: ParticleBase | None = None
 
     @property
     def identifier(self) -> str:
         return self._identifier
-
-    @identifier.setter
-    def identifier(self, identifier: str) -> None:
-        self._identifier = identifier
 
     @property
     def population(self) -> dict[str, ParticleBase]:
@@ -119,17 +133,13 @@ class AlgorithmBase(ABC):
     def local_best(self) -> ParticleBase | None:
         return self._local_best
 
-    @local_best.setter
-    def local_best(self, new_particle: ParticleBase) -> None:
-        self._local_best = new_particle
+    @property
+    def iter_best(self) -> ParticleBase | None:
+        return self._iter_best
 
     @property
-    def local_worst(self) -> ParticleBase | None:
-        return self._local_worst
-
-    @local_worst.setter
-    def local_worst(self, new_particle: ParticleBase) -> None:
-        self._local_worst = new_particle
+    def iter_worst(self) -> ParticleBase | None:
+        return self._iter_worst
 
     @abstractmethod
     def create_particle(
