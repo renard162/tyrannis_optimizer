@@ -276,14 +276,20 @@ class AlgorithmBase(ABC):
         """
         Process the results of the particle iteration.
 
-        The current iteration number is provided through `actual_iter`.
+        The current iteration number is provided through ``actual_iter``.
         Iteration 0 represents the initial population setup, in which the
         initial states of the particles and the algorithm are established.
         It does not represent the first actual optimization iteration.
 
+        Particle states resulting from the current iteration may be consolidated
+        by this method. However, newly created particles must not be initialized
+        or consolidated here. Their fitness initialization and consolidation are
+        performed automatically by ``initialize_particle`` before the particle
+        participates in the iteration.
+
         This method may modify the algorithm object and any objects contained
-        by it, including consolidating particle states and updating
-        population-level results.
+        by it, including consolidating the results of particle updates and
+        updating population-level results.
         """
 
     def update_solution_state(self) -> None:
