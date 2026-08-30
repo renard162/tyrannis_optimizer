@@ -20,6 +20,7 @@ class Event:
 class Serial(ProcessorBase):
     def __init__(self) -> None:
         self._stop_signal = Event()
+        self._wait_signal = Event()
 
     def run(self) -> None:
         self.init_particles()

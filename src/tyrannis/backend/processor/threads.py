@@ -7,8 +7,9 @@ from .base import ProcessorBase, evaluate_particle
 
 class ThreadsPool(ProcessorBase):
     def __init__(self, n_process: int | None = None) -> None:
-        self._stop_signal = Event()
         self._n_process = n_process
+        self._stop_signal = Event()
+        self._wait_signal = Event()
 
     def run(self) -> None:
         self.init_particles()
