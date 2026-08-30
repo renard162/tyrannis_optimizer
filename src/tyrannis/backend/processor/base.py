@@ -3,19 +3,22 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass
 from time import sleep
-from typing import Any, Protocol, Self
+from typing import Any, Generic, Protocol, Self, TypeVar
 
 import numpy as np
 
 from ...algorithm.base import AlgorithmBase, ParticleBase
 
 
-class StopSignalDummy(Protocol):
+class SignalProtocol(Protocol):
     """Just to use in _update_particle signature"""
 
     def is_set(self) -> bool: ...
     def set(self) -> None: ...
     def clear(self) -> None: ...
+
+
+SignalType = TypeVar("SignalType", bound=SignalProtocol)
 
 
 @dataclass
@@ -26,6 +29,7 @@ class StatusVariables:
     population: dict[str, float | None]
     actual_iter: int = -1
     n_process: int = 1
+    iter_waiting: bool = False
 
     best_particle_data: str = ""
     best_particle_fitness: float | None = None
@@ -55,8 +59,11 @@ class ControlVariables:
         self.arrival_particle_fit = data["fitness"]
 
 
-class ProcessorBase(ABC):
+class ProcessorBase(ABC, Generic[SignalType]):
     """Base class for processor agent."""
+
+    _stop_signal: SignalType
+    _wait_signal: SignalType
 
     @abstractmethod
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -126,11 +133,17 @@ class ProcessorBase(ABC):
             )
 
     def wait_sync(self, actual_iter: int) -> None:
+        self._status.iter_waiting = False
         if self._control.iter_until is None:
             return
 
-        while actual_iter >= self._control.iter_until:
+        while (not self._stop_signal.is_set()) and (
+            (actual_iter >= self._control.iter_until) or self._wait_signal.is_set()
+        ):
+            self._status.iter_waiting = True
             sleep(0.01)
+
+        self._status.iter_waiting = False
 
     def migration_control(self) -> None:
         self._insert_arrival_particle()
@@ -205,7 +218,7 @@ class ProcessorBase(ABC):
 def evaluate_particle(
     particle_id: str,
     algorithm: AlgorithmBase,
-    stop_signal: StopSignalDummy,
+    stop_signal: SignalProtocol,
     fitness_failure_strategy: str,
     initialize_particle: bool = False,
 ) -> ParticleBase:

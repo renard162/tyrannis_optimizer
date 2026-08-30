@@ -1,31 +1,69 @@
 from functools import partial
 from multiprocessing import Event, Manager, Pool
+from multiprocessing.synchronize import Event as EventProtocol
 
 from .base import (
     ProcessorBase,
+    SignalProtocol,
     evaluate_particle,
 )
+
+
+class StopSignal(SignalProtocol):
+    def __init__(self) -> None:
+        self._signal: EventProtocol = Event()
+        self._manager_signal: SignalProtocol | None = None
+
+    def set(self) -> None:
+        self._signal.set()
+        if self._manager_signal is not None:
+            self._manager_signal.set()
+
+    def clear(self) -> None:
+        self._signal.clear()
+        if self._manager_signal is not None:
+            self._manager_signal.clear()
+
+    def is_set(self) -> bool:
+        return self._signal.is_set()
+
+    def set_manager_signal(self, manager_signal: SignalProtocol) -> None:
+        self._manager_signal = manager_signal
+        if self._manager_signal is None:
+            raise RuntimeError("Manager signal cannot be None.")
+        if self._signal.is_set():
+            self._manager_signal.set()
+        else:
+            self._manager_signal.clear()
+
+    def clear_manager_signal(self) -> None:
+        self._manager_signal = None
+
+    @property
+    def manager_signal(self) -> SignalProtocol:
+        if self._manager_signal is None:
+            raise RuntimeError("Manager signal has not been initialized.")
+        return self._manager_signal
 
 
 class ProcessPool(ProcessorBase):
     def __init__(self, n_process: int | None = None) -> None:
         self._n_process = n_process
-        # Just a dummy, the real event is created when run method is called
-        self._stop_signal = Event()
+        self._stop_signal = StopSignal()
+        self._wait_signal = Event()
 
     def run(self) -> None:
         self.init_particles()
         with Manager() as manager:
-            self._stop_signal = manager.Event()
+            self._stop_signal.set_manager_signal(manager.Event())
             with Pool(processes=self._n_process) as pool:
                 self._status.n_process = pool._processes  # type: ignore
                 for actual_iter in range(self._n_iter + 1):
                     self.update_iter_counter(actual_iter)
 
+                    self.wait_sync(actual_iter)
                     if self._stop_signal.is_set():
                         break
-
-                    self.wait_sync(actual_iter)
 
                     self.migration_control()
 
@@ -35,7 +73,7 @@ class ProcessPool(ProcessorBase):
                     if new_particles_ids:
                         worker = partial(
                             evaluate_particle,
-                            stop_signal=self._stop_signal,
+                            stop_signal=self._stop_signal.manager_signal,
                             algorithm=self._algorithm,
                             fitness_failure_strategy=self._fitness_failure_strategy,
                             initialize_particle=True,
@@ -46,7 +84,7 @@ class ProcessPool(ProcessorBase):
                     if actual_iter > 0:
                         worker = partial(
                             evaluate_particle,
-                            stop_signal=self._stop_signal,
+                            stop_signal=self._stop_signal.manager_signal,
                             algorithm=self._algorithm,
                             fitness_failure_strategy=self._fitness_failure_strategy,
                             initialize_particle=False,
@@ -59,8 +97,7 @@ class ProcessPool(ProcessorBase):
                     self._algorithm.post_iteration(actual_iter)
 
                     self.update_status()
-
-        self._stop_signal = Event()
+            self._stop_signal.clear_manager_signal()
 
 
 if __name__ == "__main__":
