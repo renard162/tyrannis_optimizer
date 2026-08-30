@@ -1,9 +1,7 @@
-from collections.abc import Callable
+import json
 
-from pyspark import TaskContext
 from pyspark.sql import SparkSession
 
-from ..algorithm.base import AlgorithmBase
 from .processor.base import ProcessorBase
 
 
@@ -11,122 +9,92 @@ class Spark:
     """
     Spark backend for distributed processor execution.
 
-    Each Spark task creates exactly one Processor instance and executes it
-    independently. The processor identifier is unique within the backend and
-    is also used as the prefix for the identifiers of its particles.
-
-    The algorithm and its fitness function must be serializable because the
-    algorithm is transferred from the Spark driver to the executors.
+    A processor pool is created on the Spark driver with one processor for
+    each Spark worker. During execution, each Spark worker receives one
+    processor from this pool.
 
     Parameters
     ----------
     spark:
         Spark session used to execute the processors.
     processor:
-        Processor class to instantiate in each Spark task.
-    algorithm:
-        Algorithm instance used as the template for the processors.
-    n_workers:
-        Number of processors to execute.
-    n_iter:
-        Number of iterations executed by each processor.
-    n_particles:
-        Number of particles created by each processor.
-    fitness_failure_strategy:
-        Strategy used when the fitness function raises an exception.
+        Configured processor instance used as the template for the processor
+        pool.
     """
 
     def __init__(
         self,
         spark: SparkSession,
-        processor: type[ProcessorBase],
-        algorithm: AlgorithmBase,
-        n_workers: int,
-        n_iter: int,
-        n_particles: int,
-        fitness_failure_strategy: str = "invalidate",
+        processor: ProcessorBase,
     ) -> None:
-        if n_workers < 1:
-            raise ValueError("n_workers must be greater than or equal to 1.")
-
-        if n_iter < 0:
-            raise ValueError("n_iter must be greater than or equal to 0.")
-
-        if n_particles < 1:
-            raise ValueError("n_particles must be greater than or equal to 1.")
+        if spark is None:
+            raise ValueError("Spark session cannot be None")
 
         self._spark = spark
         self._processor = processor
-        self._algorithm = algorithm
-        self._n_workers = n_workers
-        self._n_iter = n_iter
-        self._n_particles = n_particles
-        self._fitness_failure_strategy = fitness_failure_strategy
 
-        self._local_bests: dict[str, str] = {}
+        self._n_workers = self._get_n_workers()
+
+        self._processor.create_processors_pool(self._n_workers)
+
+        if len(self._processor.processors_pool) != self._n_workers:
+            raise RuntimeError(
+                "The number of processors in the processor pool must be "
+                "identical to the number of Spark workers."
+            )
+
+        self._local_bests: dict[str, dict] = {}
 
         self._job_group = f"tyrannis-spark-{id(self)}"
 
     @property
-    def local_bests(self) -> dict[str, str]:
+    def processor(self) -> ProcessorBase:
+        return self._processor
+
+    @property
+    def processors_pool(self) -> list[ProcessorBase]:
+        return self._processor.processors_pool
+
+    @property
+    def local_bests(self) -> dict[str, dict]:
         return self._local_bests.copy()
 
-    def run(self) -> dict[str, str]:
+    @property
+    def n_workers(self) -> int:
+        return self._n_workers
+
+    def run(self) -> None:
         spark_context = self._spark.sparkContext
 
-        spark_context.setJobGroup(
-            self._job_group,
-            "Tyrannis processor execution",
-            interruptOnCancel=True,
+        processors = spark_context.parallelize(
+            self._processor.processors_pool,
+            numSlices=self._n_workers,
         )
 
-        try:
-            workers = spark_context.parallelize(
-                range(self._n_workers),
-                numSlices=self._n_workers,
-            )
+        results = processors.map(
+            _run_processor,
+        ).collect()
 
-            results = workers.mapPartitions(
-                lambda partition: self._run_processor(
-                    partition,
-                    self._processor,
-                    self._algorithm,
-                    self._n_iter,
-                    self._n_particles,
-                    self._fitness_failure_strategy,
-                ),
-            ).collect()
-
-        finally:
-            spark_context.clearJobGroup()
-
-        self._local_bests = {
-            processor_id: local_best for processor_id, local_best in results
-        }
-
-        return self.local_bests
+        self._local_bests = dict(results)
 
     def stop(self) -> None:
         self._spark.sparkContext.cancelJobGroup(self._job_group)
 
-    def _run_processor(
-        partition,
-        processor_class,
-        algorithm,
-        n_iter,
-        n_particles,
-        fitness_failure_strategy,
-    ):
-        worker_id = next(iter(partition))
+    def _get_n_workers(self) -> int:
+        executor_infos = self._spark.sparkContext._jsc.sc().getExecutorMemoryStatus()
 
-        processor = processor_class(
-            identifier=str(worker_id),
-            algorithm=algorithm,
-            n_iter=n_iter,
-            n_particles=n_particles,
-            fitness_failure_strategy=fitness_failure_strategy,
-        )
+        return executor_infos.size()
 
+
+def _run_processor(processor: ProcessorBase) -> tuple[str, dict]:
+    processor.initialize_execution_context()
+
+    try:
         processor.run()
 
-        yield str(worker_id), processor.local_best
+        local_best = json.loads(processor.local_best)
+        identifier = processor.identifier
+    finally:
+        processor.finalize_execution_context()
+
+    return identifier, local_best

@@ -1,8 +1,10 @@
+import json
 from time import perf_counter, sleep
 
 import numpy as np
 
-from .algorithm.pso import PSO
+from .algorithm import PSO
+from .backend import Spark
 from .backend.processor import ProcessPool, Serial, ThreadsPool
 from .examples.many_local_minima import ackley
 
@@ -53,17 +55,24 @@ def main():
         n_particles=13,
         seed=42,
     )
-    processor.create_processors_pool(1)
+    # processor.create_processors_pool(1)
+    spark = generate_spark_session()
+
+    backend = Spark(
+        spark=spark,
+        processor=processor,
+    )
 
     start = perf_counter()
-    processor.processors_pool[0].run()
+    backend.run()
     total_time = perf_counter() - start
 
-    best_particle = processor.processors_pool[0]._status.best_particle_data
+    results = backend.local_bests
 
-    print(f"{total_time=}\n{best_particle}")
+    print(f"{total_time=}")
     print("Breakpoint here")
 
 
 if __name__ == "__main__":
     main()
+    # generate_spark_session().stop()
