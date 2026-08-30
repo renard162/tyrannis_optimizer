@@ -74,12 +74,12 @@ class ProcessorBase(ABC, Generic[SignalType]):
         by the execution strategy. Runtime-specific variables and the `stop_signal`
         must be initialized by the processor context initialization method.
 
-        The `stop_signal` must provide an `is_set` method that returns `True` when
-        the signal is active and `False` otherwise, as well as `set` and `clear`
-        methods to activate and deactivate the signal. Its implementation should
-        be appropriate for the processor execution strategy. For example, a
-        multiprocessing-based processor may use `multiprocessing.Event`, while a
-        serial processor may use a compatible implementation without requiring
+        The `stop_signal` and `wait_signal` must provide an `is_set` method that
+        returns `True` when the signal is active and `False` otherwise, as well as
+        `set` and `clear` methods to activate and deactivate the signal. Its
+        implementation should be appropriate for the processor execution strategy.
+        For example, a multiprocessing-based processor may use `multiprocessing.Event`,
+        while a serial processor may use a compatible implementation without requiring
         the multiprocessing package.
 
         Implementations must define their class-specific initialization without
