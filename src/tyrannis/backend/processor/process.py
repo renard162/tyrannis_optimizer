@@ -54,6 +54,7 @@ class ProcessPool(ProcessorBase):
 
     def run(self) -> None:
         self.init_particles()
+        self._stop_signal.clear()
         with Manager() as manager:
             self._stop_signal.set_manager_signal(manager.Event())
             with Pool(processes=self._n_process) as pool:
