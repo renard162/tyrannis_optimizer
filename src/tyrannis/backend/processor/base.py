@@ -132,6 +132,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
         self._control = ControlVariables()
         self._status = StatusVariables(population={})
         self._seed_sequence = np.random.SeedSequence(seed)
+        self._processors_pool = []
 
     def create_processors_pool(self, n_islands: int) -> None:
         self._processors_pool = [
