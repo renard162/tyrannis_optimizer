@@ -77,8 +77,8 @@ class ProcessorBase(ABC, Generic[SignalType]):
         algorithm: AlgorithmBase,
         n_iter: int,
         n_particles: int,
-        fitness_failure_strategy: str,
-        seed: int | None,
+        fitness_failure_strategy: str = "invalidate",
+        seed: int | None = None,
     ) -> None:
         self._algorithm = algorithm
         self._n_iter = n_iter
