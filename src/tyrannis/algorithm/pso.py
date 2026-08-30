@@ -30,6 +30,33 @@ class PSOParticle(ParticleBase):
         self._personal_best_variables = personal_best_variables
         self._personal_best_fitness = personal_best_fitness
 
+    def __call__(self) -> dict[str, str | dict[str, float] | float | None]:
+        return {
+            "identifier": self._identifier,
+            "variables": self._variables,
+            "fitness": self._fitness,
+            "velocity": self._velocity,
+            "personal_best_variables": self._personal_best_variables,
+            "personal_best_fitness": self._personal_best_fitness,
+        }
+
+    def recreate(
+        self,
+        variables: dict[str, float],
+        fitness: float | None = None,
+        velocity: dict[str, float] | None = None,
+        personal_best_variables: dict[str, float] | None = None,
+        personal_best_fitness: float | None = None,
+    ) -> None:
+        self._new_particle = True
+        self._variables = variables
+        self._fitness = fitness
+        self._velocity = velocity
+        self._personal_best_variables = personal_best_variables
+        self._personal_best_fitness = personal_best_fitness
+        self._candidate_variables = None
+        self._candidate_fitness = None
+
     @property
     def velocity(self) -> dict[str, float] | None:
         return self._velocity
@@ -45,16 +72,6 @@ class PSOParticle(ParticleBase):
     @property
     def personal_best_fitness(self) -> float | None:
         return self._personal_best_fitness
-
-    def __call__(self) -> dict[str, str | dict[str, float] | float | None]:
-        return {
-            "identifier": self._identifier,
-            "variables": self._variables,
-            "fitness": self._fitness,
-            "velocity": self._velocity,
-            "personal_best_variables": self._personal_best_variables,
-            "personal_best_fitness": self._personal_best_fitness,
-        }
 
     def update_personal_best(self) -> None:
         if self.fitness is None:
@@ -128,13 +145,12 @@ class PSO(AlgorithmBase):
                 f"Particle '{identifier}' must be an instance of PSOParticle."
             )
 
-        if particle.fitness is not None:
-            return particle
+        if particle.fitness is None:
+            particle.update(
+                variables=particle.variables,
+                fitness_function=self._fitness_function,
+            )
 
-        particle.update(
-            variables=particle.variables,
-            fitness_function=self._fitness_function,
-        )
         particle.consolidate(consolidate_new=True)
         particle.update_personal_best()
 
@@ -204,30 +220,29 @@ class PSO(AlgorithmBase):
 
         return particle
 
+    def post_iteration(self, actual_iter: int) -> None:
+        for particle in self._population.values():
+            if not isinstance(particle, PSOParticle):
+                raise TypeError(
+                    f"Particle '{particle.identifier}' must be an instance of PSOParticle."
+                )
 
-def post_iteration(self, actual_iter: int) -> None:
-    for particle in self._population.values():
-        if not isinstance(particle, PSOParticle):
-            raise TypeError(
-                f"Particle '{particle.identifier}' must be an instance of PSOParticle."
+            if actual_iter == 0:
+                continue
+
+            if particle.candidate_fitness is None:
+                raise RuntimeError(
+                    f"Particle '{particle.identifier}' has no candidate fitness."
+                )
+
+            if particle.fitness is None:
+                raise RuntimeError(
+                    f"Particle '{particle.identifier}' has no current fitness."
+                )
+
+            particle.consolidate(
+                consolidate_new=particle.candidate_fitness < particle.fitness,
             )
+            particle.update_personal_best()
 
-        if actual_iter == 0:
-            continue
-
-        if particle.candidate_fitness is None:
-            raise RuntimeError(
-                f"Particle '{particle.identifier}' has no candidate fitness."
-            )
-
-        if particle.fitness is None:
-            raise RuntimeError(
-                f"Particle '{particle.identifier}' has no current fitness."
-            )
-
-        particle.consolidate(
-            consolidate_new=particle.candidate_fitness < particle.fitness,
-        )
-        particle.update_personal_best()
-
-    self.update_solution_state()
+        self.update_solution_state()
