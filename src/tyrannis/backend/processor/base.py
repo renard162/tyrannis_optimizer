@@ -201,6 +201,10 @@ class ProcessorBase(ABC, Generic[SignalType]):
         return new_processor
 
     @property
+    def identifier(self) -> str:
+        return self._identifier
+
+    @property
     def processors_pool(self) -> list[Self]:
         return self._processors_pool
 
