@@ -7,8 +7,16 @@ from .base import ProcessorBase, evaluate_particle
 
 
 class ThreadsPool(ProcessorBase):
-    def __init__(self, n_process: int | None = None) -> None:
+    def __init__(
+        self,
+        n_process: int | None = None,
+        chunksize: int = 1,
+    ) -> None:
+        if chunksize <= 0:
+            raise ValueError("chunksize must be greater than zero.")
+
         self._n_process = n_process
+        self._chunksize = chunksize
 
     def __deepcopy__(self, memo: dict[int, object]) -> Self:
         new_processor = super().__deepcopy__(memo)
@@ -19,8 +27,10 @@ class ThreadsPool(ProcessorBase):
     def run(self) -> None:
         self.init_particles()
         self._stop_signal.clear()
+
         with ThreadPool(processes=self._n_process) as pool:
             self._status.n_process = pool._processes  # type: ignore
+
             for actual_iter in range(self._n_iter + 1):
                 self.update_iter_counter(actual_iter)
 
@@ -41,7 +51,11 @@ class ThreadsPool(ProcessorBase):
                         fitness_failure_strategy=self._fitness_failure_strategy,
                         initialize_particle=True,
                     )
-                    new_particles = pool.imap_unordered(worker, new_particles_ids)
+                    new_particles = pool.imap_unordered(
+                        worker,
+                        new_particles_ids,
+                        chunksize=self._chunksize,
+                    )
                     self._algorithm.update_population(new_particles)
 
                 if actual_iter > 0:
@@ -53,7 +67,9 @@ class ThreadsPool(ProcessorBase):
                         initialize_particle=False,
                     )
                     processed_particles = pool.imap_unordered(
-                        worker, self._algorithm.population
+                        worker,
+                        self._algorithm.population,
+                        chunksize=self._chunksize,
                     )
                     self._algorithm.update_population(processed_particles)
 
