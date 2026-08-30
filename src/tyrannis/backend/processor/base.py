@@ -163,8 +163,6 @@ class ProcessorBase(ABC, Generic[SignalType]):
         for p_idx in range(self._n_particles):
             self._algorithm.create_particle(
                 identifier=f"island:{self._identifier}|particle:{p_idx}",
-                variables=None,
-                fitness=None,
             )
 
     def wait_sync(self, actual_iter: int) -> None:

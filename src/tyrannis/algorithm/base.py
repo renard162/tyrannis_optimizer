@@ -205,25 +205,39 @@ class AlgorithmBase(ABC):
     @abstractmethod
     def create_particle(
         self,
-        identifier: str | None,
-        variables: dict[str, float] | None,
-        fitness: float | None,
+        identifier: str,
+        variables: dict[str, float] | None = None,
+        fitness: float | None = None,
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
         """
         Create and add a particle to the population.
 
-        This method must only create and add the particle to the population. It
-        must never evaluate the fitness function. When the particle is created
-        without a fitness value, its fitness is initialized by a dedicated method
-        invoked after ``pre_iteration``.
+        The signature of this method must match the signature of the particle
+        constructor (`__init__`) implemented by the algorithm, including all of its
+        arguments and their respective types. The only required argument of this
+        method must be `identifier`. All other arguments must have `None` as their
+        default value.
 
-        When no variables are provided, the particle must be created according
-        to the algorithm's initial particle generation rule.
+        When an argument other than `identifier` is not provided, the method must
+        determine its value according to the particle creation rules defined by the
+        algorithm. The method must not evaluate the fitness function during particle
+        creation, even when the fitness value is not provided.
 
-        When particle data is provided, the arguments may be used to create a
-        particle with the specified state. This allows dynamic particle creation
-        during algorithm execution, such as migration between populations or the
-        generation of new individuals in evolutionary algorithms.
+        If `fitness` is not provided, the particle must be created with an undefined
+        fitness. Its fitness will be evaluated subsequently by `initialize_particle`,
+        which is responsible for initializing the fitness of newly created particles
+        before they participate in the algorithm's execution.
+
+        Having `identifier` as the only required argument is fundamental to the
+        operation of Tyrannis, as particles may be created generically by the
+        framework without knowledge of the algorithm-specific parameters required by
+        their implementation.
+
+        When complete particle state is provided, including algorithm-specific
+        arguments, the method must use the provided values to recreate that state
+        rather than generating new values for those arguments.
         """
 
     @abstractmethod
