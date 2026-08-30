@@ -50,7 +50,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
 
     _stop_signal: SignalType
     _wait_signal: SignalType
-    _process_pool: list[Self]
+    _processors_pool: list[Self]
 
     @abstractmethod
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -100,7 +100,8 @@ class ProcessorBase(ABC, Generic[SignalType]):
         excluded_attributes = {
             "_stop_signal",
             "_wait_signal",
-            "_process_pool",
+            "_seed_sequence",
+            "_processors_pool",
         }
 
         for name, value in self.__dict__.items():
@@ -132,8 +133,8 @@ class ProcessorBase(ABC, Generic[SignalType]):
         self._status = StatusVariables(population={})
         self._seed_sequence = np.random.SeedSequence(seed)
 
-    def create_process_pool(self, n_islands: int) -> None:
-        self._process_pool = [
+    def create_processors_pool(self, n_islands: int) -> None:
+        self._processors_pool = [
             self._replicate_processor(f"{idx + 1}") for idx in range(n_islands)
         ]
 
@@ -145,6 +146,10 @@ class ProcessorBase(ABC, Generic[SignalType]):
             seed=self._seed_sequence.spawn(1)[0],
         )
         return new_processor
+
+    @property
+    def processors_pool(self) -> list[Self]:
+        return self._processors_pool
 
     @property
     def local_best(self) -> str:
