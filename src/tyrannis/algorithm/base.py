@@ -20,32 +20,9 @@ class ParticleBase(ABC):
         self._variables = variables
         self._fitness = fitness
 
+        self._new_particle = True
         self._candidate_variables = None
         self._candidate_fitness = None
-
-    @property
-    def identifier(self) -> str:
-        return self._identifier
-
-    @property
-    def variables(self) -> dict[str, float]:
-        return self._variables
-
-    @property
-    def fitness(self) -> float | None:
-        return self._fitness
-
-    @property
-    def candidate_variables(self) -> dict[str, float] | None:
-        return self._candidate_variables
-
-    @property
-    def candidate_fitness(self) -> float | None:
-        return self._candidate_fitness
-
-    @candidate_fitness.setter
-    def candidate_fitness(self, new_value: float) -> None:
-        self._candidate_fitness = new_value
 
     def __call__(self) -> dict[str, str | dict[str, float] | float | None]:
         """
@@ -65,14 +42,63 @@ class ParticleBase(ABC):
             "fitness": self._fitness,
         }
 
-    def dump(self) -> str:
-        return json.dumps(self())
+    def recreate(
+        self,
+        variables: dict[str, float],
+        fitness: float | None,
+    ) -> None:
+        """
+        Reset the particle state using the values provided to its constructor.
 
-    def recreate(self, variables: dict[str, float], fitness: float | None) -> None:
+        The provided arguments must correspond to the particle constructor
+        parameters that define its state, excluding the `identifier`. The internal
+        state of the existing particle is reset using the provided values, while
+        its `identifier` is preserved.
+
+        This method allows a particle to be treated as a new particle without
+        creating a new instance, reducing the complexity and overhead of replacing
+        an existing particle object.
+        """
         self._variables = variables
         self._fitness = fitness
+        self._new_particle = True
         self._candidate_variables = None
         self._candidate_fitness = None
+
+    @property
+    def identifier(self) -> str:
+        return self._identifier
+
+    @property
+    def new_particle(self) -> bool:
+        return self._new_particle
+
+    @property
+    def variables(self) -> dict[str, float]:
+        return self._variables
+
+    @property
+    def fitness(self) -> float | None:
+        return self._fitness
+
+    @property
+    def candidate_variables(self) -> dict[str, float] | None:
+        return self._candidate_variables
+
+    @candidate_variables.setter
+    def candidate_variables(self) -> dict[str, float] | None:
+        return self._candidate_variables
+
+    @property
+    def candidate_fitness(self) -> float | None:
+        return self._candidate_fitness
+
+    @candidate_fitness.setter
+    def candidate_fitness(self, new_value: float | None) -> None:
+        self._candidate_fitness = new_value
+
+    def dump(self) -> str:
+        return json.dumps(self())
 
     def update(
         self,
@@ -90,6 +116,8 @@ class ParticleBase(ABC):
     def consolidate(self, consolidate_new: bool) -> None:
         if self._candidate_variables is None:
             raise RuntimeError("No candidate solution available for consolidation.")
+
+        self._new_particle = False
 
         if consolidate_new or (self._fitness is None):
             self._variables = self._candidate_variables
@@ -163,7 +191,7 @@ class AlgorithmBase(ABC):
         return [
             particle_id
             for particle_id, particle in self._population.items()
-            if particle.fitness is None
+            if particle.new_particle
         ]
 
     @abstractmethod
@@ -276,6 +304,12 @@ class AlgorithmBase(ABC):
         The returned particle represents the updated state of the particle and
         may be used to replace its corresponding entry in the population.
         """
+
+    def get_unmodified_particle(self, identifier: str) -> ParticleBase:
+        particle = self._population[identifier]
+        particle.candidate_variables = particle.variables
+        particle.candidate_fitness = particle.fitness
+        return particle
 
     def update_population(self, new_population: Iterable[ParticleBase]) -> None:
         self._population.update(

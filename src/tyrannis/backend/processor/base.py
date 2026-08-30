@@ -204,7 +204,7 @@ def evaluate_particle(
     initialize_particle: bool = False,
 ) -> ParticleBase:
     if stop_signal.is_set():
-        return algorithm.population[particle_id]
+        return algorithm.get_unmodified_particle(particle_id)
     try:
         if initialize_particle:
             return algorithm.initialize_particle(particle_id)
