@@ -150,6 +150,9 @@ class PSO(AlgorithmBase):
                 variables=particle.variables,
                 fitness_function=self._fitness_function,
             )
+        else:
+            particle.candidate_variables = particle.variables
+            particle.candidate_fitness = particle.fitness
 
         particle.consolidate(consolidate_new=True)
         particle.update_personal_best()
