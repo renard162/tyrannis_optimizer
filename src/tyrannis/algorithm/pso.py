@@ -51,6 +51,7 @@ class PSOParticle(ParticleBase):
             "identifier": self._identifier,
             "variables": self._variables,
             "fitness": self._fitness,
+            "velocity": self._velocity,
             "personal_best_variables": self._personal_best_variables,
             "personal_best_fitness": self._personal_best_fitness,
         }
