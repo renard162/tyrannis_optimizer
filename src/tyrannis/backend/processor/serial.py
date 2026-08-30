@@ -1,9 +1,14 @@
 from functools import partial
+from typing import Self
 
-from .base import ProcessorBase, evaluate_particle
+from .base import (
+    ProcessorBase,
+    SignalProtocol,
+    evaluate_particle,
+)
 
 
-class Event:
+class LocalEvent(SignalProtocol):
     def __init__(self) -> None:
         self._state: bool = False
 
@@ -19,8 +24,13 @@ class Event:
 
 class Serial(ProcessorBase):
     def __init__(self) -> None:
-        self._stop_signal = Event()
-        self._wait_signal = Event()
+        return
+
+    def __deepcopy__(self, memo: dict[int, object]) -> Self:
+        new_processor = super().__deepcopy__(memo)
+        new_processor._stop_signal = LocalEvent()
+        new_processor._wait_signal = LocalEvent()
+        return new_processor
 
     def run(self) -> None:
         self.init_particles()

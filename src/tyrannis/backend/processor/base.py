@@ -50,6 +50,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
 
     _stop_signal: SignalType
     _wait_signal: SignalType
+    _process_pool: list[Self]
 
     @abstractmethod
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -57,20 +58,56 @@ class ProcessorBase(ABC, Generic[SignalType]):
         Initialize the processor.
 
         The implementation must initialize the processor-specific state required
-        by the execution strategy. Runtime-specific variables and the `stop_signal`
-        must be initialized by the processor context initialization method.
-
-        The `stop_signal` and `wait_signal` must provide an `is_set` method that
-        returns `True` when the signal is active and `False` otherwise, as well as
-        `set` and `clear` methods to activate and deactivate the signal. Its
-        implementation should be appropriate for the processor execution strategy.
-        For example, a multiprocessing-based processor may use `multiprocessing.Event`,
-        while a serial processor may use a compatible implementation without requiring
-        the multiprocessing package.
+        by the execution strategy. Runtime-specific variables, including the
+        `stop_signal` and `wait_signal`, must not be initialized by this method.
+        These variables are initialized when the processor execution context is
+        created or when the processor is replicated.
 
         Implementations must define their class-specific initialization without
         relying on a call to the `ProcessorBase` initializer.
         """
+
+    def __deepcopy__(self, memo: dict[int, object]) -> Self:
+        """
+        Create a deep copy of the processor excluding execution control state.
+
+        The default implementation recursively deep-copies the processor's
+        instance attributes, except for `_stop_signal` and `_wait_signal`. These
+        attributes represent execution-specific control state and must not be
+        propagated to replicated processors.
+
+        Both control signals must provide an `is_set` method that returns `True`
+        when the signal is active and `False` otherwise, as well as `set` and
+        `clear` methods to activate and deactivate the signal. Their concrete
+        implementations must be appropriate for the processor's execution
+        strategy and must be recreated by the subclass rather than copied from
+        the original processor.
+
+        The `stop_signal` controls termination of the processor's execution,
+        while the `wait_signal` controls synchronization with other execution
+        contexts. Their state must therefore be independent for each replicated
+        processor.
+
+        Processor implementations that require specific handling of
+        synchronization primitives or other non-copyable execution resources must
+        override this method. Subclasses may call this implementation through
+        `super().__deepcopy__()` and initialize the excluded attributes according
+        to their execution strategy.
+        """
+        new_processor = self.__class__.__new__(self.__class__)
+        memo[id(self)] = new_processor
+
+        excluded_attributes = {
+            "_stop_signal",
+            "_wait_signal",
+            "_process_pool",
+        }
+
+        for name, value in self.__dict__.items():
+            if name not in excluded_attributes:
+                setattr(new_processor, name, deepcopy(value, memo))
+
+        return new_processor
 
     def initialize_context(
         self,
@@ -95,7 +132,12 @@ class ProcessorBase(ABC, Generic[SignalType]):
         self._status = StatusVariables(population={})
         self._seed_sequence = np.random.SeedSequence(seed)
 
-    def replicate_processor(self, identifier: str) -> Self:
+    def create_process_pool(self, n_islands: int) -> None:
+        self._process_pool = [
+            self._replicate_processor(f"{idx + 1}") for idx in range(n_islands)
+        ]
+
+    def _replicate_processor(self, identifier: str) -> Self:
         new_processor = deepcopy(self)
         new_processor._identifier = identifier
         new_processor._algorithm.configure(

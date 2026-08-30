@@ -1,8 +1,7 @@
-from copy import deepcopy
 from functools import partial
 from multiprocessing import Event, Manager, Pool
 from multiprocessing.synchronize import Event as EventProtocol
-from typing import Any, Self
+from typing import Self
 
 from .base import (
     ProcessorBase,
@@ -51,22 +50,11 @@ class StopSignal(SignalProtocol):
 class ProcessPool(ProcessorBase):
     def __init__(self, n_process: int | None = None) -> None:
         self._n_process = n_process
-        self._stop_signal = StopSignal()
-        self._wait_signal = Event()
 
-    def __deepcopy__(self, memo: dict[int, Any]) -> Self:
-        new_processor = self.__class__.__new__(self.__class__)
-        memo[id(self)] = new_processor
-
-        for key, value in self.__dict__.items():
-            if key in {"_stop_signal", "_wait_signal"}:
-                continue
-
-            setattr(new_processor, key, deepcopy(value, memo))
-
+    def __deepcopy__(self, memo: dict[int, object]) -> Self:
+        new_processor = super().__deepcopy__(memo)
         new_processor._stop_signal = StopSignal()
         new_processor._wait_signal = Event()
-
         return new_processor
 
     def run(self) -> None:
