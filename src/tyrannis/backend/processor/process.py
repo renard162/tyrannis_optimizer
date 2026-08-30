@@ -1,7 +1,6 @@
 from functools import partial
 from multiprocessing import Event, Manager, Pool
 
-from ...algorithm.base import AlgorithmBase
 from .base import (
     ProcessorBase,
     evaluate_particle,
@@ -9,29 +8,13 @@ from .base import (
 
 
 class ProcessPool(ProcessorBase):
-    def __init__(
-        self,
-        identifier: str,
-        algorithm: AlgorithmBase,
-        n_iter: int,
-        n_particles: int,
-        n_process: int | None = None,
-        fitness_failure_strategy: str = "invalidate",
-    ) -> None:
-
+    def __init__(self, n_process: int | None = None) -> None:
+        self._n_process = n_process
         # Just a dummy, the real event is created when run method is called
         self._stop_signal = Event()
 
-        self._n_process = n_process
-        super().__init__(
-            identifier=identifier,
-            algorithm=algorithm,
-            n_iter=n_iter,
-            n_particles=n_particles,
-            fitness_failure_strategy=fitness_failure_strategy,
-        )
-
     def run(self) -> None:
+        self.init_particles()
         with Manager() as manager:
             self._stop_signal = manager.Event()
             with Pool(processes=self._n_process) as pool:

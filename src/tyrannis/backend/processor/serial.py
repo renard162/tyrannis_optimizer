@@ -1,6 +1,5 @@
 from functools import partial
 
-from ...algorithm.base import AlgorithmBase
 from .base import ProcessorBase, evaluate_particle
 
 
@@ -19,25 +18,11 @@ class Event:
 
 
 class Serial(ProcessorBase):
-    def __init__(
-        self,
-        identifier: str,
-        algorithm: AlgorithmBase,
-        n_iter: int,
-        n_particles: int,
-        fitness_failure_strategy: str = "invalidate",
-    ) -> None:
-
+    def __init__(self) -> None:
         self._stop_signal = Event()
-        super().__init__(
-            identifier=identifier,
-            algorithm=algorithm,
-            n_iter=n_iter,
-            n_particles=n_particles,
-            fitness_failure_strategy=fitness_failure_strategy,
-        )
 
     def run(self) -> None:
+        self.init_particles()
         self._stop_signal.clear()
         for actual_iter in range(self._n_iter + 1):
             self.update_iter_counter(actual_iter)

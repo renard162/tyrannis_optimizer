@@ -1,8 +1,9 @@
 import json
 from abc import ABC, abstractmethod
+from copy import deepcopy
 from dataclasses import dataclass
 from time import sleep
-from typing import Protocol
+from typing import Any, Protocol, Self
 
 import numpy as np
 
@@ -57,45 +58,37 @@ class ControlVariables:
 class ProcessorBase(ABC):
     """Base class for processor agent."""
 
-    def __init__(
+    @abstractmethod
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """
+        Initialize the processor.
+
+        The implementation must initialize the processor-specific state required
+        by the execution strategy. Runtime-specific variables and the `stop_signal`
+        must be initialized by the processor context initialization method.
+
+        The `stop_signal` must provide an `is_set` method that returns `True` when
+        the signal is active and `False` otherwise, as well as `set` and `clear`
+        methods to activate and deactivate the signal. Its implementation should
+        be appropriate for the processor execution strategy. For example, a
+        multiprocessing-based processor may use `multiprocessing.Event`, while a
+        serial processor may use a compatible implementation without requiring
+        the multiprocessing package.
+
+        Implementations must define their class-specific initialization without
+        relying on a call to the `ProcessorBase` initializer.
+        """
+
+    def initialize_context(
         self,
-        identifier: str,
         algorithm: AlgorithmBase,
         n_iter: int,
         n_particles: int,
         fitness_failure_strategy: str,
     ) -> None:
-        """
-        Initialize the processor with an optimization algorithm.
-
-        The processor must maintain a `stop_signal` control variable whose
-        implementation provides an `is_set` method that returns `True` when
-        the signal is active and `False` otherwise. The signal must also
-        provide `set` and `clear` methods, where `set` activates the signal
-        and `clear` deactivates it.
-
-        The implementation of the signal is determined by the processor
-        execution strategy. For example, a multiprocessing-based processor
-        may use `multiprocessing.Event`, while a serial processor may use a
-        compatible implementation without requiring the multiprocessing
-        package.
-
-        The provided algorithm is stored by the processor and is responsible
-        for the optimization logic executed by the processor.
-
-        Implement the class-specific __init__ (including the stop_signal
-        implementation) and call the ProcessorBase initializer via super().
-        """
-        self._identifier = identifier
-        self._n_iter = n_iter
         self._algorithm = algorithm
-        self._init_particles(n_particles)
-        self._control = ControlVariables()
-        self._status = StatusVariables(
-            population={},
-            departure_particle_id="",
-            departure_particle_data="",
-        )
+        self._n_iter = n_iter
+        self._n_particles = n_particles
         if fitness_failure_strategy not in ("invalidate", "raise"):
             raise ValueError(
                 f"Invalid fitness failure strategy {fitness_failure_strategy!r}. "
@@ -103,12 +96,29 @@ class ProcessorBase(ABC):
             )
         self._fitness_failure_strategy = fitness_failure_strategy
 
+        self._identifier = "ProcessorBase"
+        self._control = ControlVariables()
+        self._status = StatusVariables(
+            population={},
+            departure_particle_id="",
+            departure_particle_data="",
+        )
+
+    def replicate_processor(self, identifier: str) -> Self:
+        new_processor = deepcopy(self)
+        new_processor._identifier = identifier
+        new_processor._algorithm.set_identifier(f"island:{identifier}|algorithm")
+        return new_processor
+
     @property
     def local_best(self) -> str:
         return self._status.best_particle_data
 
-    def _init_particles(self, n_particles: int) -> None:
-        for p_idx in range(n_particles):
+    def init_particles(self) -> None:
+        if len(self._algorithm.population) > 0:
+            return
+
+        for p_idx in range(self._n_particles):
             self._algorithm.create_particle(
                 identifier=f"island:{self._identifier}|particle:{p_idx}",
                 variables=None,
@@ -154,14 +164,12 @@ class ProcessorBase(ABC):
         self._update_partial_result()
 
     def _update_partial_result(self) -> None:
-        if (self._algorithm.local_best is None) or (
-            self._algorithm.local_worst is None
-        ):
+        if (self._algorithm.iter_best is None) or (self._algorithm.iter_worst is None):
             return
-        self._status.best_particle_fitness = self._algorithm.local_best.fitness
-        self._status.best_particle_data = self._algorithm.local_best.dump()
-        self._status.worst_particle_fitness = self._algorithm.local_worst.fitness
-        self._status.worst_particle_data = self._algorithm.local_worst.dump()
+        self._status.best_particle_fitness = self._algorithm.iter_best.fitness
+        self._status.best_particle_data = self._algorithm.iter_best.dump()
+        self._status.worst_particle_fitness = self._algorithm.iter_worst.fitness
+        self._status.worst_particle_data = self._algorithm.iter_worst.dump()
 
     def _update_population_status(self) -> None:
         self._status.population = {

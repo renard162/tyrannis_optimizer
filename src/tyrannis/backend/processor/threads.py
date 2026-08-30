@@ -2,32 +2,16 @@ from functools import partial
 from multiprocessing import Event
 from multiprocessing.pool import ThreadPool
 
-from ...algorithm.base import AlgorithmBase
 from .base import ProcessorBase, evaluate_particle
 
 
 class ThreadsPool(ProcessorBase):
-    def __init__(
-        self,
-        identifier: str,
-        algorithm: AlgorithmBase,
-        n_iter: int,
-        n_particles: int,
-        n_process: int | None = None,
-        fitness_failure_strategy: str = "invalidate",
-    ) -> None:
-
+    def __init__(self, n_process: int | None = None) -> None:
         self._stop_signal = Event()
         self._n_process = n_process
-        super().__init__(
-            identifier=identifier,
-            algorithm=algorithm,
-            n_iter=n_iter,
-            n_particles=n_particles,
-            fitness_failure_strategy=fitness_failure_strategy,
-        )
 
     def run(self) -> None:
+        self.init_particles()
         self._stop_signal.clear()
         with ThreadPool(processes=self._n_process) as pool:
             self._status.n_process = pool._processes  # type: ignore
