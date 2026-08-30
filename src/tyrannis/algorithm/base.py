@@ -48,6 +48,17 @@ class ParticleBase(ABC):
         self._candidate_fitness = new_value
 
     def __call__(self) -> dict[str, str | dict[str, float] | float | None]:
+        """
+        Return the particle state as a dictionary.
+
+        The returned dictionary must always contain the arguments required by
+        the particle's constructor. The keys must correspond to the constructor
+        parameter names, and their values must represent the current state of
+        the particle.
+
+        This representation allows the particle state to be serialized,
+        transferred, or used to recreate an equivalent particle instance.
+        """
         return {
             "identifier": self._identifier,
             "variables": self._variables,
