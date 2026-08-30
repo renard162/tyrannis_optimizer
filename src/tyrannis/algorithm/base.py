@@ -5,6 +5,7 @@ from copy import deepcopy
 from typing import Any
 
 import numpy as np
+from numpy.random import SeedSequence
 
 
 class ParticleBase(ABC):
@@ -149,18 +150,21 @@ class AlgorithmBase(ABC):
         self,
         fitness_function: Callable[[dict[str, float]], float],
         boundaries: dict[str, tuple[float, float]],
-        seed: int | None,
     ) -> None:
         self._fitness_function = fitness_function
         self._boundaries = boundaries
-        self._rng = np.random.default_rng(seed)
         self._population: dict[str, ParticleBase] = {}
         self._local_best: ParticleBase | None = None
         self._iter_best: str | None = None
         self._iter_worst: str | None = None
 
-    def set_identifier(self, identifier: str) -> None:
+    def configure(
+        self,
+        identifier: str,
+        seed: int | SeedSequence | None,
+    ) -> None:
         self._identifier = identifier
+        self._rng = np.random.default_rng(seed)
 
     @property
     def identifier(self) -> str:

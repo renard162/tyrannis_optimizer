@@ -78,6 +78,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
         n_iter: int,
         n_particles: int,
         fitness_failure_strategy: str,
+        seed: int | None,
     ) -> None:
         self._algorithm = algorithm
         self._n_iter = n_iter
@@ -92,11 +93,15 @@ class ProcessorBase(ABC, Generic[SignalType]):
         self._identifier = "ProcessorBase"
         self._control = ControlVariables()
         self._status = StatusVariables(population={})
+        self._seed_sequence = np.random.SeedSequence(seed)
 
     def replicate_processor(self, identifier: str) -> Self:
         new_processor = deepcopy(self)
         new_processor._identifier = identifier
-        new_processor._algorithm.set_identifier(f"island:{identifier}|algorithm")
+        new_processor._algorithm.configure(
+            identifier=f"island:{identifier}|algorithm",
+            seed=self._seed_sequence.spawn(1)[0],
+        )
         return new_processor
 
     @property
