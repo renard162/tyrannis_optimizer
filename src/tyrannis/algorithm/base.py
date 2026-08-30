@@ -1,6 +1,7 @@
 import json
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable
+from copy import deepcopy
 from typing import Any
 
 import numpy as np
@@ -75,11 +76,11 @@ class ParticleBase(ABC):
         self._candidate_variables = variables
         self._candidate_fitness = fitness_function(variables)
 
-    def consolidate(self, new: bool) -> None:
+    def consolidate(self, consolidate_new: bool) -> None:
         if self._candidate_variables is None:
             raise RuntimeError("No candidate solution available for consolidation.")
 
-        if new or (self._fitness is None):
+        if consolidate_new or (self._fitness is None):
             self._variables = self._candidate_variables
             self._fitness = self._candidate_fitness
 
@@ -116,8 +117,8 @@ class AlgorithmBase(ABC):
         self._rng = np.random.default_rng(seed)
         self._population: dict[str, ParticleBase] = {}
         self._local_best: ParticleBase | None = None
-        self._iter_best: ParticleBase | None = None
-        self._iter_worst: ParticleBase | None = None
+        self._iter_best: str | None = None
+        self._iter_worst: str | None = None
 
     def set_identifier(self, identifier: str) -> None:
         self._identifier = identifier
@@ -136,11 +137,23 @@ class AlgorithmBase(ABC):
 
     @property
     def iter_best(self) -> ParticleBase | None:
-        return self._iter_best
+        if self._iter_best is None:
+            return None
+        return self._population[self._iter_best]
 
     @property
     def iter_worst(self) -> ParticleBase | None:
-        return self._iter_worst
+        if self._iter_worst is None:
+            return None
+        return self.population[self._iter_worst]
+
+    @property
+    def new_particles_id(self) -> list[str]:
+        return [
+            particle_id
+            for particle_id, particle in self._population.items()
+            if particle.fitness is None
+        ]
 
     @abstractmethod
     def create_particle(
@@ -152,14 +165,18 @@ class AlgorithmBase(ABC):
         """
         Create and add a particle to the population.
 
-        When no variables are provided, the particle must be created
-        according to the algorithm's initial particle generation rule.
+        This method must only create and add the particle to the population. It
+        must never evaluate the fitness function. When the particle is created
+        without a fitness value, its fitness is initialized by a dedicated method
+        invoked after ``pre_iteration``.
 
-        When particle data is provided, the arguments may be used to
-        create a particle with the specified state. This allows dynamic
-        particle creation during algorithm execution, such as migration
-        between populations or the generation of new individuals in
-        evolutionary algorithms.
+        When no variables are provided, the particle must be created according
+        to the algorithm's initial particle generation rule.
+
+        When particle data is provided, the arguments may be used to create a
+        particle with the specified state. This allows dynamic particle creation
+        during algorithm execution, such as migration between populations or the
+        generation of new individuals in evolutionary algorithms.
         """
 
     @abstractmethod
@@ -182,23 +199,71 @@ class AlgorithmBase(ABC):
         """
         Prepare the algorithm state before updating the particles.
 
-        The current iteration number is provided through `actual_iter`.
+        The current iteration number is provided through ``actual_iter``.
         Iteration 0 represents the initial population setup, in which the
         initial states of the particles and the algorithm are established.
         It does not represent the first actual optimization iteration.
 
+        All operations that create or remove particles as part of the algorithm's
+        iteration process must be performed during this method. Fitness
+        initialization for newly created particles is performed immediately
+        after ``pre_iteration`` by dedicated methods, allowing those particles
+        to participate in the current iteration without requiring an additional
+        iteration solely for their initial fitness evaluation.
+
         This method may modify the algorithm object and any objects contained
-        by it.
+        by it. It must not evaluate the fitness of newly created particles
+        directly.
+        """
+
+    @abstractmethod
+    def initialize_particle(self, identifier: str) -> ParticleBase:
+        """
+        Initialize the fitness of a newly created particle.
+
+        This method is intended exclusively for evaluating particles that are
+        newly added to the population. Unlike the initial population setup,
+        newly created particles must have their fitness initialized immediately
+        so that they can participate in the current iteration without requiring
+        an additional iteration solely for their first fitness evaluation.
+
+        The particle's initial fitness must be consolidated with
+        ``consolidate(consolidate_new=True)`` before this method returns, ensuring that the
+        newly evaluated fitness becomes the particle's current fitness before it
+        participates in subsequent iterations.
+
+        This method does not alter the iteration semantics of the algorithm.
+        Iteration 0 remains the initialization iteration of the algorithm and is
+        not affected by the use of this method.
+
+        The method may modify the specified particle and, consequently, the
+        algorithm's population. Changes made to the population are preserved
+        after the particle initialization process.
+
+        No state of the algorithm other than the population may be modified by
+        this method. Any changes made to other algorithm state are considered
+        volatile and will be discarded after the particle initialization process.
+
+        The returned particle represents the initialized state of the particle
+        and may be used to replace its corresponding entry in the population.
         """
 
     @abstractmethod
     def update_particle(self, identifier: str) -> ParticleBase:
         """
-        Return the updated particle identified by `identifier`.
+        Update and return the particle identified by `identifier`.
 
-        This method must not modify the algorithm object or any shared state.
-        The returned particle represents the candidate state resulting
-        from the particle update.
+        This method may modify the specified particle and, consequently, the
+        algorithm's population. Changes made to the population are preserved after
+        the particle update process and become part of the algorithm's subsequent
+        state.
+
+        No state of the algorithm other than the population may be modified by
+        this method. Any changes made to other algorithm state are considered
+        volatile and will be discarded after the particle update process.
+
+        The returned particle represents the updated state of the particle and
+        may be used to replace its corresponding entry in the population.
         """
 
     def update_population(self, new_population: Iterable[ParticleBase]) -> None:
@@ -220,6 +285,24 @@ class AlgorithmBase(ABC):
         by it, including consolidating particle states and updating
         population-level results.
         """
+
+    def update_solution_state(self) -> None:
+        iter_best = min(
+            self._population.values(),
+            key=self.get_fitness,
+        )
+        iter_worst = max(
+            self._population.values(),
+            key=self.get_fitness,
+        )
+
+        self._iter_best = iter_best.identifier
+        self._iter_worst = iter_worst.identifier
+
+        if self._local_best is None or (
+            self.get_fitness(iter_best) < self.get_fitness(self._local_best)
+        ):
+            self._local_best = deepcopy(iter_best)
 
     @staticmethod
     def get_fitness(particle: ParticleBase) -> float:

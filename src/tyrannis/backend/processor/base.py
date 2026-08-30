@@ -199,10 +199,13 @@ def evaluate_particle(
     algorithm: AlgorithmBase,
     stop_signal: StopSignalDummy,
     fitness_failure_strategy: str,
+    initialize_particle: bool = False,
 ) -> ParticleBase:
     if stop_signal.is_set():
         return algorithm.population[particle_id]
     try:
+        if initialize_particle:
+            return algorithm.initialize_particle(particle_id)
         return algorithm.update_particle(particle_id)
     except Exception:
         if fitness_failure_strategy == "invalidate":
