@@ -28,10 +28,9 @@ class Serial(ProcessorBase):
         for actual_iter in range(self._n_iter + 1):
             self.update_iter_counter(actual_iter)
 
+            self.wait_sync(actual_iter)
             if self._stop_signal.is_set():
                 break
-
-            self.wait_sync(actual_iter)
 
             self.migration_control()
 
