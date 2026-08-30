@@ -1,4 +1,3 @@
-from collections.abc import Callable
 from copy import deepcopy
 
 import numpy as np
@@ -15,7 +14,6 @@ class PSOParticle(ParticleBase):
     def __init__(
         self,
         identifier: str,
-        fitness_function: Callable[[dict[str, float]], float],
         variables: dict[str, float],
         fitness: float | None = None,
         velocity: dict[str, float] | None = None,
@@ -24,7 +22,6 @@ class PSOParticle(ParticleBase):
     ) -> None:
         super().__init__(
             identifier=identifier,
-            fitness_function=fitness_function,
             variables=variables,
             fitness=fitness,
         )
@@ -75,21 +72,10 @@ class PSO(AlgorithmBase):
 
     def __init__(
         self,
-        identifier: str,
-        fitness_function: Callable[[dict[str, float]], float],
-        boundaries: dict[str, tuple[float, float]],
-        seed: int | None,
         inertia: float = 0.7,
         cognitive_coefficient: float = 1.5,
         social_coefficient: float = 1.5,
     ) -> None:
-        super().__init__(
-            identifier=identifier,
-            fitness_function=fitness_function,
-            boundaries=boundaries,
-            seed=seed,
-        )
-
         self._inertia = inertia
         self._cognitive_coefficient = cognitive_coefficient
         self._social_coefficient = social_coefficient
@@ -119,7 +105,6 @@ class PSO(AlgorithmBase):
 
         self._population[identifier] = PSOParticle(
             identifier=identifier,
-            fitness_function=self._fitness_function,
             variables=variables,
             fitness=fitness,
             velocity=velocity,
@@ -134,6 +119,26 @@ class PSO(AlgorithmBase):
     def pre_iteration(self, actual_iter: int) -> None:
         return
 
+    def initialize_particle(self, identifier: str) -> ParticleBase:
+        particle = self._population[identifier]
+
+        if not isinstance(particle, PSOParticle):
+            raise TypeError(
+                f"Particle '{identifier}' must be an instance of PSOParticle."
+            )
+
+        if particle.fitness is not None:
+            return particle
+
+        particle.update(
+            variables=particle.variables,
+            fitness_function=self._fitness_function,
+        )
+        particle.consolidate(consolidate_new=True)
+        particle.update_personal_best()
+
+        return particle
+
     def update_particle(self, identifier: str) -> ParticleBase:
         particle = self._population[identifier]
 
@@ -142,12 +147,11 @@ class PSO(AlgorithmBase):
                 f"Particle '{identifier}' must be an instance of PSOParticle."
             )
 
-        if particle.fitness is None:
-            particle.update(particle.variables)
-            return particle
-
         if self._local_best is None:
             raise RuntimeError("Local best particle has not been initialized.")
+
+        if particle.fitness is None:
+            raise RuntimeError(f"Particle '{identifier}' does not have a fitness.")
 
         if particle.velocity is None:
             raise RuntimeError(f"Particle '{identifier}' does not have a velocity.")
@@ -191,76 +195,38 @@ class PSO(AlgorithmBase):
             new_variables[name] = variable
 
         particle.velocity = new_velocity
-        particle.update(new_variables)
+
+        particle.update(
+            variables=new_variables,
+            fitness_function=self._fitness_function,
+        )
 
         return particle
 
-    def post_iteration(self, actual_iter: int) -> None:
+
+def post_iteration(self, actual_iter: int) -> None:
+    for particle in self._population.values():
+        if not isinstance(particle, PSOParticle):
+            raise TypeError(
+                f"Particle '{particle.identifier}' must be an instance of PSOParticle."
+            )
+
         if actual_iter == 0:
-            for particle in self._population.values():
-                if not isinstance(particle, PSOParticle):
-                    raise TypeError(
-                        f"Particle '{particle.identifier}' must be an "
-                        "instance of PSOParticle."
-                    )
+            continue
 
-                particle.consolidate(new=True)
-                particle.update_personal_best()
-
-            self._local_best = deepcopy(
-                min(
-                    self._population.values(),
-                    key=self.get_fitness,
-                )
+        if particle.candidate_fitness is None:
+            raise RuntimeError(
+                f"Particle '{particle.identifier}' has no candidate fitness."
             )
 
-            self._local_worst = deepcopy(
-                max(
-                    self._population.values(),
-                    key=self.get_fitness,
-                )
+        if particle.fitness is None:
+            raise RuntimeError(
+                f"Particle '{particle.identifier}' has no current fitness."
             )
 
-            return
-
-        for particle in self._population.values():
-            if not isinstance(particle, PSOParticle):
-                raise TypeError(
-                    f"Particle '{particle.identifier}' must be an "
-                    "instance of PSOParticle."
-                )
-
-            if particle.candidate_fitness is None:
-                raise RuntimeError(
-                    f"Particle '{particle.identifier}' has no candidate fitness."
-                )
-
-            if particle.fitness is None:
-                raise RuntimeError(
-                    f"Particle '{particle.identifier}' has no current fitness."
-                )
-
-            particle.consolidate(
-                new=particle.candidate_fitness < particle.fitness,
-            )
-            particle.update_personal_best()
-
-        best_particle = min(
-            self._population.values(),
-            key=self.get_fitness,
+        particle.consolidate(
+            consolidate_new=particle.candidate_fitness < particle.fitness,
         )
+        particle.update_personal_best()
 
-        worst_particle = max(
-            self._population.values(),
-            key=self.get_fitness,
-        )
-
-        if (self._local_best is None) or (
-            best_particle.fitness != self._local_best.fitness
-        ):
-            self._local_best = deepcopy(best_particle)
-
-        if (self._local_worst is None) or (
-            worst_particle.fitness != self._local_worst.fitness
-        ):
-            self._local_worst = deepcopy(worst_particle)
+    self.update_solution_state()
