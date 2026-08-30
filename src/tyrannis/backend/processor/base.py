@@ -11,7 +11,7 @@ from ...algorithm.base import AlgorithmBase, ParticleBase
 
 
 class SignalProtocol(Protocol):
-    """Just to use in _update_particle signature"""
+    """Just to use as signature"""
 
     def is_set(self) -> bool: ...
     def set(self) -> None: ...
