@@ -115,7 +115,11 @@ class ParticleBase(ABC):
         self._candidate_fitness = fitness_function(variables)
 
     def consolidate(self, consolidate_new: bool) -> None:
-        if self._candidate_variables is None:
+        if (self._candidate_variables is None) or (self._candidate_fitness is None):
+            if self._new_particle and self._fitness is not None:
+                self._new_particle = False
+                return
+
             raise RuntimeError("No candidate solution available for consolidation.")
 
         self._new_particle = False
