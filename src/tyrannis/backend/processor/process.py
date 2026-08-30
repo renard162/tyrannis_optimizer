@@ -1,19 +1,18 @@
 from functools import partial
 from multiprocessing import Event, get_all_start_methods, get_context
 from multiprocessing.synchronize import Event as EventProtocol
-from typing import Self
 
 from .base import (
+    LocalEvent,
     ProcessorBase,
-    SignalProtocol,
     evaluate_particle,
 )
 
 
-class StopSignal(SignalProtocol):
+class StopSignal(LocalEvent):
     def __init__(self) -> None:
         self._signal: EventProtocol = Event()
-        self._manager_signal: SignalProtocol | None = None
+        self._manager_signal: EventProtocol | None = None
 
     def set(self) -> None:
         self._signal.set()
@@ -28,7 +27,7 @@ class StopSignal(SignalProtocol):
     def is_set(self) -> bool:
         return self._signal.is_set()
 
-    def set_manager_signal(self, manager_signal: SignalProtocol) -> None:
+    def set_manager_signal(self, manager_signal: EventProtocol) -> None:
         self._manager_signal = manager_signal
         if self._manager_signal is None:
             raise RuntimeError("Manager signal cannot be None.")
@@ -41,7 +40,7 @@ class StopSignal(SignalProtocol):
         self._manager_signal = None
 
     @property
-    def manager_signal(self) -> SignalProtocol:
+    def manager_signal(self) -> EventProtocol:
         if self._manager_signal is None:
             raise RuntimeError("Manager signal has not been initialized.")
         return self._manager_signal
@@ -77,11 +76,13 @@ class ProcessPool(ProcessorBase):
         self._maxtasksperchild = maxtasksperchild
         self._chunksize = chunksize
 
-    def __deepcopy__(self, memo: dict[int, object]) -> Self:
-        new_processor = super().__deepcopy__(memo)
-        new_processor._stop_signal = StopSignal()
-        new_processor._wait_signal = Event()
-        return new_processor
+    def initialize_execution_context(self) -> None:
+        self._stop_signal = StopSignal()
+        self._wait_signal = Event()
+
+    def clear_execution_context(self) -> None:
+        self._stop_signal = LocalEvent()
+        self._wait_signal = LocalEvent()
 
     def run(self) -> None:
         self.init_particles()

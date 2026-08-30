@@ -1,36 +1,22 @@
 from functools import partial
-from typing import Self
 
 from .base import (
+    LocalEvent,
     ProcessorBase,
-    SignalProtocol,
     evaluate_particle,
 )
-
-
-class LocalEvent(SignalProtocol):
-    def __init__(self) -> None:
-        self._state: bool = False
-
-    def set(self) -> None:
-        self._state = True
-
-    def clear(self) -> None:
-        self._state = False
-
-    def is_set(self) -> bool:
-        return self._state
 
 
 class Serial(ProcessorBase):
     def __init__(self) -> None:
         return
 
-    def __deepcopy__(self, memo: dict[int, object]) -> Self:
-        new_processor = super().__deepcopy__(memo)
-        new_processor._stop_signal = LocalEvent()
-        new_processor._wait_signal = LocalEvent()
-        return new_processor
+    def initialize_execution_context(self) -> None:
+        self._stop_signal = LocalEvent()
+        self._wait_signal = LocalEvent()
+
+    def finalize_execution_context(self) -> None:
+        return
 
     def run(self) -> None:
         self.init_particles()

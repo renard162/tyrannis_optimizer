@@ -1,9 +1,12 @@
 from functools import partial
 from multiprocessing import Event
 from multiprocessing.pool import ThreadPool
-from typing import Self
 
-from .base import ProcessorBase, evaluate_particle
+from .base import (
+    LocalEvent,
+    ProcessorBase,
+    evaluate_particle,
+)
 
 
 class ThreadsPool(ProcessorBase):
@@ -18,11 +21,13 @@ class ThreadsPool(ProcessorBase):
         self._n_process = n_process
         self._chunksize = chunksize
 
-    def __deepcopy__(self, memo: dict[int, object]) -> Self:
-        new_processor = super().__deepcopy__(memo)
-        new_processor._stop_signal = Event()
-        new_processor._wait_signal = Event()
-        return new_processor
+    def initialize_execution_context(self) -> None:
+        self._stop_signal = Event()
+        self._wait_signal = Event()
+
+    def finalize_execution_context(self) -> None:
+        self._stop_signal = LocalEvent()
+        self._wait_signal = LocalEvent()
 
     def run(self) -> None:
         self.init_particles()

@@ -3,22 +3,28 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 from dataclasses import dataclass
 from time import sleep
-from typing import Any, Generic, Protocol, Self, TypeVar
+from typing import Any, Generic, Self, TypeVar
 
 import numpy as np
 
 from ...algorithm.base import AlgorithmBase, ParticleBase
 
 
-class SignalProtocol(Protocol):
-    """Just to use as signature"""
+class LocalEvent:
+    def __init__(self) -> None:
+        self._state: bool = False
 
-    def is_set(self) -> bool: ...
-    def set(self) -> None: ...
-    def clear(self) -> None: ...
+    def set(self) -> None:
+        self._state = True
+
+    def clear(self) -> None:
+        self._state = False
+
+    def is_set(self) -> bool:
+        return self._state
 
 
-SignalType = TypeVar("SignalType", bound=SignalProtocol)
+SignalType = TypeVar("SignalType", bound=LocalEvent)
 
 
 @dataclass
@@ -51,62 +57,108 @@ class ProcessorBase(ABC, Generic[SignalType]):
     _stop_signal: SignalType
     _wait_signal: SignalType
     _processors_pool: list[Self]
+    _excluded_attributes: tuple[str, ...] = (
+        "_stop_signal",
+        "_wait_signal",
+        "_seed_sequence",
+        "_processors_pool",
+    )
 
     @abstractmethod
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         """
-        Initialize the processor.
+        Initialize the processor-specific state.
 
-        The implementation must initialize the processor-specific state required
-        by the execution strategy. Runtime-specific variables, including the
-        `stop_signal` and `wait_signal`, must not be initialized by this method.
-        These variables are initialized when the processor execution context is
-        created or when the processor is replicated.
+        This method defines the public initialization interface of the processor
+        and must initialize only variables that are specific to the processor
+        implementation. Any parameter required to configure behavior that is
+        unique to the processor must be received and initialized here.
 
-        Implementations must define their class-specific initialization without
-        relying on a call to the `ProcessorBase` initializer.
+        Processor-specific parameters may include, for example, arguments required
+        to configure the multiprocessing execution strategy, synchronization
+        behavior, or any other configuration that is pertinent exclusively to the
+        processor implementation.
+
+        The implementation must not initialize execution-context resources such as
+        synchronization primitives or other non-serializable objects. These
+        resources must be created by `initialize_execution_context` immediately
+        before the processor is executed and removed by
+        `finalize_execution_context` when execution is finished.
+
+        The `_excluded_attributes` tuple may be extended by the implementation
+        during initialization to include any additional instance attributes that
+        cannot be serialized or deep-copied and therefore must not be propagated
+        when the processor is replicated. The attributes already excluded by the
+        base implementation must remain excluded.
+
+        This method constitutes the user-facing configuration interface of the
+        processor. Therefore, its arguments must represent only configuration that
+        belongs exclusively to the processor and must not expose parameters that
+        belong to the optimization process as a whole or to another architectural
+        component.
+        """
+
+    def initialize_execution_context(self) -> None:
+        """
+        Initialize resources required exclusively during processor execution.
+
+        This method must create any execution-specific resources that are required
+        for the processor to operate but must not be present while the processor is
+        being serialized or replicated. This includes any non-serializable
+        variables, synchronization primitives, process or thread resources, or
+        other runtime-specific objects required by the processor's execution
+        strategy.
+
+        In particular, `_stop_signal` and `_wait_signal` must be initialized here
+        using the synchronization primitives appropriate for the processor's
+        execution strategy. For example, a processor based on multiprocessing may
+        initialize these attributes with `multiprocessing.Event` objects, which are
+        not serializable and therefore must only exist inside the execution
+        context of the worker.
+
+        The resources created by this method must be local to the execution context
+        in which the processor will run. They must not be created during
+        initialization or replication of the processor, since the processor may
+        subsequently be serialized and distributed to another execution context.
+
+        Every resource created by this method must have a corresponding cleanup
+        operation implemented by `finalize_execution_context`.
+        """
+
+    def finalize_execution_context(self) -> None:
+        """
+        Remove resources associated with the processor's execution context.
+
+        This method must release and remove any execution-specific resources
+        created by `initialize_execution_context`, including non-serializable
+        variables, synchronization primitives, process or thread resources, and
+        other runtime-specific objects that must not be retained after execution.
+
+        In particular, `_stop_signal` and `_wait_signal` must be cleared by
+        replacing them with `LocalEvent` instances. `LocalEvent` provides the
+        local, serializable representation of the signals required by the
+        processor outside its execution context, while execution-specific
+        implementations such as `multiprocessing.Event` must not remain attached
+        to the processor.
+
+        This method must leave the processor in a state that can safely be
+        serialized, deep-copied, or returned from a worker to the driver without
+        carrying resources that are specific to the execution context in which it
+        was run.
+
+        Every resource initialized by `initialize_execution_context` must be
+        released or replaced here before the processor leaves its execution
+        context.
         """
 
     def __deepcopy__(self, memo: dict[int, object]) -> Self:
-        """
-        Create a deep copy of the processor excluding execution control state.
-
-        The default implementation recursively deep-copies the processor's
-        instance attributes, except for `_stop_signal` and `_wait_signal`. These
-        attributes represent execution-specific control state and must not be
-        propagated to replicated processors.
-
-        Both control signals must provide an `is_set` method that returns `True`
-        when the signal is active and `False` otherwise, as well as `set` and
-        `clear` methods to activate and deactivate the signal. Their concrete
-        implementations must be appropriate for the processor's execution
-        strategy and must be recreated by the subclass rather than copied from
-        the original processor.
-
-        The `stop_signal` controls termination of the processor's execution,
-        while the `wait_signal` controls synchronization with other execution
-        contexts. Their state must therefore be independent for each replicated
-        processor.
-
-        Processor implementations that require specific handling of
-        synchronization primitives or other non-copyable execution resources must
-        override this method. Subclasses may call this implementation through
-        `super().__deepcopy__()` and initialize the excluded attributes according
-        to their execution strategy.
-        """
         new_processor = self.__class__.__new__(self.__class__)
         memo[id(self)] = new_processor
 
-        excluded_attributes = {
-            "_stop_signal",
-            "_wait_signal",
-            "_seed_sequence",
-            "_processors_pool",
-        }
-
         for name, value in self.__dict__.items():
-            if name not in excluded_attributes:
-                setattr(new_processor, name, deepcopy(value, memo))
+            if name in self._excluded_attributes:
+                continue
+            setattr(new_processor, name, deepcopy(value, memo))
 
         return new_processor
 
@@ -250,7 +302,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
 def evaluate_particle(
     particle_id: str,
     algorithm: AlgorithmBase,
-    stop_signal: SignalProtocol,
+    stop_signal: LocalEvent,
     fitness_failure_strategy: str,
     initialize_particle: bool = False,
 ) -> ParticleBase:
