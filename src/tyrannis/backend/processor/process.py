@@ -1,6 +1,8 @@
+from copy import deepcopy
 from functools import partial
 from multiprocessing import Event, Manager, Pool
 from multiprocessing.synchronize import Event as EventProtocol
+from typing import Any, Self
 
 from .base import (
     ProcessorBase,
@@ -51,6 +53,21 @@ class ProcessPool(ProcessorBase):
         self._n_process = n_process
         self._stop_signal = StopSignal()
         self._wait_signal = Event()
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> Self:
+        new_processor = self.__class__.__new__(self.__class__)
+        memo[id(self)] = new_processor
+
+        for key, value in self.__dict__.items():
+            if key in {"_stop_signal", "_wait_signal"}:
+                continue
+
+            setattr(new_processor, key, deepcopy(value, memo))
+
+        new_processor._stop_signal = StopSignal()
+        new_processor._wait_signal = Event()
+
+        return new_processor
 
     def run(self) -> None:
         self.init_particles()
@@ -110,26 +127,26 @@ if __name__ == "__main__":
     # from ...examples.many_local_minima import ackley
 
     # def test_function(x):
-    #     sleep(0.25)
+    #     # sleep(0.25)
     #     result = ackley(x)
-    #     for _ in range(5_000_001):
-    #         result = result * 1.0000001
-    #     result /= np.exp(1)
+    #     # for _ in range(5_000_001):
+    #     #     result = result * 1.0000001
+    #     # result /= np.exp(1)
     #     return float(result)
 
-    # algo = PSO(
-    #     identifier="pso",
+    # algo = PSO()
+    # algo.initialize_context(
     #     fitness_function=test_function,
     #     boundaries={f"{n}": (-32.768, 32.768) for n in range(2)},
-    #     seed=42,
     # )
 
-    # obj = ProcessPool(  # execution time 46s with 8 process
-    #     identifier="1",
+    # processor = ProcessPool(n_process=8)
+    # processor.initialize_context(
     #     algorithm=algo,
-    #     n_iter=30,
+    #     n_iter=5,
     #     n_particles=13,
     # )
+    # obj = processor.replicate_processor("1")
 
     # start = perf_counter()
     # obj.run()

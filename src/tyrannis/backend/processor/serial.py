@@ -79,26 +79,26 @@ if __name__ == "__main__":
     # from ...examples.many_local_minima import ackley
 
     # def test_function(x):
-    #     sleep(0.25)
+    #     # sleep(0.25)
     #     result = ackley(x)
-    #     for _ in range(5_000_001):
-    #         result = result * 1.0000001
-    #     result /= np.exp(1)
+    #     # for _ in range(5_000_001):
+    #     #     result = result * 1.0000001
+    #     # result /= np.exp(1)
     #     return float(result)
 
-    # algo = PSO(
-    #     identifier="pso",
+    # algo = PSO()
+    # algo.initialize_context(
     #     fitness_function=test_function,
     #     boundaries={f"{n}": (-32.768, 32.768) for n in range(2)},
-    #     seed=42,
     # )
 
-    # obj = Serial(  # execution time 238s
-    #     identifier="1",
+    # processor = Serial()
+    # processor.initialize_context(
     #     algorithm=algo,
     #     n_iter=5,
     #     n_particles=13,
     # )
+    # obj = processor.replicate_processor("1")
 
     # start = perf_counter()
     # obj.run()
