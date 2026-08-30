@@ -100,9 +100,12 @@ class PSO(AlgorithmBase):
 
     def create_particle(
         self,
-        identifier: str | None,
-        variables: dict[str, float] | None,
-        fitness: float | None,
+        identifier: str,
+        variables: dict[str, float] | None = None,
+        fitness: float | None = None,
+        velocity: dict[str, float] | None = None,
+        personal_best_variables: dict[str, float] | None = None,
+        personal_best_fitness: float | None = None,
     ) -> None:
         if identifier is None:
             raise ValueError("Particle identifier cannot be None.")
@@ -113,19 +116,22 @@ class PSO(AlgorithmBase):
                 for name, (lower, upper) in self._boundaries.items()
             }
 
-        velocity = {
-            name: self._rng.uniform(
-                -(upper - lower),
-                upper - lower,
-            )
-            for name, (lower, upper) in self._boundaries.items()
-        }
+        if velocity is None:
+            velocity = {
+                name: self._rng.uniform(
+                    -(upper - lower),
+                    upper - lower,
+                )
+                for name, (lower, upper) in self._boundaries.items()
+            }
 
         self._population[identifier] = PSOParticle(
             identifier=identifier,
             variables=variables,
             fitness=fitness,
             velocity=velocity,
+            personal_best_variables=personal_best_variables,
+            personal_best_fitness=personal_best_fitness,
         )
 
     def delete_particle(self, identifier: str | None) -> None:
