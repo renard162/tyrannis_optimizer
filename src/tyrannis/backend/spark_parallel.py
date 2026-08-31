@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import pickle
+import time
 from collections.abc import Iterator
 from functools import partial
 
-import pandas as pd
+import pyarrow as pa
 from pyspark.sql import SparkSession
 from pyspark.sql.types import BinaryType, StructField, StructType
 
@@ -21,10 +22,10 @@ class SparkParallel:
 
     The algorithm instance maintained by the driver is the authoritative
     state of the optimization. For each parallelized stage, a serialized
-    copy of the algorithm is made available to the Spark tasks. Only the
-    resulting particles are returned to the driver.
+    copy of the algorithm is made available to the Spark tasks. Updated
+    particles are returned to the driver as serialized batches.
 
-    Spark's DataFrame API and ``mapInPandas`` are used instead of RDDs or
+    Spark's DataFrame API and ``mapInArrow`` are used instead of RDDs or
     direct SparkContext access, allowing the processor to operate in Spark
     environments with restricted RDD support, such as Databricks Serverless.
 
@@ -49,7 +50,7 @@ class SparkParallel:
     _particle_schema = StructType(
         [
             StructField(
-                "particle",
+                "particles",
                 BinaryType(),
                 nullable=False,
             ),
@@ -149,18 +150,29 @@ class SparkParallel:
 
         The algorithm state remains exclusively on the driver between
         parallelized stages. Spark tasks operate on serialized copies of
-        the algorithm and return updated particles to the driver.
+        the algorithm and return updated particles to the driver in
+        serialized batches.
         """
+        total_start = time.perf_counter()
+
         self.init_particles()
 
         for actual_iter in range(self._n_iter + 1):
             self._actual_iter = actual_iter
+
+            print(f"\n{'=' * 72}\nITERATION {actual_iter}\n{'=' * 72}")
 
             self.algorithm.pre_iteration(actual_iter)
 
             new_particles_ids = self.algorithm.new_particles_id
 
             if new_particles_ids:
+                print(
+                    f"[ITERATION {actual_iter}] "
+                    f"INITIALIZE PARTICLES: "
+                    f"{len(new_particles_ids)}"
+                )
+
                 initialized_particles = self._parallel_initialize_particles(
                     new_particles_ids
                 )
@@ -170,6 +182,10 @@ class SparkParallel:
             if actual_iter > 0:
                 particle_ids = self.algorithm.population
 
+                print(
+                    f"[ITERATION {actual_iter}] UPDATE PARTICLES: {len(particle_ids)}"
+                )
+
                 updated_particles = self._parallel_update_particles(particle_ids)
 
                 self.algorithm.update_population(updated_particles)
@@ -177,6 +193,10 @@ class SparkParallel:
             self.algorithm.post_iteration(actual_iter)
 
             self.update_status()
+
+        total_elapsed = time.perf_counter() - total_start
+
+        print(f"\n{'=' * 72}\nTOTAL TIME: {total_elapsed:.6f}s\n{'=' * 72}")
 
     def init_particles(self) -> None:
         """
@@ -228,45 +248,126 @@ class SparkParallel:
         if not particle_ids:
             return []
 
+        operation = "INITIALIZE" if initialize_particle else "UPDATE"
+
+        print(f"\n[DRIVER] {operation} START")
+
+        # --------------------------------------------------------------
+        # Algorithm serialization
+        # --------------------------------------------------------------
+        algorithm_start = time.perf_counter()
+
+        serialized_algorithm = pickle.dumps(
+            self.algorithm,
+            protocol=pickle.HIGHEST_PROTOCOL,
+        )
+
+        algorithm_serialization_elapsed = time.perf_counter() - algorithm_start
+
+        algorithm_size_mb = len(serialized_algorithm) / 1024 / 1024
+
+        print(
+            f"[DRIVER] Algorithm serialization: "
+            f"{algorithm_serialization_elapsed:.6f}s | "
+            f"size={algorithm_size_mb:.3f} MB"
+        )
+
+        # --------------------------------------------------------------
+        # DataFrame creation
+        # --------------------------------------------------------------
+        start = time.perf_counter()
+
         particles_df = self._spark.createDataFrame(
             [(particle_id,) for particle_id in particle_ids],
             ["particle_id"],
         )
 
+        create_dataframe_elapsed = time.perf_counter() - start
+
+        print(f"[DRIVER] createDataFrame: {create_dataframe_elapsed:.6f}s")
+
+        # --------------------------------------------------------------
+        # Worker function
+        #
+        # Only the serialized algorithm is captured by the worker.
+        # The SparkParallel instance and SparkSession are never sent
+        # to the executors.
+        # --------------------------------------------------------------
         worker = partial(
             _process_particle_batches,
-            algorithm=self.algorithm,
+            serialized_algorithm=serialized_algorithm,
             initialize_particle=initialize_particle,
             fitness_failure_strategy=self._fitness_failure_strategy,
         )
 
-        result_df = particles_df.mapInPandas(
+        # --------------------------------------------------------------
+        # mapInArrow construction
+        # --------------------------------------------------------------
+        start = time.perf_counter()
+
+        result_df = particles_df.mapInArrow(
             worker,
             schema=self._particle_schema,
         )
 
+        map_elapsed = time.perf_counter() - start
+
+        print(f"[DRIVER] mapInArrow construction: {map_elapsed:.6f}s")
+
+        # --------------------------------------------------------------
+        # Actual Spark execution
+        # --------------------------------------------------------------
+        start = time.perf_counter()
+
         rows = result_df.collect()
 
-        return [pickle.loads(row["particle"]) for row in rows]
+        collect_elapsed = time.perf_counter() - start
+
+        print(f"[DRIVER] collect: {collect_elapsed:.6f}s")
+
+        # --------------------------------------------------------------
+        # Batch deserialization
+        # --------------------------------------------------------------
+        start = time.perf_counter()
+
+        particles = []
+
+        for row in rows:
+            particles.extend(pickle.loads(row["particles"]))
+
+        particle_deserialization_elapsed = time.perf_counter() - start
+
+        print(
+            f"[DRIVER] batch deserialization: {particle_deserialization_elapsed:.6f}s"
+        )
+
+        print(
+            f"[DRIVER] {operation} END | "
+            f"particles={len(particles)} | "
+            f"batches={len(rows)} | "
+            f"collect={collect_elapsed:.6f}s"
+        )
+
+        return particles
 
 
 def _process_particle_batches(
-    batches: Iterator[pd.DataFrame],
-    algorithm: AlgorithmBase,
+    batches: Iterator[pa.RecordBatch],
+    serialized_algorithm: bytes,
     initialize_particle: bool,
     fitness_failure_strategy: str,
-) -> Iterator[pd.DataFrame]:
-    """
-    Process particles belonging to a Spark partition.
+) -> Iterator[pa.RecordBatch]:
 
-    ``algorithm`` is a serialized copy of the driver's algorithm state.
-    Changes to algorithm-level state are intentionally discarded after the
-    task finishes. Only the resulting particles are returned.
-    """
+    algorithm = pickle.loads(serialized_algorithm)
+
+    particles = []
+
     for batch in batches:
-        result = []
+        particle_ids = batch.column(batch.schema.get_field_index("particle_id"))
 
-        for particle_id in batch["particle_id"]:
+        for particle_id in particle_ids:
+            particle_id = particle_id.as_py()
+
             try:
                 if initialize_particle:
                     particle = algorithm.initialize_particle(particle_id)
@@ -281,13 +382,19 @@ def _process_particle_batches(
 
                 particle.candidate_fitness = float("inf")
 
-            result.append(
-                {
-                    "particle": pickle.dumps(
-                        particle,
-                        protocol=pickle.HIGHEST_PROTOCOL,
-                    )
-                }
-            )
+            particles.append(particle)
 
-        yield pd.DataFrame(result)
+    serialized_particles = pickle.dumps(
+        particles,
+        protocol=pickle.HIGHEST_PROTOCOL,
+    )
+
+    yield pa.RecordBatch.from_arrays(
+        [
+            pa.array(
+                [serialized_particles],
+                type=pa.binary(),
+            )
+        ],
+        names=["particles"],
+    )
