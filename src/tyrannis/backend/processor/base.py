@@ -172,6 +172,9 @@ class ProcessorBase(ABC, Generic[SignalType]):
                 continue
             setattr(new_processor, name, deepcopy(value, memo))
 
+        new_processor._pool_count_sequence = None
+        new_processor._seed_sequence = None
+        new_processor._processors_pool = {}
         return new_processor
 
     def initialize_context(
