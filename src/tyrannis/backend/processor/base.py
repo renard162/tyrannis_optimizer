@@ -28,6 +28,16 @@ class LocalEvent:
 SignalType = TypeVar("SignalType", bound=LocalEvent)
 
 
+class IntSequence:
+    def __init__(self) -> None:
+        self._value: int = 0
+
+    def spawn(self) -> int:
+        value = self._value
+        self._value += 1
+        return value
+
+
 @dataclass
 class StatusVariables:
     population: dict[str, float | None]
@@ -63,6 +73,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
         "_wait_signal",
         "_seed_sequence",
         "_processors_pool",
+        "_pool_count_sequence",
     )
 
     @abstractmethod
@@ -181,24 +192,30 @@ class ProcessorBase(ABC, Generic[SignalType]):
             )
         self._fitness_failure_strategy = fitness_failure_strategy
 
-        self._identifier = "ProcessorBase"
+        self._identifier = "MainProcessor"
         self._control = ControlVariables()
         self._status = StatusVariables(population={})
         self._seed_sequence = np.random.SeedSequence(seed)
+        self._pool_count_sequence = IntSequence()
         self._processors_pool = {}
 
     def create_processors_pool(self, n_islands: int) -> None:
-        self._processors_pool = {
-            f"{idx}": self._replicate_processor(f"{idx}") for idx in range(n_islands)
-        }
+        for _ in range(n_islands):
+            processor = self._replicate_processor()
+            self._processors_pool[processor.identifier] = processor
 
-    def _replicate_processor(self, identifier: str) -> Self:
+    def _replicate_processor(self) -> Self:
+        idx = self._pool_count_sequence.spawn()
         new_processor = deepcopy(self)
-        new_processor._identifier = identifier
+
+        processor_identifier = f"island:{idx}"
+
+        new_processor.set_identifier(processor_identifier)
         new_processor._algorithm.configure(
-            identifier=f"island:{identifier}|algorithm",
+            identifier=f"{processor_identifier}|algorithm",
             seed=self._seed_sequence.spawn(1)[0],
         )
+
         return new_processor
 
     def update_processors_pool(self, new_processors: Iterable[Self]) -> None:
@@ -218,13 +235,16 @@ class ProcessorBase(ABC, Generic[SignalType]):
     def local_best(self) -> str:
         return self._status.best_particle_data
 
+    def set_identifier(self, identifier: str) -> None:
+        self._identifier = identifier
+
     def init_particles(self) -> None:
         if len(self._algorithm.population) > 0:
             return
 
         for p_idx in range(self._n_particles):
             self._algorithm.create_particle(
-                identifier=f"island:{self._identifier}|particle:{p_idx}",
+                identifier=f"{self._identifier}|particle:{p_idx}",
             )
 
     def wait_sync(self, actual_iter: int) -> None:
