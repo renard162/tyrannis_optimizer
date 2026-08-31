@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-import pyarrow as pa
+import pandas as pd
 from pyspark import cloudpickle
 from pyspark.sql import SparkSession
 from pyspark.sql.types import BinaryType, StructField, StructType
@@ -23,7 +23,7 @@ class SparkParallel:
     copy of the algorithm is made available to the Spark tasks. Updated
     particles are returned to the driver as serialized batches.
 
-    Spark's DataFrame API and ``mapInArrow`` are used instead of RDDs or
+    Spark's DataFrame API and ``mapInPandas`` are used instead of RDDs or
     direct SparkContext access, allowing the processor to operate in Spark
     environments with restricted RDD support, such as Databricks Serverless.
 
@@ -261,10 +261,14 @@ class SparkParallel:
 
         # --------------------------------------------------------------
         # Worker function.
+        #
+        # mapInPandas receives an iterator of pandas DataFrames.
+        # The iterator is consumed partition by partition, preserving
+        # the batch-oriented execution model.
         # --------------------------------------------------------------
         def worker(
-            batches: Iterator[pa.RecordBatch],
-        ) -> Iterator[pa.RecordBatch]:
+            batches: Iterator[pd.DataFrame],
+        ) -> Iterator[pd.DataFrame]:
             return _process_particle_batches(
                 batches=batches,
                 serialized_algorithm=serialized_algorithm,
@@ -273,9 +277,9 @@ class SparkParallel:
             )
 
         # --------------------------------------------------------------
-        # mapInArrow
+        # mapInPandas
         # --------------------------------------------------------------
-        result_df = particles_df.mapInArrow(
+        result_df = particles_df.mapInPandas(
             worker,
             schema=self._particle_schema,
         )
@@ -300,11 +304,11 @@ class SparkParallel:
 
 
 def _process_particle_batches(
-    batches: Iterator[pa.RecordBatch],
+    batches: Iterator[pd.DataFrame],
     serialized_algorithm: bytes,
     initialize_particle: bool,
     fitness_failure_strategy: str,
-) -> Iterator[pa.RecordBatch]:
+) -> Iterator[pd.DataFrame]:
     """
     Process particles belonging to Spark partitions.
 
@@ -318,7 +322,7 @@ def _process_particle_batches(
     Parameters
     ----------
     batches:
-        Iterator of Arrow record batches supplied by Spark.
+        Iterator of pandas DataFrames supplied by Spark.
     serialized_algorithm:
         Serialized algorithm state generated on the driver.
     initialize_particle:
@@ -327,32 +331,37 @@ def _process_particle_batches(
         Strategy applied when particle processing fails.
     """
     # --------------------------------------------------------------
-    # Deserialize the algorithm inside the worker.
+    # Deserialize the algorithm once per worker invocation.
     # --------------------------------------------------------------
     algorithm = cloudpickle.loads(serialized_algorithm)
 
     particles: list[ParticleBase] = []
 
     # --------------------------------------------------------------
-    # Process all Arrow batches assigned to this Spark partition.
+    # Process all pandas batches assigned to this Spark partition.
+    #
+    # The particle objects themselves are still serialized only once
+    # when the complete partition result is produced.
     # --------------------------------------------------------------
     for batch in batches:
-        particle_ids = batch.column(batch.schema.get_field_index("particle_id"))
-
-        for particle_id in particle_ids:
-            particle_id = particle_id.as_py()
-
+        for particle_id in batch["particle_id"]:
             try:
                 if initialize_particle:
-                    particle = algorithm.initialize_particle(particle_id)
+                    particle = algorithm.initialize_particle(
+                        particle_id,
+                    )
                 else:
-                    particle = algorithm.update_particle(particle_id)
+                    particle = algorithm.update_particle(
+                        particle_id,
+                    )
 
             except Exception:
                 if fitness_failure_strategy == "raise":
                     raise
 
-                particle = algorithm.get_unmodified_particle(particle_id)
+                particle = algorithm.get_unmodified_particle(
+                    particle_id,
+                )
 
                 particle.candidate_fitness = float("inf")
 
@@ -368,12 +377,11 @@ def _process_particle_batches(
         particles,
     )
 
-    yield pa.RecordBatch.from_arrays(
-        [
-            pa.array(
-                [serialized_particles],
-                type=pa.binary(),
-            )
-        ],
-        names=["particles"],
+    # --------------------------------------------------------------
+    # Return one pandas DataFrame row per Spark partition.
+    # --------------------------------------------------------------
+    yield pd.DataFrame(
+        {
+            "particles": [serialized_particles],
+        }
     )
