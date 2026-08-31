@@ -1,5 +1,6 @@
 import json
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from time import sleep
@@ -56,7 +57,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
 
     _stop_signal: SignalType
     _wait_signal: SignalType
-    _processors_pool: list[Self]
+    _processors_pool: dict[str, Self]
     _excluded_attributes: tuple[str, ...] = (
         "_stop_signal",
         "_wait_signal",
@@ -184,12 +185,12 @@ class ProcessorBase(ABC, Generic[SignalType]):
         self._control = ControlVariables()
         self._status = StatusVariables(population={})
         self._seed_sequence = np.random.SeedSequence(seed)
-        self._processors_pool = []
+        self._processors_pool = {}
 
     def create_processors_pool(self, n_islands: int) -> None:
-        self._processors_pool = [
-            self._replicate_processor(f"{idx + 1}") for idx in range(n_islands)
-        ]
+        self._processors_pool = {
+            f"{idx}": self._replicate_processor(f"{idx}") for idx in range(n_islands)
+        }
 
     def _replicate_processor(self, identifier: str) -> Self:
         new_processor = deepcopy(self)
@@ -200,12 +201,17 @@ class ProcessorBase(ABC, Generic[SignalType]):
         )
         return new_processor
 
+    def update_processors_pool(self, new_processors: Iterable[Self]) -> None:
+        self._processors_pool.update(
+            {processor.identifier: processor for processor in new_processors}
+        )
+
     @property
     def identifier(self) -> str:
         return self._identifier
 
     @property
-    def processors_pool(self) -> list[Self]:
+    def processors_pool(self) -> dict[str, Self]:
         return self._processors_pool
 
     @property
