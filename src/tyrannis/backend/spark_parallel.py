@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 
 import pandas as pd
 from pyspark import cloudpickle
@@ -267,10 +267,10 @@ class SparkParallel:
         # the batch-oriented execution model.
         # --------------------------------------------------------------
         def worker(
-            batches: Iterator[pd.DataFrame],
+            batches: Iterable[pd.DataFrame],
         ) -> Iterator[pd.DataFrame]:
             return _process_particle_batches(
-                batches=batches,
+                batches=iter(batches),
                 serialized_algorithm=serialized_algorithm,
                 initialize_particle=initialize_particle,
                 fitness_failure_strategy=fitness_failure_strategy,

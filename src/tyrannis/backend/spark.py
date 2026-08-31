@@ -1,4 +1,4 @@
-import json
+from typing import Any, cast
 
 from pyspark.sql import SparkSession
 
@@ -6,21 +6,7 @@ from .processor.base import ProcessorBase
 
 
 class Spark:
-    """
-    Spark backend for distributed processor execution.
-
-    A processor pool is created on the Spark driver with one processor for
-    each Spark worker. During execution, each Spark worker receives one
-    processor from this pool.
-
-    Parameters
-    ----------
-    spark:
-        Spark session used to execute the processors.
-    processor:
-        Configured processor instance used as the template for the processor
-        pool.
-    """
+    """Spark backend for distributed processor execution."""
 
     def __init__(
         self,
@@ -28,31 +14,30 @@ class Spark:
         processor: ProcessorBase,
     ) -> None:
         if spark is None:
-            raise ValueError("Spark session cannot be None")
+            raise ValueError("Spark session cannot be None.")
 
         self._spark = spark
         self._processor = processor
+        self._n_executors = self._get_n_executors()
 
-        self._n_workers = self._get_n_workers()
+        self._processor.create_processors_pool(
+            self._n_executors,
+        )
 
-        self._processor.create_processors_pool(self._n_workers)
-
-        if len(self._processor.processors_pool) != self._n_workers:
+        if len(self._processor.processors_pool) != self._n_executors:
             raise RuntimeError(
                 "The number of processors in the processor pool must be "
-                "identical to the number of Spark workers."
+                "identical to the number of Spark executors."
             )
 
         self._local_bests: dict[str, dict] = {}
-
-        self._job_group = f"tyrannis-spark-{id(self)}"
 
     @property
     def processor(self) -> ProcessorBase:
         return self._processor
 
     @property
-    def processors_pool(self) -> list[ProcessorBase]:
+    def processors_pool(self) -> dict[str, ProcessorBase]:
         return self._processor.processors_pool
 
     @property
@@ -60,15 +45,23 @@ class Spark:
         return self._local_bests.copy()
 
     @property
-    def n_workers(self) -> int:
-        return self._n_workers
+    def n_executors(self) -> int:
+        return self._n_executors
 
-    def run(self) -> None:
+    def execute(self) -> None:
+        """
+        Execute one processor on each Spark partition.
+
+        Each processor in the processor pool represents one isolated
+        optimization island. The processor is serialized by Spark,
+        deserialized inside the executor, initialized for execution,
+        executed, and finally returned to a serializable state.
+        """
         spark_context = self._spark.sparkContext
 
         processors = spark_context.parallelize(
-            self._processor.processors_pool,
-            numSlices=self._n_workers,
+            list(self._processor.processors_pool.values()),
+            numSlices=self._n_executors,
         )
 
         results = processors.map(
@@ -77,24 +70,38 @@ class Spark:
 
         self._local_bests = dict(results)
 
-    def stop(self) -> None:
-        self._spark.sparkContext.cancelJobGroup(self._job_group)
+    def _get_n_executors(self) -> int:
+        jsc = cast(Any, self._spark.sparkContext._jsc)
 
-    def _get_n_workers(self) -> int:
-        executor_infos = self._spark.sparkContext._jsc.sc().getExecutorMemoryStatus()
-
-        return executor_infos.size()
+        return jsc.sc().getExecutorMemoryStatus().size()
 
 
-def _run_processor(processor: ProcessorBase) -> tuple[str, dict]:
+def _run_processor(
+    processor: ProcessorBase,
+) -> tuple[str, dict]:
+    """
+    Execute a processor inside a Spark executor.
+
+    The processor must enter its execution context only after Spark
+    has deserialized it. This is required because execution-context
+    resources such as Events and thread/process pools must not be
+    serialized or replicated.
+    """
     processor.initialize_execution_context()
 
     try:
         processor.run()
 
-        local_best = json.loads(processor.local_best)
-        identifier = processor.identifier
+        local_best = processor.local_best
+
+        if not local_best:
+            result: dict = {}
+        else:
+            import json
+
+            result = json.loads(local_best)
+
+        return processor.identifier, result
+
     finally:
         processor.finalize_execution_context()
-
-    return identifier, local_best
