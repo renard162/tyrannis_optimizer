@@ -8,7 +8,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql.types import BinaryType, StructField, StructType
 
 from ...algorithm.base import AlgorithmBase, ParticleBase
-from ..processor.base import CostFunctionWrapperBase
+from ..base import CostFunctionWrapperBase
 
 
 class SparkParallelCostFunctionWrapper(CostFunctionWrapperBase):

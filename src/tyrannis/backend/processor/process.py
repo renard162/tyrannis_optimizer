@@ -8,8 +8,8 @@ from typing import Any
 
 import cloudpickle
 
+from ..base import CostFunctionWrapperBase
 from .base import (
-    CostFunctionWrapperBase,
     LocalEvent,
     ProcessorBase,
     evaluate_particle,

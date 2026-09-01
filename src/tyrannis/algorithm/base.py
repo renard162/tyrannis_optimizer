@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 from numpy.random import SeedSequence
 
-from ..backend.processor.base import CostFunctionWrapperBase
+from ..backend.base import CostFunctionWrapperBase
 
 
 class ParticleBase(ABC):

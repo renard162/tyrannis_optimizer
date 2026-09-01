@@ -56,8 +56,8 @@ def parallel_test():
     backend = SparkParallel(spark)
     backend.initialize_context(
         algorithm=algo,
-        n_iter=30,
-        n_particles=500,
+        n_iter=5,  # 30,
+        n_particles=10,  # 500,
         seed=42,
     )
 
@@ -109,5 +109,5 @@ def distributed_test():
 
 
 if __name__ == "__main__":
-    distributed_test()
-    # spark_parallel_test()
+    # distributed_test()
+    parallel_test()

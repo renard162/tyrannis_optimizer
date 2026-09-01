@@ -1,6 +1,6 @@
 import json
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from time import sleep
@@ -9,6 +9,7 @@ from typing import Any, Generic, Self, TypeVar
 import numpy as np
 
 from ...algorithm.base import AlgorithmBase, ParticleBase
+from ..base import CostFunctionWrapperBase
 
 
 class LocalEvent:
@@ -60,17 +61,6 @@ class ControlVariables:
     departure_particle_data: str | None = None
 
     iter_until: int | None = None
-
-
-class CostFunctionWrapperBase(ABC):
-    """Neutral wrapper for a cost function."""
-
-    def __init__(self, function: Callable[..., float]) -> None:
-        self._function = function
-
-    def __call__(self, *args: Any, **kwargs: Any) -> float:
-        function = self._function
-        return function(*args, **kwargs)
 
 
 class ProcessorBase(ABC, Generic[SignalType]):

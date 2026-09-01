@@ -1,7 +1,7 @@
 from functools import partial
 
+from ..base import CostFunctionWrapperBase
 from .base import (
-    CostFunctionWrapperBase,
     LocalEvent,
     ProcessorBase,
     evaluate_particle,
