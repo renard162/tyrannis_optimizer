@@ -3,10 +3,15 @@ from multiprocessing import Event
 from multiprocessing.pool import ThreadPool
 
 from .base import (
+    CostFunctionWrapperBase,
     LocalEvent,
     ProcessorBase,
     evaluate_particle,
 )
+
+
+class ThreadsPoolCostFunctionWrapper(CostFunctionWrapperBase):
+    """Threads pool processor cost-function wrapper."""
 
 
 class ThreadsPool(ProcessorBase):
@@ -20,6 +25,8 @@ class ThreadsPool(ProcessorBase):
 
         self._n_process = n_process
         self._chunksize = chunksize
+
+        self._cost_function_wrapper = ThreadsPoolCostFunctionWrapper
 
     def initialize_execution_context(self) -> None:
         self._stop_signal = Event()

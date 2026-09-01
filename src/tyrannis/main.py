@@ -44,7 +44,7 @@ def test_function(x):
     return float(result)
 
 
-def spark_parallel_test():
+def parallel_test():
     algo = PSO()
     algo.initialize_context(
         fitness_function=test_function,
@@ -71,7 +71,7 @@ def spark_parallel_test():
     print("Breakpoint here")
 
 
-def main():
+def distributed_test():
     algo = PSO()
     algo.initialize_context(
         fitness_function=test_function,
@@ -109,5 +109,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    distributed_test()
     # spark_parallel_test()

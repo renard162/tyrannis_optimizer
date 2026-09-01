@@ -8,6 +8,11 @@ from pyspark.sql import SparkSession
 from pyspark.sql.types import BinaryType, StructField, StructType
 
 from ...algorithm.base import AlgorithmBase, ParticleBase
+from ..processor.base import CostFunctionWrapperBase
+
+
+class SparkParallelCostFunctionWrapper(CostFunctionWrapperBase):
+    """Spark parallel cost-function wrapper."""
 
 
 class SparkParallel:
@@ -139,6 +144,7 @@ class SparkParallel:
         if seed is not None:
             self._algorithm.configure(
                 identifier="SparkParallel|algorithm",
+                cost_function_wrapper=SparkParallelCostFunctionWrapper,
                 seed=seed,
             )
 

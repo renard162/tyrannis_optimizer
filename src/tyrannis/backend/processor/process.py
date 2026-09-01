@@ -1,12 +1,51 @@
+from __future__ import annotations
+
+from collections.abc import Callable
 from functools import partial
 from multiprocessing import Event, get_all_start_methods, get_context
 from multiprocessing.synchronize import Event as EventProtocol
+from typing import Any
+
+import cloudpickle
 
 from .base import (
+    CostFunctionWrapperBase,
     LocalEvent,
     ProcessorBase,
     evaluate_particle,
 )
+
+
+class ProcessPoolCostFunctionWrapper(CostFunctionWrapperBase):
+    """Process pool processor cost-function wrapper with cloudpickle-based serialization."""
+
+    def __init__(self, function: Callable[..., float]) -> None:
+        self._serialized_function = cloudpickle.dumps(function)
+        self._function: Callable[..., float] | None = None
+
+    def __call__(self, *args: Any, **kwargs: Any) -> float:
+        if self._function is None:
+            self._function = cloudpickle.loads(self._serialized_function)
+
+        return self._function(*args, **kwargs)  # type: ignore
+
+    def __reduce__(
+        self,
+    ) -> tuple[Callable[[bytes], ProcessPoolCostFunctionWrapper], tuple[bytes]]:
+        return (
+            ProcessPoolCostFunctionWrapper._restore,
+            (self._serialized_function,),
+        )
+
+    @staticmethod
+    def _restore(
+        serialized_function: bytes,
+    ) -> ProcessPoolCostFunctionWrapper:
+        instance = object.__new__(ProcessPoolCostFunctionWrapper)
+        instance._serialized_function = serialized_function
+        instance._function = None
+
+        return instance
 
 
 class StopSignal(LocalEvent):
@@ -75,6 +114,8 @@ class ProcessPool(ProcessorBase):
         self._multiprocessing_context = multiprocessing_context
         self._maxtasksperchild = maxtasksperchild
         self._chunksize = chunksize
+
+        self._cost_function_wrapper = ProcessPoolCostFunctionWrapper
 
     def initialize_execution_context(self) -> None:
         self._stop_signal = StopSignal()

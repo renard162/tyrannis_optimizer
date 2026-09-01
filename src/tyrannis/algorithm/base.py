@@ -7,6 +7,8 @@ from typing import Any
 import numpy as np
 from numpy.random import SeedSequence
 
+from ..backend.processor.base import CostFunctionWrapperBase
+
 
 class ParticleBase(ABC):
     """Base class for optimization particles."""
@@ -165,9 +167,11 @@ class AlgorithmBase(ABC):
     def configure(
         self,
         identifier: str,
+        cost_function_wrapper: type[CostFunctionWrapperBase],
         seed: int | SeedSequence | None,
     ) -> None:
         self._identifier = identifier
+        self._fitness_function = cost_function_wrapper(self._fitness_function)
         self._rng = np.random.default_rng(seed)
 
     @property

@@ -1,15 +1,20 @@
 from functools import partial
 
 from .base import (
+    CostFunctionWrapperBase,
     LocalEvent,
     ProcessorBase,
     evaluate_particle,
 )
 
 
+class SerialCostFunctionWrapper(CostFunctionWrapperBase):
+    """Serial processor cost-function wrapper."""
+
+
 class Serial(ProcessorBase):
     def __init__(self) -> None:
-        return
+        self._cost_function_wrapper = SerialCostFunctionWrapper
 
     def initialize_execution_context(self) -> None:
         self._stop_signal = LocalEvent()

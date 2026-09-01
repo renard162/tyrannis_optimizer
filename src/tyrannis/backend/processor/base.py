@@ -1,6 +1,6 @@
 import json
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from copy import deepcopy
 from dataclasses import dataclass
 from time import sleep
@@ -62,11 +62,23 @@ class ControlVariables:
     iter_until: int | None = None
 
 
+class CostFunctionWrapperBase(ABC):
+    """Neutral wrapper for a cost function."""
+
+    def __init__(self, function: Callable[..., float]) -> None:
+        self._function = function
+
+    def __call__(self, *args: Any, **kwargs: Any) -> float:
+        function = self._function
+        return function(*args, **kwargs)
+
+
 class ProcessorBase(ABC, Generic[SignalType]):
     """Base class for processor agent."""
 
     _stop_signal: SignalType
     _wait_signal: SignalType
+    _cost_function_wrapper: type[CostFunctionWrapperBase]
     _processors_pool: dict[str, Self]
     _excluded_attributes: tuple[str, ...] = (
         "_stop_signal",
@@ -96,6 +108,11 @@ class ProcessorBase(ABC, Generic[SignalType]):
         resources must be created by `initialize_execution_context` immediately
         before the processor is executed and removed by
         `finalize_execution_context` when execution is finished.
+
+        The `_cost_function_wrapper` attribute must be initialized with the
+        processor-specific cost-function wrapper implementation. The wrapper must
+        preserve the public callable interface of the cost function while providing
+        any behavior required by the processor to execute or serialize it correctly.
 
         The `_excluded_attributes` tuple may be extended by the implementation
         during initialization to include any additional instance attributes that
@@ -216,6 +233,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
         new_processor.set_identifier(processor_identifier)
         new_processor._algorithm.configure(
             identifier=f"{processor_identifier}|algorithm",
+            cost_function_wrapper=self._cost_function_wrapper,
             seed=self._seed_sequence.spawn(1)[0],
         )
 
