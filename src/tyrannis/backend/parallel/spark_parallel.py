@@ -7,7 +7,7 @@ from pyspark import cloudpickle
 from pyspark.sql import SparkSession
 from pyspark.sql.types import BinaryType, StructField, StructType
 
-from ..algorithm.base import AlgorithmBase, ParticleBase
+from ...algorithm.base import AlgorithmBase, ParticleBase
 
 
 class SparkParallel:

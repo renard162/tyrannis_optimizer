@@ -2,10 +2,10 @@ from typing import Any, cast
 
 from pyspark.sql import SparkSession
 
-from .processor.base import ProcessorBase
+from ..processor.base import ProcessorBase
 
 
-class Spark:
+class SparkDistributed:
     """Spark backend for distributed processor execution."""
 
     def __init__(

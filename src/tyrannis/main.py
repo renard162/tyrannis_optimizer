@@ -4,7 +4,8 @@ from time import perf_counter, sleep
 import numpy as np
 
 from .algorithm import PSO
-from .backend import Spark, SparkParallel
+from .backend.distributed import SparkDistributed
+from .backend.parallel import SparkParallel
 from .backend.processor import ProcessPool, Serial, ThreadsPool
 from .examples.many_local_minima import ackley
 
@@ -32,10 +33,14 @@ def generate_spark_session():
 
 def test_function(x):
     result = ackley(x)
-    # for _ in range(1_000_001):
-    #     result = result * 1.0000001
-    # result /= np.exp(1)
-    # sleep(0.05)
+    n_iter = 1_000_001  # Benchmark com 30 iter e 500 partículas
+    sleep_time = 0.0  # Benchmark utiliza apenas tempo em consumo de CPU
+    # n_iter = 10_001
+    # sleep_time = 0.005  # Aproximadamente 75s a mais com 500 partículas e 30 iterações
+    for _ in range(n_iter):
+        result = result * 1.0000001
+    result /= np.exp(1)
+    sleep(sleep_time)
     return float(result)
 
 
@@ -88,9 +93,10 @@ def main():
     # executor.initialize_execution_context()
 
     spark = generate_spark_session()
-    backend = Spark(
+    backend = SparkDistributed(
         spark=spark,
         processor=processor,
+        n_executors=3,
     )
 
     start = perf_counter()
