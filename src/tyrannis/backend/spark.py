@@ -12,13 +12,17 @@ class Spark:
         self,
         spark: SparkSession,
         processor: ProcessorBase,
+        n_executors: int | None = None,
     ) -> None:
         if spark is None:
             raise ValueError("Spark session cannot be None.")
 
         self._spark = spark
         self._processor = processor
-        self._n_executors = self._get_n_executors()
+
+        self._n_executors = n_executors
+        if self._n_executors is None:
+            self._n_executors = self._get_n_executors()
 
         self._processor.create_processors_pool(
             self._n_executors,
@@ -45,7 +49,7 @@ class Spark:
         return self._local_bests.copy()
 
     @property
-    def n_executors(self) -> int:
+    def n_executors(self) -> int | None:
         return self._n_executors
 
     def execute(self) -> None:
