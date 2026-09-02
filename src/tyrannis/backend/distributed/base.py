@@ -37,4 +37,6 @@ class DistributedBackendBase(BackendBase):
         if best_candidate is None:
             return
 
-        self._result = best_candidate
+        self._result = {
+            key: value for key, value in best_candidate if key in self._result_keys
+        }

@@ -10,6 +10,7 @@ from .processor.base import ProcessorBase
 class BackendBase(ABC):
     """Base class for all backends."""
 
+    _result_keys: tuple[str, ...] = ("identifier", "fitness", "variables")
     _identifier: str
     _cost_function_wrapper: type[CostFunctionWrapperBase]
 
@@ -89,7 +90,7 @@ class BackendBase(ABC):
         self._fitness_failure_strategy = fitness_failure_strategy
         self._seed = seed
 
-        self._result: dict[str, float | dict[str, float]] | None = None
+        self._result: dict[str, str | float | dict[str, float]] | None = None
         self._algorithm.configure(
             identifier=f"{self._identifier}|algorithm",
             cost_function_wrapper=self._cost_function_wrapper,
