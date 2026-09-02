@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from ..algorithm.base import AlgorithmBase, CostFunctionWrapperBase
-from .distributed.communication.base import CommunicationBase
 from .distributed.migration.base import MigrationBase
 from .processor.base import ProcessorBase
 
@@ -77,7 +76,6 @@ class BackendBase(ABC):
         n_particles: int,
         processor: ProcessorBase | None = None,
         migration: MigrationBase | None = None,
-        communication: CommunicationBase | None = None,
         fitness_failure_strategy: str = "invalidate",
         seed: int | None = None,
     ) -> None:
@@ -86,7 +84,6 @@ class BackendBase(ABC):
         self._n_particles = n_particles
         self._processor = processor
         self._migration = migration
-        self._communication = communication
         self._fitness_failure_strategy = fitness_failure_strategy
         self._seed = seed
 
