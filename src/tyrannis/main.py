@@ -33,10 +33,10 @@ def generate_spark_session():
 
 def test_function(x):
     result = ackley(x)
-    n_iter = 1_000_001  # Benchmark com 30 iter e 500 partículas
-    sleep_time = 0.0  # Benchmark utiliza apenas tempo em consumo de CPU
-    # n_iter = 10_001
-    # sleep_time = 0.005  # Aproximadamente 75s a mais com 500 partículas e 30 iterações
+    # n_iter = 1_000_001  # Benchmark com 30 iter e 500 partículas
+    # sleep_time = 0.0  # Benchmark utiliza apenas tempo em consumo de CPU
+    n_iter = 10_001
+    sleep_time = 0.005  # Aproximadamente 75s a mais com 500 partículas e 30 iterações
     for _ in range(n_iter):
         result = result * 1.0000001
     result /= np.exp(1)
@@ -62,10 +62,10 @@ def parallel_test():
     )
 
     start = perf_counter()
-    backend.run()
+    backend.execute()
     total_time = perf_counter() - start
 
-    results = backend.algorithm.population
+    results = backend.result
 
     print(f"{total_time=}")
     print("Breakpoint here")
@@ -84,24 +84,24 @@ def distributed_test():
     processor.initialize_context(
         algorithm=algo,
         n_iter=30,
-        n_particles=500,
+        n_particles=15,  # 500,
         seed=42,
     )
 
-    # processor.create_processors_pool(1)
-    # executor = next(iter(processor.processors_pool.values()))
-    # executor.initialize_execution_context()
+    processor.create_processors_pool(1)
+    executor = next(iter(processor.processors_pool.values()))
+    executor.initialize_execution_context()
 
-    spark = generate_spark_session()
-    backend = SparkDistributed(
-        spark=spark,
-        processor=processor,
-        n_executors=3,
-    )
+    # spark = generate_spark_session()
+    # backend = SparkDistributed(
+    #     spark=spark,
+    #     processor=processor,
+    #     n_executors=3,
+    # )
 
     start = perf_counter()
-    # executor.run()
-    backend.execute()
+    executor.run()
+    # backend.execute()
     total_time = perf_counter() - start
 
     print(f"{total_time=}")

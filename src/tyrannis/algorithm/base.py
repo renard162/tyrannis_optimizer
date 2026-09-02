@@ -133,6 +133,14 @@ class ParticleBase(ABC):
         self._candidate_variables = None
         self._candidate_fitness = None
 
+    def get_result_data(self):
+        if self._fitness is None:
+            return
+        return {
+            "fitness": float(self._fitness),
+            "variables": self._variables.copy(),
+        }
+
 
 class AlgorithmBase(ABC):
     """Base class for optimization algorithm."""
