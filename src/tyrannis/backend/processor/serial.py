@@ -1,6 +1,6 @@
 from functools import partial
 
-from ..base import CostFunctionWrapperBase
+from ...algorithm.base import CostFunctionWrapperBase
 from .base import (
     LocalEvent,
     ProcessorBase,

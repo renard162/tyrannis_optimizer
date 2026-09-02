@@ -8,8 +8,7 @@ from typing import Any, Generic, Self, TypeVar
 
 import numpy as np
 
-from ...algorithm.base import AlgorithmBase, ParticleBase
-from ..base import CostFunctionWrapperBase
+from ...algorithm.base import AlgorithmBase, CostFunctionWrapperBase, ParticleBase
 
 
 class LocalEvent:

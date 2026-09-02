@@ -2,7 +2,7 @@ from functools import partial
 from multiprocessing import Event
 from multiprocessing.pool import ThreadPool
 
-from ..base import CostFunctionWrapperBase
+from ...algorithm.base import CostFunctionWrapperBase
 from .base import (
     LocalEvent,
     ProcessorBase,
