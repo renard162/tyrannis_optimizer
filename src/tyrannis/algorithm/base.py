@@ -7,7 +7,16 @@ from typing import Any
 import numpy as np
 from numpy.random import SeedSequence
 
-from ..backend.base import CostFunctionWrapperBase
+
+class CostFunctionWrapperBase(ABC):
+    """Neutral wrapper for a cost function."""
+
+    def __init__(self, function: Callable[..., float]) -> None:
+        self._function = function
+
+    def __call__(self, *args: Any, **kwargs: Any) -> float:
+        function = self._function
+        return function(*args, **kwargs)
 
 
 class ParticleBase(ABC):
