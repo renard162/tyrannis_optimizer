@@ -36,8 +36,33 @@ class ParallelBackendBase(ABC):
         """
         Execute the optimization process.
 
-        This method is responsible for performing the optimization using
-        the execution model provided by the parallel backend.
+        The execution consists of an initialization stage followed by
+        ``n_iter + 1`` execution cycles. Iteration zero is reserved for
+        establishing the initial state of the population and therefore does
+        not represent an iterative step of the optimization algorithm itself.
+
+        At the beginning of each iteration, the current iteration number is
+        registered in the backend state and the algorithm's ``pre_iteration``
+        method is called. This stage is responsible for the pre-iteration
+        processing of the algorithm, including, primarily, the creation and
+        destruction of dynamic particles during the optimization process.
+
+        After the pre-iteration processing, any new particles identified by
+        the algorithm are initialized using the parallel execution mechanism
+        and incorporated into the population. For iterations greater than
+        zero, the particles belonging to the current population are then
+        processed in parallel to update their state, and the resulting
+        particles are incorporated into the population.
+
+        Once the particle states have been updated, the algorithm's
+        ``post_iteration`` method is called. This stage consolidates the
+        results obtained from the particles during the iteration, including
+        the evaluation of the cost-function values for their candidate
+        solutions and the corresponding update of the optimization state.
+
+        After all ``n_iter + 1`` iterations have been completed, the final
+        optimization result is updated from the best solution obtained by
+        the algorithm.
         """
 
     def initialize_context(
