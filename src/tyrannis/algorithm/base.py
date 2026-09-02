@@ -142,10 +142,11 @@ class ParticleBase(ABC):
         self._candidate_variables = None
         self._candidate_fitness = None
 
-    def get_result_data(self):
+    def get_result_data(self) -> dict[str, str | float | dict[str, float]] | None:
         if self._fitness is None:
             return
         return {
+            "identifier": self._identifier,
             "fitness": float(self._fitness),
             "variables": {key: float(value) for key, value in self._variables.items()},
         }
