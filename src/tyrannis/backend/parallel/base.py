@@ -22,6 +22,10 @@ class ParallelBackendBase(ABC):
         algorithm or to the optimization process itself must not be defined
         here.
 
+        The backend identifier must also be set during initialization.
+        The identifier must uniquely represent the backend instance within
+        the optimization execution.
+
         For example, a Spark-based backend may receive a SparkSession,
         while other implementations may receive backend-specific resources
         such as an MPI communicator, a Ray context, or a Dask client.
@@ -56,6 +60,15 @@ class ParallelBackendBase(ABC):
             cost_function_wrapper=self._cost_function_wrapper,
             seed=seed,
         )
+
+    def init_particles(self) -> None:
+        if self._algorithm.population:
+            return
+
+        for p_idx in range(self._n_particles):
+            self._algorithm.create_particle(
+                identifier=f"{self._identifier}|particle:{p_idx}",
+            )
 
     def update_result(self) -> None:
         if self._algorithm.local_best is None:

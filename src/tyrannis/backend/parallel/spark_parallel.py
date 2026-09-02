@@ -74,18 +74,6 @@ class SparkParallel(ParallelBackendBase):
 
         self.update_result()
 
-    def init_particles(self) -> None:
-        """
-        Create the initial population on the driver.
-        """
-        if self._algorithm.population:
-            return
-
-        for p_idx in range(self._n_particles):
-            self._algorithm.create_particle(
-                identifier=f"SparkParallel|particle:{p_idx}",
-            )
-
     def _parallel_initialize_particles(
         self,
         particle_ids: list[str],
@@ -116,7 +104,6 @@ class SparkParallel(ParallelBackendBase):
             return []
 
         serialized_algorithm = cloudpickle.dumps(self._algorithm)
-
         particles_df = self._spark.createDataFrame(
             [(particle_id,) for particle_id in particle_ids],
             ["particle_id"],
@@ -140,7 +127,6 @@ class SparkParallel(ParallelBackendBase):
         )
 
         rows = result_df.collect()
-
         particles: list[ParticleBase] = []
 
         for row in rows:
