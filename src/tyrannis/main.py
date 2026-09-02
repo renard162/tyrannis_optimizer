@@ -92,12 +92,17 @@ def distributed_test():
     # executor = next(iter(processor.processors_pool.values()))
     # executor.initialize_execution_context()
 
-    # spark = generate_spark_session()
-    # backend = SparkDistributed(
-    #     spark=spark,
-    #     processor=processor,
-    #     n_executors=3,
-    # )
+    spark = generate_spark_session()
+    backend = SparkDistributed(
+        spark=spark,
+        n_executors=3,
+    )
+    backend.initialize_context(
+        algorithm=algo,
+        n_iter=30,
+        n_particles=15,
+        processor=processor,
+    )
 
     start = perf_counter()
     # executor.run()

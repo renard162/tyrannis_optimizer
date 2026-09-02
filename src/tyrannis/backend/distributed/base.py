@@ -1,11 +1,12 @@
-from ...algorithm.base import ParticleBase
+import numpy as np
+
 from ..base import BackendBase
 
 
 class DistributedBackendBase(BackendBase):
     """Base class for distributed optimization backends."""
 
-    _local_bests: dict[str, float | dict[str, float]]
+    _local_bests: dict[str, dict[str, float | dict[str, float]] | None]
     _n_executors: int
 
     def init_processors(self) -> None:
@@ -17,4 +18,23 @@ class DistributedBackendBase(BackendBase):
         )
 
     def update_result(self) -> None:
-        return
+        best_candidate = None
+        best_fitness = np.inf
+
+        for candidate in self._local_bests.values():
+            if candidate is None:
+                continue
+
+            fitness = candidate["fitness"]
+
+            if not isinstance(fitness, float):
+                continue
+
+            if fitness < best_fitness:
+                best_fitness = fitness
+                best_candidate = candidate
+
+        if best_candidate is None:
+            return
+
+        self._result = best_candidate

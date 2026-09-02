@@ -39,10 +39,7 @@ class SparkDistributed(DistributedBackendBase):
         if self._processor is None:
             raise RuntimeError("Processor cannot be None.")
 
-        self._processor.create_processors_pool(
-            self._n_executors,
-        )
-
+        self._processor.create_processors_pool(self._n_executors)
         spark_context = self._spark.sparkContext
         processors = spark_context.parallelize(
             list(self._processor.processors_pool.values()),
@@ -54,6 +51,7 @@ class SparkDistributed(DistributedBackendBase):
         ).collect()
 
         self._local_bests = dict(results)
+        self.update_result()
 
     def _get_n_executors(self) -> int:
         jsc = cast(Any, self._spark.sparkContext._jsc)

@@ -89,7 +89,7 @@ class BackendBase(ABC):
         self._fitness_failure_strategy = fitness_failure_strategy
         self._seed = seed
 
-        self._result: dict[str, float | None | dict[str, float]] | None = None
+        self._result: dict[str, float | dict[str, float]] | None = None
         self._algorithm.configure(
             identifier=f"{self._identifier}|algorithm",
             cost_function_wrapper=self._cost_function_wrapper,
