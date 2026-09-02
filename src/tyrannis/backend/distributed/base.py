@@ -38,5 +38,7 @@ class DistributedBackendBase(BackendBase):
             return
 
         self._result = {
-            key: value for key, value in best_candidate if key in self._result_keys
+            key: value
+            for key, value in best_candidate.items()
+            if key in self._result_keys
         }
