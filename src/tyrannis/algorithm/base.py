@@ -138,7 +138,7 @@ class ParticleBase(ABC):
             return
         return {
             "fitness": float(self._fitness),
-            "variables": self._variables.copy(),
+            "variables": {key: float(value) for key, value in self._variables.items()},
         }
 
 
