@@ -63,5 +63,9 @@ class ParallelBackendBase(ABC):
         self._result = self._algorithm.local_best.get_result_data()
 
     @property
+    def identifier(self):
+        return self._identifier
+
+    @property
     def result(self):
         return self._result

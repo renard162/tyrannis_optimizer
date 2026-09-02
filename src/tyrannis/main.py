@@ -56,7 +56,7 @@ def parallel_test():
     backend = SparkParallel(spark)
     backend.initialize_context(
         algorithm=algo,
-        n_iter=5,  # 30,
+        n_iter=3,  # 30,
         n_particles=10,  # 500,
         seed=42,
     )
