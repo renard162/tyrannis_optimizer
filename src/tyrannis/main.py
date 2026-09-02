@@ -88,9 +88,9 @@ def distributed_test():
         seed=42,
     )
 
-    processor.create_processors_pool(1)
-    executor = next(iter(processor.processors_pool.values()))
-    executor.initialize_execution_context()
+    # processor.create_processors_pool(1)
+    # executor = next(iter(processor.processors_pool.values()))
+    # executor.initialize_execution_context()
 
     # spark = generate_spark_session()
     # backend = SparkDistributed(
@@ -100,8 +100,8 @@ def distributed_test():
     # )
 
     start = perf_counter()
-    executor.run()
-    # backend.execute()
+    # executor.run()
+    backend.execute()
     total_time = perf_counter() - start
 
     print(f"{total_time=}")
@@ -109,5 +109,5 @@ def distributed_test():
 
 
 if __name__ == "__main__":
-    # distributed_test()
-    parallel_test()
+    distributed_test()
+    # parallel_test()
