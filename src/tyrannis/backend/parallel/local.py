@@ -24,11 +24,14 @@ class Local(BackendBase):
         executor.run()
         self._global_best_data = executor.local_best
         self._processor.update_processors_pool([executor])
+        self.update_result()
 
     def update_result(self) -> None:
         if self._global_best_data is None:
             return
         particle_data = json.loads(self._global_best_data)
         self._result = {
-            key: value for key, value in particle_data if key in self._result_keys
+            key: value
+            for key, value in particle_data.items()
+            if key in self._result_keys
         }
