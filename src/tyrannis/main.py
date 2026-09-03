@@ -5,9 +5,11 @@ import numpy as np
 
 from .algorithm import PSO
 from .backend.distributed import SparkDistributed
-from .backend.parallel import SparkParallel
+from .backend.parallel import Local, SparkParallel
 from .backend.processor import ProcessPool, Serial, ThreadsPool
 from .examples.many_local_minima import ackley
+
+# from .backend.distributed.migration import IslandIsolation
 
 
 def generate_spark_session():
@@ -88,15 +90,14 @@ def distributed_test():
         seed=42,
     )
 
-    # processor.create_processors_pool(1)
-    # executor = next(iter(processor.processors_pool.values()))
-    # executor.initialize_execution_context()
+    backend = Local()
 
-    spark = generate_spark_session()
-    backend = SparkDistributed(
-        spark=spark,
-        n_executors=3,
-    )
+    # spark = generate_spark_session()
+    # backend = SparkDistributed(
+    #     spark=spark,
+    #     n_executors=3,
+    # )
+
     backend.initialize_context(
         algorithm=algo,
         n_iter=30,
@@ -105,7 +106,6 @@ def distributed_test():
     )
 
     start = perf_counter()
-    # executor.run()
     backend.execute()
     total_time = perf_counter() - start
 
