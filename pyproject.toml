@@ -20,6 +20,19 @@ spark = [
     "pyarrow==19.0.1", #<===== ALTERAR PARA ">=" PARA RELEASE
 ]
 
+mpi = [
+    "mpi4py==4.1.2", #<===== ALTERAR PARA ">=" PARA RELEASE
+]
+
+# ray = [ #Future implementation
+#     "ray==2.58.0", #<===== ALTERAR PARA ">=" PARA RELEASE
+# ]
+
+# dask = [ #Future implementation
+#     "dask==2026.8.0", #<===== ALTERAR PARA ">=" PARA RELEASE
+#     "distributed==2026.8.0", #<===== ALTERAR PARA ">=" PARA RELEASE
+# ]
+
 [project.scripts]
 tyrannis = "tyrannis:main"
 
