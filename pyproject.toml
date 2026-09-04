@@ -54,3 +54,6 @@ pythonpath = ["tests/unit"]
 
 [tool.coverage.run]
 branch = true
+omit = [
+    "src/tyrannis/examples/*",
+]
