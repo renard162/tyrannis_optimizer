@@ -3,9 +3,9 @@ from typing import Any, cast
 
 from pyspark.sql import SparkSession
 
-from ...algorithm.base import CostFunctionWrapperBase
-from ..processor.base import ProcessorBase
-from .base import DistributedBackendBase
+from ...core.algorithm import CostFunctionWrapperBase
+from ...core.backend_distributed import DistributedBackendBase
+from ...core.processor import ProcessorBase
 
 
 class SparkDistributedCostFunctionWrapper(CostFunctionWrapperBase):

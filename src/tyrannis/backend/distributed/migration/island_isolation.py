@@ -1,4 +1,4 @@
-from .base import MigrationBase
+from ....core.backend_migration import MigrationBase
 
 
 class IslandIsolation(MigrationBase):

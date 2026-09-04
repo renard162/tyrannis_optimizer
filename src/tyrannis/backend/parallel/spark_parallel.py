@@ -8,8 +8,8 @@ from pyspark import cloudpickle
 from pyspark.sql import SparkSession
 from pyspark.sql.types import BinaryType, StructField, StructType
 
-from ...algorithm.base import CostFunctionWrapperBase, ParticleBase
-from .base import ParallelBackendBase
+from ...core.algorithm import CostFunctionWrapperBase, ParticleBase
+from ...core.backend_parallel import ParallelBackendBase
 
 
 class SparkParallelCostFunctionWrapper(CostFunctionWrapperBase):

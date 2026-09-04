@@ -1,6 +1,6 @@
 import json
 
-from ..base import BackendBase
+from .backend import BackendBase
 
 
 class ParallelBackendBase(BackendBase):

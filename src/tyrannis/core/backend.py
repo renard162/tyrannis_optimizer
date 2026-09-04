@@ -1,9 +1,9 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
-from ..algorithm.base import AlgorithmBase, CostFunctionWrapperBase
-from .distributed.migration.base import MigrationBase
-from .processor.base import ProcessorBase
+from .algorithm import AlgorithmBase, CostFunctionWrapperBase
+from .backend_migration import MigrationBase
+from .processor import ProcessorBase
 
 
 class BackendBase(ABC):

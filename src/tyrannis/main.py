@@ -79,8 +79,8 @@ def distributed_test():
         boundaries={f"{n}": (-32.768, 32.768) for n in range(2)},
     )
 
-    # processor = Serial()
-    processor = ThreadsPool()
+    processor = Serial()
+    # processor = ThreadsPool()
     # processor = ProcessPool()
     processor.initialize_context(
         algorithm=algo,
@@ -89,13 +89,13 @@ def distributed_test():
         seed=42,
     )
 
-    backend = Local()
+    # backend = Local()
 
-    # spark = generate_spark_session()
-    # backend = SparkDistributed(
-    #     spark=spark,
-    #     n_executors=3,
-    # )
+    spark = generate_spark_session()
+    backend = SparkDistributed(
+        spark=spark,
+        n_executors=3,
+    )
 
     backend.initialize_context(
         algorithm=algo,
@@ -107,6 +107,8 @@ def distributed_test():
     start = perf_counter()
     backend.execute()
     total_time = perf_counter() - start
+
+    result = None if backend.result is None else backend.result["fitness"]
 
     print(f"{total_time=}")
     print("Breakpoint here")

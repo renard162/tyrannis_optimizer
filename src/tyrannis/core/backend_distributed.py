@@ -1,6 +1,6 @@
 import numpy as np
 
-from ..base import BackendBase
+from .backend import BackendBase
 
 
 class DistributedBackendBase(BackendBase):

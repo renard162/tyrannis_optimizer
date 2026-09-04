@@ -1,7 +1,7 @@
 import json
 
-from ...algorithm.base import CostFunctionWrapperBase
-from ..base import BackendBase
+from ..core.algorithm import CostFunctionWrapperBase
+from ..core.backend import BackendBase
 
 
 class LocalCostFunctionWrapper(CostFunctionWrapperBase):
