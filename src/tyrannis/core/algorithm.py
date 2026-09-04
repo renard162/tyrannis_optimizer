@@ -98,8 +98,10 @@ class ParticleBase(ABC):
         return self._candidate_variables
 
     @candidate_variables.setter
-    def candidate_variables(self) -> dict[str, float] | None:
-        return self._candidate_variables
+    def candidate_variables(
+        self, new_variables: dict[str, float]
+    ) -> dict[str, float] | None:
+        self._candidate_variables = new_variables
 
     @property
     def candidate_fitness(self) -> float | None:
