@@ -58,7 +58,7 @@ def parallel_test():
     backend.initialize_context(
         algorithm=algo,
         n_iter=3,  # 30,
-        n_particles=10,  # 500,
+        n_particles=30,  # 500,
         seed=42,
     )
 
@@ -66,7 +66,7 @@ def parallel_test():
     backend.execute()
     total_time = perf_counter() - start
 
-    results = backend.result
+    results = None if backend.result is None else backend.result["fitness"]
 
     print(f"{total_time=}")
     print("Breakpoint here")
@@ -79,9 +79,9 @@ def distributed_test():
         boundaries={f"{n}": (-32.768, 32.768) for n in range(2)},
     )
 
-    processor = Serial()
+    # processor = Serial()
     # processor = ThreadsPool()
-    # processor = ProcessPool()
+    processor = ProcessPool()
     processor.initialize_context(
         algorithm=algo,
         n_iter=30,
@@ -115,5 +115,5 @@ def distributed_test():
 
 
 if __name__ == "__main__":
-    distributed_test()
-    # parallel_test()
+    # distributed_test()
+    parallel_test()

@@ -20,5 +20,7 @@ class ParallelBackendBase(BackendBase):
             return
         particle_data = json.loads(self._algorithm.local_best.dump())
         self._result = {
-            key: value for key, value in particle_data if key in self._result_keys
+            key: value
+            for key, value in particle_data.items()
+            if key in self._result_keys
         }
