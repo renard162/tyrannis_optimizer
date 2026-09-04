@@ -21,16 +21,16 @@ spark = [
 ]
 
 mpi = [
-    "mpi4py==4.1.2", #<===== ALTERAR PARA ">=" PARA RELEASE
+    "mpi4py>=4.1.2",
 ]
 
 # ray = [ #Future implementation
-#     "ray==2.58.0", #<===== ALTERAR PARA ">=" PARA RELEASE
+#     "ray>=2.58.0",
 # ]
 
 # dask = [ #Future implementation
-#     "dask==2026.8.0", #<===== ALTERAR PARA ">=" PARA RELEASE
-#     "distributed==2026.8.0", #<===== ALTERAR PARA ">=" PARA RELEASE
+#     "dask>=2026.8.0",
+#     "distributed>=2026.8.0",
 # ]
 
 [project.scripts]
