@@ -1,10 +1,7 @@
-import inspect
 import json
 
 import pytest
 from doubles.algorithm import DummyParticle
-
-from tyrannis.core.algorithm import ParticleBase
 
 
 def test_particle_state_and_properties() -> None:
@@ -156,5 +153,23 @@ def test_consolidate_can_reject_candidate() -> None:
     assert particle.variables == {"x": 1.0}
     assert particle.fitness == 1.0
     assert particle.new_particle is False
+    assert particle.candidate_variables is None
+    assert particle.candidate_fitness is None
+
+
+def test_consolidate_new_particle_with_fitness() -> None:
+    particle = DummyParticle(
+        identifier="particle",
+        variables={"x": 1.0},
+        fitness=10.0,
+    )
+
+    assert particle.new_particle
+
+    particle.consolidate(consolidate_new=True)
+
+    assert not particle.new_particle
+    assert particle.variables == {"x": 1.0}
+    assert particle.fitness == 10.0
     assert particle.candidate_variables is None
     assert particle.candidate_fitness is None

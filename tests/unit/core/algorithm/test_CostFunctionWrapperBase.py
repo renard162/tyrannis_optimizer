@@ -1,8 +1,4 @@
-import inspect
-
 from doubles.algorithm import DummyCostFunctionWrapper
-
-from tyrannis.core.algorithm import CostFunctionWrapperBase
 
 
 def test_call_forwards_arguments_to_function() -> None:
