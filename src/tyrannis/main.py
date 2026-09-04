@@ -4,9 +4,11 @@ from time import perf_counter, sleep
 import numpy as np
 
 from .algorithm import PSO
-from .backend import Local, SparkDistributed, SparkParallel
+from .backend import SparkDistributed, SparkParallel
+from .backend.local import Local
 from .backend.migration import IslandIsolation
-from .backend.processor import ProcessPool, Serial, ThreadsPool
+from .backend.processor import ProcessPool, ThreadsPool
+from .backend.processor.serial import Serial
 from .examples.many_local_minima import ackley
 
 
