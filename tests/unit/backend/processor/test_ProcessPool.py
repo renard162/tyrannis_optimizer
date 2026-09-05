@@ -104,14 +104,14 @@ def test_stop_signal_manager_signal_requires_initialization() -> None:
         RuntimeError,
         match="Manager signal has not been initialized",
     ):
-        signal.manager_signal
+        signal.manager_signal  # noqa: B018
 
 
 def test_init() -> None:
     processor = ProcessPool()
 
     assert processor._n_process is None
-    assert processor._multiprocessing_context is None
+    assert processor._multiprocessing_context == "spawn"
     assert processor._maxtasksperchild is None
     assert processor._chunksize is None
     assert processor._cost_function_wrapper is ProcessPoolCostFunctionWrapper
