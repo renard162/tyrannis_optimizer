@@ -1,5 +1,5 @@
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from threading import Event
 
 import pytest
@@ -9,7 +9,6 @@ from tyrannis.backend.distributed.communication.spark_communication import (
     SparkCommunicationProcessor,
 )
 from tyrannis.core.processor import LocalEvent
-
 
 HOST = "127.0.0.1"
 PORT = 5000
@@ -37,23 +36,16 @@ def wait_for(
     )
 
 
-def connect_processor(
-    processor: SparkCommunicationProcessor,
-    island_id: str,
-) -> None:
-    assert processor._socket is not None
-
-    processor._socket.sendall(
-        island_id.encode("utf-8"),
-    )
-
-
 @pytest.fixture
-def communication() -> tuple[
-    SparkCommunicationDriver,
-    SparkCommunicationProcessor,
-    LocalEvent,
-    LocalEvent,
+def communication() -> Generator[
+    tuple[
+        SparkCommunicationDriver,
+        SparkCommunicationProcessor,
+        LocalEvent,
+        LocalEvent,
+    ],
+    None,
+    None,
 ]:
     driver_stop_signal = Event()
     wait_signal = LocalEvent()
@@ -68,6 +60,7 @@ def communication() -> tuple[
     processor = SparkCommunicationProcessor(
         driver_ip=HOST,
         port=PORT,
+        identification=FIRST_ISLAND,
     )
 
     driver.start()
@@ -75,11 +68,6 @@ def communication() -> tuple[
     processor.start(
         wait_signal=wait_signal,
         stop_signal=stop_signal,
-    )
-
-    connect_processor(
-        processor,
-        FIRST_ISLAND,
     )
 
     wait_for(
@@ -125,7 +113,7 @@ def test_client_sends_message_to_driver(
     message = "message-from-client"
 
     processor._socket.sendall(
-        message.encode("utf-8"),
+        (processor.STX + message + processor.ETX).encode("utf-8"),
     )
 
     wait_for(
@@ -179,11 +167,13 @@ def test_two_clients_connect_to_driver() -> None:
     first = SparkCommunicationProcessor(
         driver_ip=HOST,
         port=PORT,
+        identification=FIRST_ISLAND,
     )
 
     second = SparkCommunicationProcessor(
         driver_ip=HOST,
         port=PORT,
+        identification=SECOND_ISLAND,
     )
 
     driver.start()
@@ -199,16 +189,6 @@ def test_two_clients_connect_to_driver() -> None:
     )
 
     try:
-        connect_processor(
-            first,
-            FIRST_ISLAND,
-        )
-
-        connect_processor(
-            second,
-            SECOND_ISLAND,
-        )
-
         wait_for(
             lambda: (
                 set(driver._connections)
@@ -249,11 +229,13 @@ def test_messages_are_routed_to_correct_clients() -> None:
     first = SparkCommunicationProcessor(
         driver_ip=HOST,
         port=PORT,
+        identification=FIRST_ISLAND,
     )
 
     second = SparkCommunicationProcessor(
         driver_ip=HOST,
         port=PORT,
+        identification=SECOND_ISLAND,
     )
 
     driver.start()
@@ -269,16 +251,6 @@ def test_messages_are_routed_to_correct_clients() -> None:
     )
 
     try:
-        connect_processor(
-            first,
-            FIRST_ISLAND,
-        )
-
-        connect_processor(
-            second,
-            SECOND_ISLAND,
-        )
-
         wait_for(
             lambda: (
                 set(driver._connections)
@@ -325,8 +297,6 @@ def test_multiple_messages_are_queued_in_order(
     ],
 ) -> None:
     driver, processor, _, _ = communication
-
-    assert processor._socket is not None
 
     messages = [
         "message-1",
@@ -413,11 +383,13 @@ def test_driver_stop_signal_is_sent_to_all_clients() -> None:
     first = SparkCommunicationProcessor(
         driver_ip=HOST,
         port=PORT,
+        identification=FIRST_ISLAND,
     )
 
     second = SparkCommunicationProcessor(
         driver_ip=HOST,
         port=PORT,
+        identification=SECOND_ISLAND,
     )
 
     driver.start()
@@ -433,16 +405,6 @@ def test_driver_stop_signal_is_sent_to_all_clients() -> None:
     )
 
     try:
-        connect_processor(
-            first,
-            FIRST_ISLAND,
-        )
-
-        connect_processor(
-            second,
-            SECOND_ISLAND,
-        )
-
         wait_for(
             lambda: (
                 set(driver._connections)
