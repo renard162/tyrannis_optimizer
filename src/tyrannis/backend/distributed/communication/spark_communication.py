@@ -14,11 +14,17 @@ class SparkCommunicationProcessor:
 
     STX: Final[str] = "\x02"
     ETX: Final[str] = "\x03"
-    STOP: Final[str] = "\x04"
+    EOT: Final[str] = "\x04"
 
-    def __init__(self, driver_ip: str, port: int) -> None:
+    def __init__(
+        self,
+        driver_ip: str,
+        port: int,
+        identification: str,
+    ) -> None:
         self._driver_ip = driver_ip
         self._port = port
+        self._identification = identification
 
         self._socket: socket.socket | None = None
         self._thread: Thread | None = None
@@ -30,11 +36,17 @@ class SparkCommunicationProcessor:
 
         self._messages: Queue[str] = Queue()
 
+        self._receive_buffer = ""
+
     @property
     def messages(self) -> Queue[str]:
         return self._messages
 
-    def start(self, wait_signal: LocalEvent, stop_signal: LocalEvent) -> None:
+    def start(
+        self,
+        wait_signal: LocalEvent,
+        stop_signal: LocalEvent,
+    ) -> None:
         if self._thread is not None and self._thread.is_alive():
             raise RuntimeError("Communication is already running.")
 
@@ -45,6 +57,8 @@ class SparkCommunicationProcessor:
         self._socket.connect((self._driver_ip, self._port))
 
         self._running.set()
+
+        self._send_message(self._identification)
 
         self._thread = Thread(
             target=self._receive_loop,
@@ -69,15 +83,14 @@ class SparkCommunicationProcessor:
             self._thread.join()
             self._thread = None
 
+        self._receive_buffer = ""
+
         self._stop_signal = LocalEvent()
         self._wait_signal = LocalEvent()
 
     def _receive_loop(self) -> None:
         if self._socket is None:
             raise RuntimeError("Communication socket is not initialized.")
-
-        if self._wait_signal is None or self._stop_signal is None:
-            raise RuntimeError("Communication signals are not initialized.")
 
         while self._running.is_set():
             try:
@@ -90,20 +103,58 @@ class SparkCommunicationProcessor:
             if not data:
                 break
 
-            self._process_data(data)
+            try:
+                self._receive_buffer += data.decode("utf-8")
+            except UnicodeDecodeError:
+                self._stop_signal.set()
+                break
 
-    def _process_data(self, data: bytes) -> None:
-        message = data.decode("utf-8")
+            self._process_buffer()
 
-        if message == self.ETX:
-            self._wait_signal.set()
-            return
+    def _process_buffer(self) -> None:
+        while self._receive_buffer:
+            eot_position = self._receive_buffer.find(self.EOT)
 
-        if message == self.STOP:
-            self._stop_signal.set()
-            return
+            if eot_position != -1:
+                stx_position = self._receive_buffer.find(self.STX)
 
-        self._messages.put(message)
+                if stx_position == -1 or eot_position < stx_position:
+                    self._receive_buffer = self._receive_buffer[eot_position + 1 :]
+                    self._stop_signal.set()
+                    return
+
+            stx_position = self._receive_buffer.find(self.STX)
+
+            if stx_position == -1:
+                self._receive_buffer = ""
+                return
+
+            if stx_position > 0:
+                self._receive_buffer = self._receive_buffer[stx_position:]
+
+            etx_position = self._receive_buffer.find(
+                self.ETX,
+                len(self.STX),
+            )
+
+            if etx_position == -1:
+                return
+
+            message = self._receive_buffer[len(self.STX) : etx_position]
+
+            self._receive_buffer = self._receive_buffer[etx_position + len(self.ETX) :]
+
+            if message:
+                self._messages.put(message)
+            else:
+                self._wait_signal.set()
+
+    def _send_message(self, message: str) -> None:
+        if self._socket is None:
+            raise RuntimeError("Communication socket is not initialized.")
+
+        data = f"{self.STX}{message}{self.ETX}".encode()
+        self._socket.sendall(data)
 
 
 class SparkCommunicationDriver:
@@ -111,9 +162,14 @@ class SparkCommunicationDriver:
 
     STX: Final[str] = "\x02"
     ETX: Final[str] = "\x03"
-    STOP: Final[str] = "\x04"
+    EOT: Final[str] = "\x04"
 
-    def __init__(self, island_ids: list[str], port: int, stop_signal: Event) -> None:
+    def __init__(
+        self,
+        island_ids: list[str],
+        port: int,
+        stop_signal: Event,
+    ) -> None:
         self._island_ids = set(island_ids)
         self._port = port
         self._stop_signal = stop_signal
@@ -127,6 +183,7 @@ class SparkCommunicationDriver:
         }
 
         self._connections: dict[str, socket.socket] = {}
+        self._receive_buffers: dict[socket.socket, str] = {}
 
         self._server_socket: socket.socket | None = None
         self._selector: selectors.BaseSelector | None = None
@@ -153,13 +210,23 @@ class SparkCommunicationDriver:
 
         self._selector = selectors.DefaultSelector()
 
-        self._server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._server_socket = socket.socket(
+            socket.AF_INET,
+            socket.SOCK_STREAM,
+        )
+        self._server_socket.setsockopt(
+            socket.SOL_SOCKET,
+            socket.SO_REUSEADDR,
+            1,
+        )
         self._server_socket.bind(("", self._port))
         self._server_socket.listen()
         self._server_socket.setblocking(False)
 
-        self._selector.register(self._server_socket, selectors.EVENT_READ)
+        self._selector.register(
+            self._server_socket,
+            selectors.EVENT_READ,
+        )
 
         self._stop_sent = False
         self._running.set()
@@ -172,7 +239,7 @@ class SparkCommunicationDriver:
         self._thread.start()
 
     def stop(self) -> None:
-        """Stop the communication server and close all connections."""
+        """Stop the TCP server and close all connections."""
         self._running.clear()
 
         if self._server_socket is not None:
@@ -194,6 +261,7 @@ class SparkCommunicationDriver:
                 pass
 
         self._connections.clear()
+        self._receive_buffers.clear()
 
         if self._selector is not None:
             self._selector.close()
@@ -234,7 +302,13 @@ class SparkCommunicationDriver:
 
         connection.setblocking(False)
 
-        self._selector.register(connection, selectors.EVENT_READ, data=None)
+        self._receive_buffers[connection] = ""
+
+        self._selector.register(
+            connection,
+            selectors.EVENT_READ,
+            data=None,
+        )
 
     def _receive(self, key: selectors.SelectorKey) -> None:
         connection = key.fileobj
@@ -258,53 +332,109 @@ class SparkCommunicationDriver:
         if self._selector is None:
             raise RuntimeError("Selector is not initialized.")
 
+        if not self._receive_data(connection):
+            return
+
+        for message in self._extract_messages(connection):
+            island_id = message
+
+            if island_id not in self._island_ids:
+                self._close_connection(connection)
+                return
+
+            old_connection = self._connections.get(island_id)
+
+            if old_connection is not None:
+                self._close_connection(old_connection, island_id)
+
+            self._connections[island_id] = connection
+
+            self._selector.modify(
+                connection,
+                selectors.EVENT_READ,
+                data=island_id,
+            )
+
+            return
+
+    def _receive_message(
+        self,
+        connection: socket.socket,
+        island_id: str,
+    ) -> None:
+        if not self._receive_data(connection):
+            return
+
+        for message in self._extract_messages(connection):
+            self._incoming_queues[island_id].put(message)
+
+    def _receive_data(self, connection: socket.socket) -> bool:
         try:
             data = connection.recv(4096)
         except OSError:
             self._close_connection(connection)
-            return
+            return False
 
         if not data:
             self._close_connection(connection)
-            return
+            return False
 
         try:
-            island_id = data.decode("utf-8")
+            self._receive_buffers[connection] += data.decode("utf-8")
         except UnicodeDecodeError:
             self._close_connection(connection)
-            return
+            return False
 
-        if island_id not in self._island_ids:
-            self._close_connection(connection)
-            return
+        return True
 
-        old_connection = self._connections.get(island_id)
+    def _extract_messages(
+        self,
+        connection: socket.socket,
+    ) -> list[str]:
+        buffer = self._receive_buffers[connection]
+        messages: list[str] = []
 
-        if old_connection is not None:
-            self._close_connection(old_connection, island_id)
+        while buffer:
+            eot_position = buffer.find(self.EOT)
 
-        self._connections[island_id] = connection
+            if eot_position != -1:
+                stx_position = buffer.find(self.STX)
 
-        self._selector.modify(connection, selectors.EVENT_READ, data=island_id)
+                if stx_position == -1 or eot_position < stx_position:
+                    buffer = buffer[eot_position + len(self.EOT) :]
+                    self._receive_buffers[connection] = buffer
+                    self._handle_stop()
+                    break
 
-    def _receive_message(self, connection: socket.socket, island_id: str) -> None:
-        try:
-            data = connection.recv(4096)
-        except OSError:
-            self._close_connection(connection, island_id)
-            return
+            stx_position = buffer.find(self.STX)
 
-        if not data:
-            self._close_connection(connection, island_id)
-            return
+            if stx_position == -1:
+                buffer = ""
+                break
 
-        try:
-            message = data.decode("utf-8")
-        except UnicodeDecodeError:
-            self._close_connection(connection, island_id)
-            return
+            if stx_position > 0:
+                buffer = buffer[stx_position:]
 
-        self._incoming_queues[island_id].put(message)
+            etx_position = buffer.find(
+                self.ETX,
+                len(self.STX),
+            )
+
+            if etx_position == -1:
+                break
+
+            message = buffer[len(self.STX) : etx_position]
+
+            messages.append(message)
+
+            buffer = buffer[etx_position + len(self.ETX) :]
+
+        self._receive_buffers[connection] = buffer
+
+        return messages
+
+    def _handle_stop(self) -> None:
+        self._stop_signal.set()
 
     def _send_pending_messages(self) -> None:
         for island_id, queue in self._outgoing_queues.items():
@@ -320,16 +450,22 @@ class SparkCommunicationDriver:
                     break
 
                 try:
-                    connection.sendall(message.encode("utf-8"))
+                    data = f"{self.STX}{message}{self.ETX}".encode()
+                    connection.sendall(data)
                 except OSError:
                     queue.put(message)
-                    self._close_connection(connection, island_id)
+                    self._close_connection(
+                        connection,
+                        island_id,
+                    )
                     break
 
     def _send_stop_to_all(self) -> None:
-        data = self.STOP.encode("utf-8")
+        data = self.EOT.encode("utf-8")
 
-        for island_id, connection in list(self._connections.items()):
+        for island_id, connection in list(
+            self._connections.items(),
+        ):
             try:
                 connection.sendall(data)
             except OSError:
@@ -350,6 +486,8 @@ class SparkCommunicationDriver:
             connection.close()
         except OSError:
             pass
+
+        self._receive_buffers.pop(connection, None)
 
         if island_id is not None:
             self._connections.pop(island_id, None)
