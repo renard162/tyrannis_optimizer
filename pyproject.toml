@@ -52,7 +52,8 @@ testpaths = [
     "tests/unit",
     "tests/integration",
 ]
-pythonpath = ["tests/unit"]
+pythonpath = ["tests"]
+addopts = "--import-mode=importlib"
 # addopts = "--cov=tyrannis --cov-report=term-missing"
 
 [tool.coverage.run]
