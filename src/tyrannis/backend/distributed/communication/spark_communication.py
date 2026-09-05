@@ -6,10 +6,14 @@ from queue import Empty, Queue
 from threading import Event, Thread
 from typing import Final
 
+from ....core.backend_communication import (
+    CommunicationDriverBase,
+    CommunicationProcessorBase,
+)
 from ....core.processor import LocalEvent
 
 
-class SparkCommunicationProcessor:
+class SparkCommunicationProcessor(CommunicationProcessorBase):
     """TCP communication layer for a processor."""
 
     STX: Final[str] = "\x02"
@@ -214,7 +218,7 @@ class SparkCommunicationProcessor:
         self._socket.sendall(data)
 
 
-class SparkCommunicationDriver:
+class SparkCommunicationDriver(CommunicationDriverBase):
     """TCP communication layer for the driver."""
 
     STX: Final[str] = "\x02"
@@ -225,7 +229,7 @@ class SparkCommunicationDriver:
         self,
         island_ids: list[str],
         port: int,
-        stop_signal: Event,
+        stop_signal: LocalEvent,
     ) -> None:
         self._island_ids = set(island_ids)
         self._port = port

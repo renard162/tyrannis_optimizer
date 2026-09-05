@@ -6,7 +6,7 @@ from queue import Queue
 from ..core.processor import LocalEvent
 
 
-class CommunicationProcessor(ABC):
+class CommunicationProcessorBase(ABC):
     """Abstract interface for the processor communication layer."""
 
     @abstractmethod
@@ -170,7 +170,7 @@ class CommunicationProcessor(ABC):
         raise NotImplementedError
 
 
-class CommunicationDriver(ABC):
+class CommunicationDriverBase(ABC):
     """Abstract interface for the driver communication layer."""
 
     @abstractmethod
