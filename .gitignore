@@ -219,3 +219,4 @@ __marimo__/
 
 # Project
 pytest-cov.bat
+clear-cache.bat
