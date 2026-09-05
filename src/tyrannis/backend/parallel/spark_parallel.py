@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -27,11 +28,16 @@ class SparkParallel(ParallelBackendBase):
         ]
     )
 
-    def __init__(self, spark: SparkSession) -> None:
+    def __init__(
+        self,
+        spark: SparkSession,
+        code_archive: str | Path | None = None,
+    ) -> None:
         if spark is None:
             raise ValueError("Spark session cannot be None.")
 
         self._spark = spark
+        self._code_archive = Path(code_archive) if code_archive is not None else None
         self._actual_iter = -1
 
         self._identifier = "SparkParallel"
@@ -49,6 +55,16 @@ class SparkParallel(ParallelBackendBase):
         return self._algorithm.local_best.dump()
 
     def execute(self) -> None:
+        if self._code_archive is not None:
+            if not self._code_archive.is_file():
+                raise FileNotFoundError(
+                    f"Spark code archive not found: {self._code_archive}"
+                )
+
+            self._spark.sparkContext.addPyFile(
+                str(self._code_archive),
+            )
+
         self.init_particles()
 
         for actual_iter in range(self._n_iter + 1):

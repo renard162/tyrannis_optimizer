@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from typing import Any, cast
 
 from pyspark.sql import SparkSession
@@ -19,11 +20,13 @@ class SparkDistributed(DistributedBackendBase):
         self,
         spark: SparkSession,
         n_executors: int | None = None,
+        code_archive: str | Path | None = None,
     ) -> None:
         if spark is None:
             raise ValueError("Spark session cannot be None.")
 
         self._spark = spark
+        self._code_archive = Path(code_archive) if code_archive is not None else None
 
         if n_executors is None:
             self._n_executors = self._get_n_executors()
@@ -39,7 +42,18 @@ class SparkDistributed(DistributedBackendBase):
         if self._processor is None:
             raise RuntimeError("Processor cannot be None.")
 
+        if self._code_archive is not None:
+            if not self._code_archive.is_file():
+                raise FileNotFoundError(
+                    f"Spark code archive not found: {self._code_archive}"
+                )
+
+            self._spark.sparkContext.addPyFile(
+                str(self._code_archive),
+            )
+
         self._processor.create_processors_pool(self._n_executors)
+
         spark_context = self._spark.sparkContext
         processors = spark_context.parallelize(
             list(self._processor.processors_pool.values()),
