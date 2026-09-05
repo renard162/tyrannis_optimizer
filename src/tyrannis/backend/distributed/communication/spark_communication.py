@@ -12,8 +12,9 @@ from ....core.processor import LocalEvent
 class SparkCommunicationProcessor:
     """TCP communication layer for a processor."""
 
-    EOT: Final[str] = "\x04"
-    STOP: Final[str] = "\x03"
+    STX: Final[str] = "\x02"
+    ETX: Final[str] = "\x03"
+    STOP: Final[str] = "\x04"
 
     def __init__(self, driver_ip: str, port: int) -> None:
         self._driver_ip = driver_ip
@@ -94,7 +95,7 @@ class SparkCommunicationProcessor:
     def _process_data(self, data: bytes) -> None:
         message = data.decode("utf-8")
 
-        if message == self.EOT:
+        if message == self.ETX:
             self._wait_signal.set()
             return
 
@@ -108,8 +109,9 @@ class SparkCommunicationProcessor:
 class SparkCommunicationDriver:
     """TCP communication layer for the driver."""
 
-    EOT: Final[str] = "\x04"
-    STOP: Final[str] = "\x03"
+    STX: Final[str] = "\x02"
+    ETX: Final[str] = "\x03"
+    STOP: Final[str] = "\x04"
 
     def __init__(self, island_ids: list[str], port: int, stop_signal: Event) -> None:
         self._island_ids = set(island_ids)
