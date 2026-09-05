@@ -111,7 +111,9 @@ class ProcessPool(ProcessorBase):
             raise ValueError("chunksize must be greater than zero.")
 
         self._n_process = n_process
-        self._multiprocessing_context = multiprocessing_context
+        self._multiprocessing_context = "spawn"
+        if multiprocessing_context is not None:
+            self._multiprocessing_context = multiprocessing_context
         self._maxtasksperchild = maxtasksperchild
         self._chunksize = chunksize
 
