@@ -28,11 +28,13 @@ def spark() -> Generator[SparkSession, None, None]:
         if sys.platform == "win32":
             raise RuntimeError(
                 "Unable to create the Spark session.\n\n"
-                "Spark integration tests on Windows require a Spark "
-                "environment running in WSL.\n"
-                "Start the Tyrannis Spark cluster in WSL and ensure that "
-                "the Spark master is available at "
-                "spark://172.22.76.60:7077."
+                "Spark integration tests on Windows require a fully functional "
+                "Spark environment running in WSL.\n"
+                "Start the Tyrannis Spark cluster in WSL and ensure that the "
+                "Spark master is available at spark://172.22.76.60:7077.\n\n"
+                "The Spark environment must be fully operational and use the same "
+                "Python version and the same Python packages and package versions "
+                "as the driver's Python environment."
             ) from exc
 
         raise
