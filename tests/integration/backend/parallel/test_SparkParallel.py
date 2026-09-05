@@ -1,17 +1,9 @@
-import sys
-
 import numpy as np
-import pytest
 from doubles.cost_functions import sphere
 from pyspark.sql import SparkSession
 
 from tyrannis.algorithm.pso import PSO
 from tyrannis.backend.parallel.spark_parallel import SparkParallel
-
-pytestmark = pytest.mark.skipif(
-    sys.platform != "linux",
-    reason="Spark integration tests are only supported on Linux.",
-)
 
 N_ITER = 2
 N_PARTICLES = 20
@@ -21,24 +13,6 @@ BOUNDARIES = {
     "x": (-5.12, 5.12),
     "y": (-5.12, 5.12),
 }
-
-
-@pytest.fixture(scope="module")
-def spark() -> SparkSession:  # type: ignore
-    session = (
-        SparkSession.builder.master("local[2]")
-        .appName("tyrannis-test")
-        .config("spark.ui.enabled", "false")
-        .config("spark.pyspark.python", sys.executable)
-        .config("spark.pyspark.driver.python", sys.executable)
-        .getOrCreate()
-    )
-
-    session.sparkContext.setLogLevel("ERROR")
-
-    yield session  # type: ignore
-
-    session.stop()
 
 
 def create_backend(
