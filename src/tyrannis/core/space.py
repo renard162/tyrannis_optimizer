@@ -122,6 +122,26 @@ class SpaceBase(ABC):
         """
         raise NotImplementedError
 
+    @property
+    @abstractmethod
+    def is_kargs(self) -> bool:
+        """
+        Identify whether the user-provided search space can be used as keyword
+        arguments when calling the cost function.
+
+        Returns
+        -------
+        bool
+            ``True`` when the search-space representation can be used as keyword
+            arguments, or ``False`` otherwise.
+
+        Raises
+        ------
+        NotImplementedError
+            This property must be implemented by concrete search-space classes.
+        """
+        raise NotImplementedError
+
     def __call__(self, float_inputs: dict[str, float]) -> float:
         if self._cost_function is None:
             raise ValueError("cost_function cannot be None.")
