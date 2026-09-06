@@ -1,32 +1,33 @@
 import inspect
+from typing import Any
 
 from doubles.algorithm import DummyAlgorithm
 from doubles.backend import DummyBackend
 from doubles.processor import DummyProcessor
 
 from tyrannis.core.backend import BackendBase
+from tyrannis.core.backend_migration import MigrationDriverBase
 
 
-def create_backend() -> DummyBackend:
-    backend = DummyBackend()
+class DummyMigration(MigrationDriverBase):
+    _processor_class = None  # type: ignore
+    _communication_driver = None  # type: ignore
+    _communication_processor_class = None  # type: ignore
 
-    algorithm = DummyAlgorithm()
-    algorithm.initialize_context(
-        fitness_function=lambda variables: sum(variables.values()),
-        boundaries={"x": (-1.0, 1.0)},
-    )
+    def __init__(self, initial_iter: int = 1, *args: Any, **kwargs: Any) -> None:
+        self._migration_processor_init_kargs = {
+            "initial_iter": initial_iter,
+        }
 
-    processor = DummyProcessor()
+    def start(self) -> None:
+        pass
 
-    backend.initialize_context(
-        algorithm=algorithm,
-        n_iter=10,
-        n_particles=20,
-        processor=processor,
-        seed=42,
-    )
+    def stop(self) -> None:
+        pass
 
-    return backend
+
+def create_migration() -> DummyMigration:
+    return DummyMigration()
 
 
 def create_algorithm() -> DummyAlgorithm:
@@ -40,15 +41,36 @@ def create_algorithm() -> DummyAlgorithm:
     return algorithm
 
 
-def test_initialize_context() -> None:
+def create_backend() -> DummyBackend:
     backend = DummyBackend()
+
     algorithm = create_algorithm()
     processor = DummyProcessor()
+    migration = create_migration()
 
     backend.initialize_context(
         algorithm=algorithm,
         n_iter=10,
         n_particles=20,
+        migration=migration,
+        processor=processor,
+        seed=42,
+    )
+
+    return backend
+
+
+def test_initialize_context() -> None:
+    backend = DummyBackend()
+    algorithm = create_algorithm()
+    processor = DummyProcessor()
+    migration = create_migration()
+
+    backend.initialize_context(
+        algorithm=algorithm,
+        n_iter=10,
+        n_particles=20,
+        migration=migration,
         processor=processor,
         seed=42,
     )
@@ -56,8 +78,8 @@ def test_initialize_context() -> None:
     assert backend._algorithm is algorithm
     assert backend._n_iter == 10
     assert backend._n_particles == 20
+    assert backend._migration is migration
     assert backend._processor is processor
-    assert backend._migration is None
     assert backend._fitness_failure_strategy == "invalidate"
     assert backend._seed == 42
     assert backend._result is None

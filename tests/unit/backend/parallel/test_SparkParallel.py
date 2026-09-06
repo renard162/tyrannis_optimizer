@@ -1,3 +1,5 @@
+from unittest.mock import Mock
+
 import cloudpickle
 import numpy as np
 import pandas as pd
@@ -9,6 +11,7 @@ from tyrannis.backend.parallel.spark_parallel import (
     SparkParallelCostFunctionWrapper,
     _process_particle_batches,
 )
+from tyrannis.core.backend_migration import MigrationDriverBase
 
 
 class DummySparkDataFrame:
@@ -77,12 +80,14 @@ class DummySparkSession:
         )
 
 
+def create_migration() -> Mock:
+    return Mock(spec=MigrationDriverBase)
+
+
 def create_failing_algorithm() -> DummyAlgorithm:
     algorithm = DummyAlgorithm()
 
-    def failing_fitness(
-        variables: dict[str, float],
-    ) -> float:
+    def failing_fitness(variables: dict[str, float]) -> float:
         raise RuntimeError("fitness failure")
 
     algorithm.initialize_context(
@@ -178,9 +183,7 @@ def test_init_rejects_none_spark() -> None:
 
 
 def test_actual_iter() -> None:
-    backend = SparkParallel(
-        DummySparkSession(),  # type: ignore
-    )
+    backend = SparkParallel(DummySparkSession())  # type: ignore
 
     assert backend.actual_iter == -1
 
@@ -191,36 +194,38 @@ def test_actual_iter() -> None:
 
 def test_local_best_is_empty_without_solution() -> None:
     algorithm = create_algorithm()
+    migration = create_migration()
 
-    backend = SparkParallel(
-        DummySparkSession(),  # type: ignore
-    )
+    backend = SparkParallel(DummySparkSession())  # type: ignore
 
     backend.initialize_context(
         algorithm=algorithm,
         n_iter=1,
         n_particles=1,
+        migration=migration,
     )
 
     assert backend.local_best == ""
 
 
 def test_initialize_context() -> None:
+    spark = DummySparkSession()
     algorithm = create_algorithm()
+    migration = create_migration()
 
-    backend = SparkParallel(
-        DummySparkSession(),  # type: ignore
-    )
+    backend = SparkParallel(spark)  # type: ignore
 
     backend.initialize_context(
         algorithm=algorithm,
         n_iter=5,
         n_particles=10,
+        migration=migration,
         fitness_failure_strategy="raise",
         seed=42,
     )
 
     assert backend._algorithm is algorithm
+    assert backend._migration is migration
     assert backend._n_iter == 5
     assert backend._n_particles == 10
     assert backend._fitness_failure_strategy == "raise"
@@ -233,6 +238,7 @@ def test_execute_distributes_code_archive(tmp_path) -> None:
 
     spark = DummySparkSession()
     algorithm = create_algorithm()
+    migration = create_migration()
 
     backend = SparkParallel(
         spark,  # type: ignore
@@ -243,18 +249,18 @@ def test_execute_distributes_code_archive(tmp_path) -> None:
         algorithm=algorithm,
         n_iter=0,
         n_particles=1,
+        migration=migration,
     )
 
     backend.execute()
 
-    assert spark.sparkContext.added_py_files == [
-        str(archive),
-    ]
+    assert spark.sparkContext.added_py_files == [str(archive)]
 
 
 def test_execute_without_code_archive_does_not_distribute_file() -> None:
     spark = DummySparkSession()
     algorithm = create_algorithm()
+    migration = create_migration()
 
     backend = SparkParallel(spark)  # type: ignore
 
@@ -262,6 +268,7 @@ def test_execute_without_code_archive_does_not_distribute_file() -> None:
         algorithm=algorithm,
         n_iter=0,
         n_particles=1,
+        migration=migration,
     )
 
     backend.execute()
@@ -287,15 +294,15 @@ def test_execute_rejects_missing_code_archive(tmp_path) -> None:
 def test_parallel_initialize_particles() -> None:
     spark = DummySparkSession()
     algorithm = create_algorithm()
+    migration = create_migration()
 
-    backend = SparkParallel(
-        spark,  # type: ignore
-    )
+    backend = SparkParallel(spark)  # type: ignore
 
     backend.initialize_context(
         algorithm=algorithm,
         n_iter=1,
         n_particles=1,
+        migration=migration,
     )
 
     particles = backend._parallel_initialize_particles(
@@ -311,15 +318,11 @@ def test_parallel_initialize_particles() -> None:
         0.25,
     )
 
-    assert spark.created_rows == [
-        ("particle:0",),
-    ]
+    assert spark.created_rows == [("particle:0",)]
 
 
 def test_parallel_process_particles_returns_empty_for_empty_input() -> None:
-    backend = SparkParallel(
-        DummySparkSession(),  # type: ignore
-    )
+    backend = SparkParallel(DummySparkSession())  # type: ignore
 
     result = backend._parallel_process_particles(
         particle_ids=[],
@@ -332,22 +335,25 @@ def test_parallel_process_particles_returns_empty_for_empty_input() -> None:
 def test_parallel_update_particles_accepts_population_dict() -> None:
     spark = DummySparkSession()
     algorithm = create_algorithm()
+    migration = create_migration()
 
-    backend = SparkParallel(
-        spark,  # type: ignore
-    )
+    particle = algorithm.population["particle:0"]
+
+    algorithm.initialize_particle("particle:0")
+    algorithm.update_solution_state()
+
+    backend = SparkParallel(spark)  # type: ignore
 
     backend.initialize_context(
         algorithm=algorithm,
         n_iter=1,
         n_particles=1,
+        migration=migration,
     )
-
-    algorithm.initialize_particle("particle:0")
 
     particles = backend._parallel_update_particles(
         {
-            "particle:0": algorithm.population["particle:0"],
+            particle.identifier: particle,
         }
     )
 
@@ -359,9 +365,7 @@ def test_parallel_update_particles_accepts_population_dict() -> None:
 def test_process_particle_batches_initializes_particles() -> None:
     algorithm = create_algorithm()
 
-    serialized_algorithm = cloudpickle.dumps(
-        algorithm,
-    )
+    serialized_algorithm = cloudpickle.dumps(algorithm)
 
     batches = iter(
         [
@@ -385,9 +389,7 @@ def test_process_particle_batches_initializes_particles() -> None:
     assert len(result) == 1
     assert "particles" in result[0]
 
-    particles = cloudpickle.loads(
-        result[0]["particles"].iloc[0],
-    )
+    particles = cloudpickle.loads(result[0]["particles"].iloc[0])
 
     assert len(particles) == 1
     assert particles[0].fitness is not None
@@ -401,9 +403,7 @@ def test_process_particle_batches_initializes_particles() -> None:
 def test_process_particle_batches_invalidates_failed_particle() -> None:
     algorithm = create_failing_algorithm()
 
-    serialized_algorithm = cloudpickle.dumps(
-        algorithm,
-    )
+    serialized_algorithm = cloudpickle.dumps(algorithm)
 
     batches = iter(
         [
@@ -440,9 +440,7 @@ def test_process_particle_batches_invalidates_failed_particle() -> None:
 def test_process_particle_batches_raises_when_requested() -> None:
     algorithm = create_failing_algorithm()
 
-    serialized_algorithm = cloudpickle.dumps(
-        algorithm,
-    )
+    serialized_algorithm = cloudpickle.dumps(algorithm)
 
     batches = iter(
         [

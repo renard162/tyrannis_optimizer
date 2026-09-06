@@ -4,6 +4,7 @@ from unittest.mock import Mock
 from doubles.algorithm import DummyAlgorithm
 
 from tyrannis.backend.local import Local, LocalCostFunctionWrapper
+from tyrannis.backend.migration import IslandIsolation
 
 
 def create_algorithm() -> DummyAlgorithm:
@@ -17,6 +18,10 @@ def create_algorithm() -> DummyAlgorithm:
     )
 
     return algorithm
+
+
+def create_migration() -> IslandIsolation:
+    return IslandIsolation()
 
 
 def test_init() -> None:
@@ -47,6 +52,7 @@ def test_execute() -> None:
         algorithm=algorithm,
         n_iter=1,
         n_particles=1,
+        migration=create_migration(),
         processor=processor,
         seed=42,
     )
@@ -73,6 +79,7 @@ def test_update_result() -> None:
         algorithm=create_algorithm(),
         n_iter=1,
         n_particles=1,
+        migration=create_migration(),
     )
 
     backend._global_best_data = json.dumps(
@@ -100,6 +107,7 @@ def test_update_result_without_global_best() -> None:
         algorithm=create_algorithm(),
         n_iter=1,
         n_particles=1,
+        migration=create_migration(),
     )
 
     backend.update_result()

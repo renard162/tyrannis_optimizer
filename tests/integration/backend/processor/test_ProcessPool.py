@@ -2,7 +2,12 @@ import numpy as np
 from doubles.cost_functions import sphere
 
 from tyrannis.algorithm.pso import PSO
+from tyrannis.backend.distributed.communication.no_communication import (
+    NoCommunicationDriver,
+)
+from tyrannis.backend.migration.island_isolation import IslandIsolation
 from tyrannis.backend.processor.process import ProcessPool
+from tyrannis.core.signals import LocalEvent
 
 N_ITER = 20
 N_PARTICLES = 10
@@ -13,6 +18,23 @@ BOUNDARIES = {
     "x": (-5.12, 5.12),
     "y": (-5.12, 5.12),
 }
+
+
+def create_migration() -> IslandIsolation:
+    migration = IslandIsolation()
+
+    communication_driver = NoCommunicationDriver(
+        island_ids=["island:0"],
+        stop_signal=LocalEvent(),
+    )
+
+    migration.initialize_context(
+        communication_driver=communication_driver,
+        communication_processor_class=None,  # type: ignore
+        communication_processor_kargs={},
+    )
+
+    return migration
 
 
 def create_processor(seed: int = SEED) -> ProcessPool:
@@ -32,6 +54,7 @@ def create_processor(seed: int = SEED) -> ProcessPool:
         algorithm=algorithm,
         n_iter=N_ITER,
         n_particles=N_PARTICLES,
+        migration_driver=create_migration(),
         seed=seed,
     )
 
@@ -47,7 +70,7 @@ def run_processor(seed: int = SEED) -> ProcessPool:
 
     executor.initialize_execution_context()
     executor.run()
-    executor.clear_execution_context()
+    executor.finalize_execution_context()
 
     return executor
 

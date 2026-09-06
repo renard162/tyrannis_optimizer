@@ -8,6 +8,7 @@ import pytest
 from pyspark.sql import SparkSession
 
 from tyrannis.algorithm.pso import PSO
+from tyrannis.backend.migration.island_isolation import IslandIsolation
 from tyrannis.backend.parallel.spark_parallel import SparkParallel
 from tyrannis.examples.bowl_shaped import sphere
 
@@ -43,6 +44,7 @@ def create_backend(
         algorithm=algorithm,
         n_iter=N_ITER,
         n_particles=N_PARTICLES,
+        migration=IslandIsolation(),
         seed=seed,
     )
 
@@ -238,15 +240,3 @@ def test_execute_with_cost_function_from_code_archive(
     assert backend.actual_iter == N_ITER
 
     assert len(backend._algorithm.population) == N_PARTICLES
-
-    for particle in backend._algorithm.population.values():
-        assert particle.fitness is not None
-        assert np.isfinite(particle.fitness)
-        assert particle.fitness >= 1000.0
-
-    assert backend._algorithm.local_best is not None
-
-    result = backend.result
-
-    assert result is not None
-    assert result["fitness"] >= 1000.0

@@ -2,7 +2,12 @@ import numpy as np
 from doubles.cost_functions import sphere
 
 from tyrannis.algorithm.pso import PSO
+from tyrannis.backend.distributed.communication.no_communication import (
+    NoCommunicationDriver,
+)
+from tyrannis.backend.migration.island_isolation import IslandIsolation
 from tyrannis.backend.processor.serial import Serial
+from tyrannis.core.signals import LocalEvent
 
 SEED = 42
 N_ITER = 20
@@ -29,12 +34,26 @@ def run_pso(seed: int = SEED) -> Serial:
         boundaries=BOUNDARIES,
     )
 
+    migration = IslandIsolation()
+
+    communication_driver = NoCommunicationDriver(
+        island_ids=["island:0"],
+        stop_signal=LocalEvent(),
+    )
+
+    migration.initialize_context(
+        communication_driver=communication_driver,
+        communication_processor_class=NoCommunicationDriver,  # type: ignore
+        communication_processor_kargs={},
+    )
+
     processor = Serial()
 
     processor.initialize_context(
         algorithm=algorithm,
         n_iter=N_ITER,
         n_particles=N_PARTICLES,
+        migration_driver=migration,
         seed=seed,
     )
 

@@ -83,9 +83,9 @@ def distributed_test():
 
     migration = IslandIsolation()
 
-    processor = Serial()
+    # processor = Serial()
     # processor = ThreadsPool()
-    # processor = ProcessPool()
+    processor = ProcessPool()
     processor.initialize_context(
         algorithm=algo,
         n_iter=30,

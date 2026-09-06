@@ -1,11 +1,36 @@
+from typing import Any
+
 from doubles.algorithm import DummyAlgorithm
 from doubles.backend import DummyBackend
 
+from tyrannis.core.backend_migration import MigrationDriverBase
 from tyrannis.core.backend_parallel import ParallelBackendBase
+
+
+class DummyMigration(MigrationDriverBase):
+    def __init__(
+        self,
+        initial_iter: int = 1,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        self._migration_processor_init_kargs = {
+            "initial_iter": initial_iter,
+        }
+
+    def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
 
 
 class DummyParallelBackend(ParallelBackendBase, DummyBackend):
     pass
+
+
+def create_migration() -> DummyMigration:
+    return DummyMigration()
 
 
 def create_backend() -> DummyParallelBackend:
@@ -21,6 +46,7 @@ def create_backend() -> DummyParallelBackend:
         algorithm=algorithm,
         n_iter=10,
         n_particles=3,
+        migration=create_migration(),
         seed=42,
     )
 

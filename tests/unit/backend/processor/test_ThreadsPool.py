@@ -4,7 +4,37 @@ from tyrannis.backend.processor.threads import (
     ThreadsPool,
     ThreadsPoolCostFunctionWrapper,
 )
+from tyrannis.core.backend_migration import MigrationProcessorBase
 from tyrannis.core.processor import LocalEvent
+
+
+class DummyMigrationProcessor(MigrationProcessorBase):
+    def __init__(
+        self,
+        initial_iter: int = 1,
+        communication_processor=None,
+        *args,
+        **kwargs,
+    ) -> None:
+        self._initial_iter = initial_iter
+        self._communication_processor = communication_processor
+
+    def start(self, wait_signal, stop_signal) -> None:
+        self._wait_signal = wait_signal
+        self._stop_signal = stop_signal
+
+    def stop(self) -> None:
+        pass
+
+    def check_particles(self) -> None:
+        pass
+
+
+def create_processor() -> ThreadsPool:
+    processor = ThreadsPool()
+    processor._migration_processor = DummyMigrationProcessor()
+
+    return processor
 
 
 def test_init() -> None:
@@ -34,7 +64,7 @@ def test_init_rejects_invalid_chunksize() -> None:
 
 
 def test_initialize_execution_context() -> None:
-    processor = ThreadsPool()
+    processor = create_processor()
 
     processor.initialize_execution_context()
 
@@ -46,7 +76,7 @@ def test_initialize_execution_context() -> None:
 
 
 def test_finalize_execution_context() -> None:
-    processor = ThreadsPool()
+    processor = create_processor()
 
     processor.initialize_execution_context()
 

@@ -11,6 +11,7 @@ from tyrannis.backend.distributed.spark_distributed import (
     SparkDistributedCostFunctionWrapper,
     _run_processor,
 )
+from tyrannis.core.backend_migration import MigrationDriverBase
 
 
 class DummySparkContext:
@@ -66,9 +67,18 @@ class DummyMappedRDD:
         ]
 
 
+class DummySparkConf:
+    def get(self, key: str) -> str:
+        if key == "spark.driver.host":
+            return "127.0.0.1"
+
+        raise KeyError(key)
+
+
 class DummySparkSession:
     def __init__(self) -> None:
         self.sparkContext = DummySparkContext()
+        self.conf = DummySparkConf()
 
 
 def create_algorithm() -> DummyAlgorithm:
@@ -82,21 +92,35 @@ def create_algorithm() -> DummyAlgorithm:
     return algorithm
 
 
-def create_processor() -> DummyProcessor:
+def create_migration() -> Mock:
+    return Mock(spec=MigrationDriverBase)
+
+
+def create_processor(
+    migration: MigrationDriverBase | None = None,
+) -> DummyProcessor:
+    if migration is None:
+        migration = create_migration()
+
     processor = DummyProcessor()
 
     processor.initialize_context(
         algorithm=create_algorithm(),
         n_iter=1,
         n_particles=1,
+        migration_driver=migration,
         seed=42,
     )
 
     return processor
 
 
-def create_processor_with_local_best() -> DummyProcessor:
-    processor = create_processor()
+def create_processor_with_local_best(
+    migration: MigrationDriverBase | None = None,
+) -> DummyProcessor:
+    processor = create_processor(
+        migration=migration,
+    )
 
     processor._status.best_particle_data = json.dumps(
         {
@@ -111,14 +135,20 @@ def create_processor_with_local_best() -> DummyProcessor:
 def create_backend(
     spark: DummySparkSession | None = None,
     processor: DummyProcessor | None = None,
+    migration: MigrationDriverBase | None = None,
     n_executors: int = 2,
     code_archive: str | Path | None = None,
 ) -> SparkDistributed:
     if spark is None:
         spark = DummySparkSession()
 
+    if migration is None:
+        migration = create_migration()
+
     if processor is None:
-        processor = create_processor_with_local_best()
+        processor = create_processor_with_local_best(
+            migration=migration,
+        )
 
     backend = SparkDistributed(
         spark,  # type: ignore
@@ -130,6 +160,7 @@ def create_backend(
         algorithm=processor._algorithm,  # type: ignore
         n_iter=1,
         n_particles=1,
+        migration=migration,
         processor=processor,
         seed=42,
     )
@@ -147,6 +178,7 @@ def test_init() -> None:
 
     assert backend._spark is spark
     assert backend._code_archive is None
+    assert backend._communication_port == 6062
     assert backend._n_executors == 3
     assert backend._identifier == "SparkDistributed"
     assert backend._cost_function_wrapper is SparkDistributedCostFunctionWrapper
@@ -326,3 +358,38 @@ def test_run_processor_finalizes_execution_context_on_error() -> None:
 
     assert processor._stop_signal is not None
     assert processor._wait_signal is not None
+
+
+def test_initialize_context_configures_migration() -> None:
+    spark = DummySparkSession()
+    migration = create_migration()
+    processor = create_processor(
+        migration=migration,
+    )
+
+    backend = SparkDistributed(  # type: ignore
+        spark,  # type: ignore
+        n_executors=3,
+        communication_port=6063,
+    )
+
+    backend.initialize_context(
+        algorithm=processor._algorithm,  # type: ignore
+        n_iter=1,
+        n_particles=1,
+        migration=migration,
+        processor=processor,
+        seed=42,
+    )
+
+    migration.initialize_context.assert_called_once()
+
+    kwargs = migration.initialize_context.call_args.kwargs
+
+    assert kwargs["communication_processor_class"] is not None
+    assert kwargs["communication_processor_kargs"] == {
+        "driver_ip": spark.conf.get(  # type: ignore
+            "spark.driver.host",
+        ),
+        "port": 6063,
+    }

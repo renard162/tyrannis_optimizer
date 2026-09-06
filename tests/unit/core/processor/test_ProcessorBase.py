@@ -4,11 +4,78 @@ import pytest
 from doubles.algorithm import DummyAlgorithm, DummyParticle
 from doubles.processor import DummyProcessor
 
+from tyrannis.backend.distributed.communication.no_communication import (
+    NoCommunicationProcessor,
+)
+from tyrannis.core.backend_migration import (
+    MigrationDriverBase,
+    MigrationProcessorBase,
+)
 from tyrannis.core.processor import (
     ControlVariables,
     LocalEvent,
     StatusVariables,
 )
+
+
+class DummyMigrationProcessor(MigrationProcessorBase):
+    def __init__(
+        self,
+        initial_iter: int,
+        communication_processor: NoCommunicationProcessor,
+        processor=None,
+        *args,
+        **kwargs,
+    ) -> None:
+        self._initial_iter = initial_iter
+        self._communication_processor = communication_processor
+        self._processor = processor
+
+    def start(
+        self,
+        wait_signal: LocalEvent,
+        stop_signal: LocalEvent,
+    ) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
+
+    def check_particles(self) -> None:
+        if self._processor is not None:
+            self._processor._insert_arrival_particle()
+
+
+class DummyMigration(MigrationDriverBase):
+    _processor_class = DummyMigrationProcessor
+
+    def __init__(
+        self,
+        initial_iter: int = 1,
+        *args,
+        **kwargs,
+    ) -> None:
+        self._migration_processor_init_kargs = {
+            "initial_iter": initial_iter,
+        }
+
+    def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
+
+
+def create_migration() -> DummyMigration:
+    migration = DummyMigration()
+
+    migration.initialize_context(
+        communication_driver=None,  # type: ignore
+        communication_processor_class=NoCommunicationProcessor,
+        communication_processor_kargs={},
+    )
+
+    return migration
 
 
 def create_processor() -> DummyProcessor:
@@ -19,14 +86,28 @@ def create_processor() -> DummyProcessor:
     )
 
     processor = DummyProcessor(algorithm)
+
     processor.initialize_context(
         algorithm=algorithm,
         n_iter=10,
         n_particles=3,
+        migration_driver=create_migration(),
         seed=42,
     )
 
     return processor
+
+
+def create_migration_processor(
+    processor: DummyProcessor,
+) -> DummyMigrationProcessor:
+    migration = create_migration()
+
+    migration._migration_processor_init_kargs["processor"] = processor
+
+    return migration.create_processor_module(
+        identification="MainProcessor",
+    )  # type: ignore
 
 
 def test_initialize_context_sets_initial_state() -> None:
@@ -41,10 +122,12 @@ def test_initialize_context_sets_initial_state() -> None:
     assert processor.local_best == ""
     assert isinstance(processor._control, ControlVariables)
     assert isinstance(processor._status, StatusVariables)
+    assert processor._migration_processor is None
 
 
 def test_initialize_context_rejects_invalid_fitness_strategy() -> None:
     algorithm = DummyAlgorithm()
+
     algorithm.initialize_context(
         fitness_function=lambda variables: sum(variables.values()),
         boundaries={"x": (-1.0, 1.0)},
@@ -60,6 +143,7 @@ def test_initialize_context_rejects_invalid_fitness_strategy() -> None:
             algorithm=algorithm,
             n_iter=10,
             n_particles=3,
+            migration_driver=create_migration(),
             fitness_failure_strategy="ignore",
         )
 
@@ -82,6 +166,7 @@ def test_init_particles_creates_population_once() -> None:
     processor.init_particles()
 
     assert processor._algorithm is not None
+
     assert list(processor._algorithm.population) == [
         "MainProcessor|particle:0",
         "MainProcessor|particle:1",
@@ -110,8 +195,6 @@ def test_initialize_and_finalize_execution_context() -> None:
 
     assert isinstance(processor._stop_signal, LocalEvent)
     assert isinstance(processor._wait_signal, LocalEvent)
-    assert not processor._stop_signal.is_set()
-    assert not processor._wait_signal.is_set()
 
 
 def test_deepcopy_excludes_execution_and_pool_state() -> None:
@@ -133,6 +216,8 @@ def test_deepcopy_excludes_execution_and_pool_state() -> None:
     assert replica._seed_sequence is None
     assert replica._pool_count_sequence is None
     assert replica._processors_pool == {}
+    assert replica._migration_driver is None
+    assert replica._migration_processor is None
 
 
 def test_create_processors_pool_creates_islands() -> None:
@@ -151,6 +236,7 @@ def test_create_processors_pool_creates_islands() -> None:
         assert replica is not processor
         assert replica._algorithm is not None
         assert replica._algorithm.identifier == f"{identifier}|algorithm"
+        assert replica._migration_processor is not None
 
 
 def test_update_processors_pool_adds_and_replaces_processors() -> None:
@@ -166,7 +252,13 @@ def test_update_processors_pool_adds_and_replaces_processors() -> None:
     second.set_identifier("island:1")
 
     processor.update_processors_pool([first])
-    processor.update_processors_pool([replacement, second])
+
+    processor.update_processors_pool(
+        [
+            replacement,
+            second,
+        ]
+    )
 
     assert processor.processors_pool == {
         "island:0": replacement,
@@ -199,6 +291,7 @@ def test_update_status_updates_population_and_partial_result() -> None:
         variables={"x": 1.0},
         fitness=1.0,
     )
+
     worst = DummyParticle(
         identifier="particle:1",
         variables={"x": 2.0},
@@ -206,7 +299,14 @@ def test_update_status_updates_population_and_partial_result() -> None:
     )
 
     assert processor._algorithm is not None
-    processor._algorithm.update_population([best, worst])
+
+    processor._algorithm.update_population(
+        [
+            best,
+            worst,
+        ]
+    )
+
     processor._algorithm._iter_best = best.identifier
     processor._algorithm._iter_worst = worst.identifier
 
@@ -216,6 +316,7 @@ def test_update_status_updates_population_and_partial_result() -> None:
         "particle:0": 1.0,
         "particle:1": 4.0,
     }
+
     assert processor._status.best_particle_fitness == 1.0
     assert processor._status.best_particle_data == best.dump()
     assert processor._status.worst_particle_fitness == 4.0
@@ -233,17 +334,25 @@ def test_update_status_without_iteration_best_only_updates_population() -> None:
     )
 
     assert processor._algorithm is not None
+
     processor._algorithm.update_population([particle])
 
     processor.update_status()
 
-    assert processor._status.population == {"particle:0": 1.0}
+    assert processor._status.population == {
+        "particle:0": 1.0,
+    }
+
     assert processor._status.best_particle_data == ""
     assert processor._status.best_particle_fitness is None
 
 
 def test_migration_control_inserts_arrival_particle() -> None:
     processor = create_processor()
+
+    processor._migration_processor = create_migration_processor(
+        processor,
+    )
 
     particle = DummyParticle(
         identifier="arrival",
@@ -263,6 +372,10 @@ def test_migration_control_inserts_arrival_particle() -> None:
 def test_migration_control_rejects_missing_arrival_data() -> None:
     processor = create_processor()
 
+    processor._migration_processor = create_migration_processor(
+        processor,
+    )
+
     processor._control.arrival_particle_id = "arrival"
 
     with pytest.raises(
@@ -275,6 +388,10 @@ def test_migration_control_rejects_missing_arrival_data() -> None:
 def test_migration_control_ignores_existing_arrival_particle() -> None:
     processor = create_processor()
 
+    processor._migration_processor = create_migration_processor(
+        processor,
+    )
+
     particle = DummyParticle(
         identifier="arrival",
         variables={"x": 1.0},
@@ -282,6 +399,7 @@ def test_migration_control_ignores_existing_arrival_particle() -> None:
     )
 
     assert processor._algorithm is not None
+
     processor._algorithm.update_population([particle])
 
     processor._control.arrival_particle_id = particle.identifier

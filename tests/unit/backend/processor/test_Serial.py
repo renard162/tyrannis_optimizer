@@ -5,7 +5,56 @@ from tyrannis.backend.processor.serial import (
     Serial,
     SerialCostFunctionWrapper,
 )
+from tyrannis.core.backend_migration import (
+    MigrationDriverBase,
+    MigrationProcessorBase,
+)
 from tyrannis.core.processor import LocalEvent
+
+
+class DummyMigrationProcessor(MigrationProcessorBase):
+    def __init__(
+        self,
+        initial_iter: int = 1,
+        communication_processor=None,
+        *args,
+        **kwargs,
+    ) -> None:
+        self._initial_iter = initial_iter
+        self._communication_processor = communication_processor
+
+    def start(
+        self,
+        wait_signal: LocalEvent,
+        stop_signal: LocalEvent,
+    ) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
+
+    def check_particles(self) -> None:
+        pass
+
+
+class DummyMigrationDriver(MigrationDriverBase):
+    _processor_class = DummyMigrationProcessor
+
+    def __init__(
+        self,
+        initial_iter: int = 1,
+        *args,
+        **kwargs,
+    ) -> None:
+        self._migration_processor_init_kargs = {
+            "initial_iter": initial_iter,
+        }
+
+    def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
 
 
 def create_processor() -> Serial:
@@ -17,13 +66,18 @@ def create_processor() -> Serial:
         boundaries={"x": (-1.0, 1.0)},
     )
 
+    migration_driver = DummyMigrationDriver()
+
     processor = Serial()
     processor.initialize_context(
         algorithm=algorithm,
         n_iter=1,
         n_particles=2,
+        migration_driver=migration_driver,
         seed=42,
     )
+
+    processor._migration_processor = DummyMigrationProcessor()
 
     return processor
 

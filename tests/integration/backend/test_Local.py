@@ -3,6 +3,7 @@ from doubles.cost_functions import sphere
 
 from tyrannis.algorithm.pso import PSO
 from tyrannis.backend.local import Local
+from tyrannis.backend.migration.island_isolation import IslandIsolation
 from tyrannis.backend.processor.serial import Serial
 
 N_ITER = 20
@@ -23,12 +24,15 @@ def create_backend(seed: int = SEED) -> Local:
         boundaries=BOUNDARIES,
     )
 
+    migration = IslandIsolation()
+
     processor = Serial()
 
     processor.initialize_context(
         algorithm=algorithm,
         n_iter=N_ITER,
         n_particles=N_PARTICLES,
+        migration_driver=migration,
         seed=seed,
     )
 
@@ -38,6 +42,7 @@ def create_backend(seed: int = SEED) -> Local:
         algorithm=algorithm,
         n_iter=N_ITER,
         n_particles=N_PARTICLES,
+        migration=migration,
         processor=processor,
         seed=seed,
     )
