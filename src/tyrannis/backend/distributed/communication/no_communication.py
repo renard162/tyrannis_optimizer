@@ -19,17 +19,21 @@ class NoCommunicationProcessor(CommunicationProcessorBase):
     ) -> None:
         self._identification = identification
 
-        self._messages: Queue[str] = Queue()
-        self._outgoing_queue: Queue[str] = Queue()
+        self._messages: Queue[str] | None = None
+        self._outgoing_queue: Queue[str] | None = None
 
     @property
     def messages(self) -> Queue[str]:
-        """Queue containing messages received from the driver."""
+        if self._messages is None:
+            raise RuntimeError("Communication processor is not running.")
+
         return self._messages
 
     @property
     def outgoing_queue(self) -> Queue[str]:
-        """Queue containing messages to be sent to the driver."""
+        if self._outgoing_queue is None:
+            raise RuntimeError("Communication processor is not running.")
+
         return self._outgoing_queue
 
     def start(
@@ -37,10 +41,12 @@ class NoCommunicationProcessor(CommunicationProcessorBase):
         wait_signal: LocalEvent,
         stop_signal: LocalEvent,
     ) -> None:
-        """Do nothing."""
+        self._messages = Queue()
+        self._outgoing_queue = Queue()
 
     def stop(self) -> None:
-        """Do nothing."""
+        self._messages = None
+        self._outgoing_queue = None
 
 
 class NoCommunicationDriver(CommunicationDriverBase):

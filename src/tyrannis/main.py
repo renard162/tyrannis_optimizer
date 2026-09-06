@@ -94,13 +94,13 @@ def distributed_test():
         seed=42,
     )
 
-    backend = Local()
+    # backend = Local()
 
-    # spark = generate_spark_session()
-    # backend = SparkDistributed(
-    #     spark=spark,
-    #     n_executors=3,
-    # )
+    spark = generate_spark_session()
+    backend = SparkDistributed(
+        spark=spark,
+        n_executors=3,
+    )
 
     backend.initialize_context(
         algorithm=algo,

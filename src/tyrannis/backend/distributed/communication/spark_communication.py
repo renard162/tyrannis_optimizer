@@ -33,22 +33,32 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
         self._socket: socket.socket | None = None
         self._thread: Thread | None = None
 
-        self._running = Event()
+        self._running: Event | None = None
 
-        self._wait_signal: LocalEvent = LocalEvent()
-        self._stop_signal: LocalEvent = LocalEvent()
+        self._wait_signal: LocalEvent | None = None
+        self._stop_signal: LocalEvent | None = None
 
-        self._messages: Queue[str] = Queue()
-        self._outgoing_queue: Queue[str] = Queue()
+        self._messages: Queue[str] | None = None
+        self._outgoing_queue: Queue[str] | None = None
 
         self._receive_buffer = ""
 
     @property
     def messages(self) -> Queue[str]:
+        if self._messages is None:
+            raise RuntimeError(
+                "Communication processor is not running.",
+            )
+
         return self._messages
 
     @property
     def outgoing_queue(self) -> Queue[str]:
+        if self._outgoing_queue is None:
+            raise RuntimeError(
+                "Communication processor is not running.",
+            )
+
         return self._outgoing_queue
 
     def start(
@@ -61,6 +71,10 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
 
         self._wait_signal = wait_signal
         self._stop_signal = stop_signal
+
+        self._running = Event()
+        self._messages = Queue()
+        self._outgoing_queue = Queue()
 
         self._socket = socket.socket(
             socket.AF_INET,
@@ -83,7 +97,8 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
         self._thread.start()
 
     def stop(self) -> None:
-        self._running.clear()
+        if self._running is not None:
+            self._running.clear()
 
         if self._socket is not None:
             try:
@@ -98,10 +113,14 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
             self._thread.join()
             self._thread = None
 
+        self._running = None
+        self._messages = None
+        self._outgoing_queue = None
+
         self._receive_buffer = ""
 
-        self._stop_signal = LocalEvent()
-        self._wait_signal = LocalEvent()
+        self._wait_signal = None
+        self._stop_signal = None
 
     def _receive_loop(self) -> None:
         if self._socket is None:
