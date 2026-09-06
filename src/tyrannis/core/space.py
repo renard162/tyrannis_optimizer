@@ -6,7 +6,7 @@ from typing import Any
 class SpaceBase(ABC):
     """Abstract base class for optimization search spaces."""
 
-    _cost_function: Callable[..., float]
+    _cost_function: Callable[..., float] | None
     _args: tuple[Any, ...]
     _kwargs: dict[str, Any]
     _encoded_boundaries: dict[str, tuple[float, float]]
@@ -14,7 +14,7 @@ class SpaceBase(ABC):
     @abstractmethod
     def __init__(
         self,
-        cost_function: Callable[..., float],
+        cost_function: Callable[..., float] | None,
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -123,5 +123,7 @@ class SpaceBase(ABC):
         raise NotImplementedError
 
     def __call__(self, float_inputs: dict[str, float]) -> float:
+        if self._cost_function is None:
+            raise ValueError("cost_function cannot be None.")
         inputs = self.decode(float_inputs)
         return self._cost_function(inputs)
