@@ -24,9 +24,9 @@ class BackendBase(ABC):
         here.
 
         The backend identifier and cost function wrapper class must also be
-        set during initialization. The identifier must uniquely represent
-        the backend instance within the optimization execution. The cost
-        function wrapper must be assigned as a class derived from
+        set during initialization. The identifier must uniquely represent the
+        backend instance within the optimization execution. The cost function
+        wrapper must be assigned as a class derived from
         ``CostFunctionWrapperBase``, rather than as an instance of that
         class.
 
@@ -45,11 +45,10 @@ class BackendBase(ABC):
         establishing the initial state of the population and therefore does
         not represent an iterative step of the optimization algorithm itself.
 
-        At the beginning of each iteration, the current iteration number is
-        registered in the backend state and the algorithm's ``pre_iteration``
-        method is called. This stage is responsible for the pre-iteration
-        processing of the algorithm, including, primarily, the creation and
-        destruction of dynamic particles during the optimization process.
+        At the beginning of each iteration, the processor controls the
+        migration state before allowing the algorithm to execute. This
+        includes any synchronization required by the migration strategy and
+        the application of pending migration operations.
 
         After the pre-iteration processing, any new particles identified by
         the algorithm are initialized using the parallel execution mechanism
@@ -64,9 +63,10 @@ class BackendBase(ABC):
         the evaluation of the cost-function values for their candidate
         solutions and the corresponding update of the optimization state.
 
-        After all ``n_iter + 1`` iterations have been completed, the final
-        optimization result is updated from the best solution obtained by
-        the algorithm.
+        After ``post_iteration``, the processor updates its local best
+        result. After all ``n_iter + 1`` iterations have been completed, the
+        final optimization result is obtained from the best solution
+        maintained by the processor.
         """
 
     def initialize_context(
@@ -88,6 +88,7 @@ class BackendBase(ABC):
         self._seed = seed
 
         self._result: dict[str, str | float | dict[str, float]] | None = None
+
         self._algorithm.configure(
             identifier=f"{self._identifier}|algorithm",
             cost_function_wrapper=self._cost_function_wrapper,
@@ -95,9 +96,9 @@ class BackendBase(ABC):
         )
 
     @property
-    def identifier(self):
+    def identifier(self) -> str:
         return self._identifier
 
     @property
-    def result(self):
+    def result(self) -> dict[str, str | float | dict[str, float]] | None:
         return self._result

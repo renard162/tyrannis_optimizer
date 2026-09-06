@@ -1,9 +1,6 @@
-import json
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from copy import deepcopy
-from dataclasses import dataclass
-from time import sleep
 from typing import Any, Generic, Self, TypeVar
 
 import numpy as np
@@ -25,42 +22,17 @@ class IntSequence:
         return value
 
 
-@dataclass
-class StatusVariables:
-    population: dict[str, float | None]
-    actual_iter: int = -1
-    n_process: int = 1
-    iter_waiting: bool = False
-
-    best_particle_data: str = ""
-    best_particle_fitness: float | None = None
-    worst_particle_data: str = ""
-    worst_particle_fitness: float | None = None
-
-
-@dataclass
-class ControlVariables:
-    arrival_particle_id: str | None = None
-    arrival_particle_data: str | None = None
-
-    departure_particle_id: str | None = None
-    departure_particle_data: str | None = None
-
-    iter_until: int | None = None
-
-
 class ProcessorBase(ABC, Generic[SignalType]):
     """Base class for processor agent."""
 
     _stop_signal: SignalType
-    _wait_signal: SignalType
     _cost_function_wrapper: type[CostFunctionWrapperBase]
     _processors_pool: dict[str, Self]
     _migration_driver: MigrationDriverBase | None
     _migration_processor: MigrationProcessorBase | None
+    _local_best: str | None
     _excluded_attributes: tuple[str, ...] = (
         "_stop_signal",
-        "_wait_signal",
         "_seed_sequence",
         "_processors_pool",
         "_pool_count_sequence",
@@ -117,10 +89,10 @@ class ProcessorBase(ABC, Generic[SignalType]):
         other runtime-specific objects required by the processor's execution
         strategy.
 
-        In particular, `_stop_signal` and `_wait_signal` must be initialized here
-        using the synchronization primitives appropriate for the processor's
-        execution strategy. For example, a processor based on multiprocessing may
-        initialize these attributes with `multiprocessing.Event` objects, which are
+        In particular, `_stop_signal` must be initialized here using the
+        synchronization primitive appropriate for the processor's execution
+        strategy. For example, a processor based on multiprocessing may
+        initialize this attribute with a `multiprocessing.Event` object, which is
         not serializable and therefore must only exist inside the execution
         context of the worker.
 
@@ -142,17 +114,16 @@ class ProcessorBase(ABC, Generic[SignalType]):
         variables, synchronization primitives, process or thread resources, and
         other runtime-specific objects that must not be retained after execution.
 
-        In particular, `_stop_signal` and `_wait_signal` must be cleared by
-        replacing them with `LocalEvent` instances. `LocalEvent` provides the
-        local, serializable representation of the signals required by the
-        processor outside its execution context, while execution-specific
-        implementations such as `multiprocessing.Event` must not remain attached
-        to the processor.
+        In particular, `_stop_signal` must be cleared by replacing it with a
+        `LocalEvent` instance. `LocalEvent` provides the local, serializable
+        representation of the signal required by the processor outside its
+        execution context, while execution-specific implementations such as
+        `multiprocessing.Event` must not remain attached to the processor.
 
         This method must leave the processor in a state that can safely be
         serialized, deep-copied, or returned from a worker to the driver without
-        carrying resources that are specific to the execution context in which it
-        was run.
+        carrying resources that are specific to the execution context in which
+        it was run.
 
         Every resource initialized by `initialize_execution_context` must be
         released or replaced here before the processor leaves its execution
@@ -200,8 +171,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
 
         self._migration_processor = None
         self._identifier = "MainProcessor"
-        self._control = ControlVariables()
-        self._status = StatusVariables(population={})
+        self._local_best = None
         self._seed_sequence = np.random.SeedSequence(seed)
         self._pool_count_sequence = IntSequence()
         self._processors_pool = {}
@@ -246,8 +216,8 @@ class ProcessorBase(ABC, Generic[SignalType]):
         return self._processors_pool
 
     @property
-    def local_best(self) -> str:
-        return self._status.best_particle_data
+    def local_best(self) -> str | None:
+        return self._local_best
 
     def set_identifier(self, identifier: str) -> None:
         self._identifier = identifier
@@ -261,25 +231,11 @@ class ProcessorBase(ABC, Generic[SignalType]):
                 identifier=f"{self._identifier}|particle:{p_idx}",
             )
 
-    def wait_sync(self, actual_iter: int) -> None:
-        self._status.iter_waiting = False
-        if self._control.iter_until is None:
-            return
-
-        while (not self._stop_signal.is_set()) and (
-            (actual_iter >= self._control.iter_until) or self._wait_signal.is_set()
-        ):
-            self._status.iter_waiting = True
-            sleep(0.01)
-
-        self._status.iter_waiting = False
-
     def start_migration(self) -> None:
         if self._migration_processor is None:
             raise RuntimeError("Migration processor has not been initialized.")
 
         self._migration_processor.start(
-            wait_signal=self._wait_signal,
             stop_signal=self._stop_signal,
         )
 
@@ -289,50 +245,69 @@ class ProcessorBase(ABC, Generic[SignalType]):
 
         self._migration_processor.stop()
 
-    def migration_control(self) -> None:
+    def migration_control(self, actual_iter: int) -> None:
         if self._migration_processor is None:
             raise RuntimeError("Migration processor has not been initialized.")
 
-        self._migration_processor.check_particles()
+        self._migration_processor.migration_control(
+            actual_iter=actual_iter,
+            local_best=self._local_best,
+            insert_arrival_particle=self._insert_arrival_particle,
+            departure_particle=self._departure_particle,
+        )
 
-    def _insert_arrival_particle(self) -> None:
-        if self._control.arrival_particle_id is None:
-            return
+    def _insert_arrival_particle(
+        self,
+        particle_data: dict[str, Any],
+    ) -> None:
+        """
+        Insert an arriving particle into the algorithm population.
 
-        if self._control.arrival_particle_id not in self._algorithm.population:
-            if self._control.arrival_particle_data is None:
-                raise ValueError("Arrival particle data cannot be None.")
-            data = json.loads(self._control.arrival_particle_data)
-            self._algorithm.create_particle(**data)
+        This method is the interface used by the migration processor to transfer
+        a particle received from another processor into the local algorithm.
 
-    def _departure_particle(self) -> None:
+        Parameters
+        ----------
+        particle_data:
+            Serialized particle data required by the algorithm to create the
+            arriving particle.
+        """
+        particle_id = particle_data.get("identifier")
+        if particle_id is None:
+            raise ValueError("Arrival particle data must contain an identifier.")
+
+        if particle_id not in self._algorithm.population:
+            self._algorithm.create_particle(**particle_data)
+
+    def _departure_particle(
+        self,
+        particle_id: str,
+    ) -> None:
         """
         Remove a departing particle from the algorithm population.
 
-        This method will be implemented after the interaction methods
-        between optimization islands have been defined.
-        """
-        return
+        This method is the interface used by the migration processor to remove
+        a particle selected for migration from the local algorithm.
 
-    def update_iter_counter(self, actual_iter: int) -> None:
-        self._status.actual_iter = actual_iter
+        Parameters
+        ----------
+        particle_id:
+            Identifier of the particle that must be removed.
+        """
+        if particle_id not in self._algorithm.population:
+            return
+
+        del self._algorithm.population[particle_id]
 
     def update_status(self) -> None:
-        self._update_population_status()
+        """Update the processor execution status."""
         self._update_partial_result()
 
     def _update_partial_result(self) -> None:
-        if (self._algorithm.iter_best is None) or (self._algorithm.iter_worst is None):
+        if self._algorithm.local_best is None:
             return
-        self._status.best_particle_fitness = self._algorithm.iter_best.fitness
-        self._status.best_particle_data = self._algorithm.iter_best.dump()
-        self._status.worst_particle_fitness = self._algorithm.iter_worst.fitness
-        self._status.worst_particle_data = self._algorithm.iter_worst.dump()
 
-    def _update_population_status(self) -> None:
-        self._status.population = {
-            p_id: p.fitness for p_id, p in self._algorithm.population.items()
-        }
+        self._local_best = self._algorithm.local_best.dump()
 
     @abstractmethod
     def run(self) -> None:
@@ -344,16 +319,17 @@ class ProcessorBase(ABC, Generic[SignalType]):
         establish the initial states of the algorithm and its particles and
         does not represent an actual optimization iteration.
 
-        The iteration flow must use `iter_until` as a synchronization
-        control, preventing the processor from advancing beyond the
-        iteration specified by this variable. The `stop_signal` control
-        variable must be checked to allow the execution to be interrupted
-        before subsequent iterations are performed.
-
         Before processing each iteration, the processor must call
-        `insert_arrival_particle` to handle particles received from other
-        processors and `remove_departure_particle` to handle particles that
-        must leave the current population.
+        `migration_control` to allow the migration processor to enforce its
+        synchronization policy and apply pending migration operations.
+
+        The migration processor must block the processor when the current
+        iteration is greater than or equal to its configured synchronization
+        iteration. A synchronization iteration of `None` disables iteration-based
+        synchronization.
+
+        The `stop_signal` control variable must be checked to allow the execution
+        to be interrupted before subsequent iterations are performed.
 
         The algorithm iteration must then be executed according to the
         algorithm's defined iteration lifecycle.

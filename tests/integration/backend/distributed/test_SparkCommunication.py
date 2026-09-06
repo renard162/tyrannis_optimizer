@@ -1,13 +1,11 @@
 import time
 from collections.abc import Callable, Generator
+from queue import Queue
 from threading import Event
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
-from tyrannis.backend.distributed.communication import (
-    spark_communication as communication_module,
-)
 from tyrannis.backend.distributed.communication.spark_communication import (
     SparkCommunicationDriver,
     SparkCommunicationProcessor,
@@ -46,19 +44,17 @@ def communication() -> Generator[
         SparkCommunicationDriver,
         SparkCommunicationProcessor,
         LocalEvent,
-        LocalEvent,
     ],
     None,
     None,
 ]:
-    driver_stop_signal = Event()
-    wait_signal = LocalEvent()
+    driver_stop_signal = LocalEvent()
     stop_signal = LocalEvent()
 
     driver = SparkCommunicationDriver(
         island_ids=[FIRST_ISLAND],
         port=PORT,
-        stop_signal=driver_stop_signal,  # type: ignore
+        stop_signal=driver_stop_signal,
     )
 
     processor = SparkCommunicationProcessor(
@@ -70,7 +66,6 @@ def communication() -> Generator[
     driver.start()
 
     processor.start(
-        wait_signal=wait_signal,
         stop_signal=stop_signal,
     )
 
@@ -81,7 +76,6 @@ def communication() -> Generator[
     yield (
         driver,
         processor,
-        wait_signal,
         stop_signal,
     )
 
@@ -94,10 +88,9 @@ def test_client_connects_to_driver(
         SparkCommunicationDriver,
         SparkCommunicationProcessor,
         LocalEvent,
-        LocalEvent,
     ],
 ) -> None:
-    driver, _, _, _ = communication
+    driver, _, _ = communication
 
     assert FIRST_ISLAND in driver._connections
 
@@ -107,10 +100,9 @@ def test_client_sends_message_to_driver(
         SparkCommunicationDriver,
         SparkCommunicationProcessor,
         LocalEvent,
-        LocalEvent,
     ],
 ) -> None:
-    driver, processor, _, _ = communication
+    driver, processor, _ = communication
 
     assert processor._socket is not None
 
@@ -132,10 +124,9 @@ def test_driver_sends_message_to_client(
         SparkCommunicationDriver,
         SparkCommunicationProcessor,
         LocalEvent,
-        LocalEvent,
     ],
 ) -> None:
-    driver, processor, _, _ = communication
+    driver, processor, _ = communication
 
     message = "message-from-driver"
 
@@ -151,7 +142,7 @@ def test_driver_sends_message_to_client(
 
 
 def test_two_clients_connect_to_driver() -> None:
-    driver_stop_signal = Event()
+    driver_stop_signal = LocalEvent()
 
     driver = SparkCommunicationDriver(
         island_ids=[
@@ -159,13 +150,10 @@ def test_two_clients_connect_to_driver() -> None:
             SECOND_ISLAND,
         ],
         port=PORT,
-        stop_signal=driver_stop_signal,  # type: ignore
+        stop_signal=driver_stop_signal,
     )
 
-    first_wait_signal = LocalEvent()
     first_stop_signal = LocalEvent()
-
-    second_wait_signal = LocalEvent()
     second_stop_signal = LocalEvent()
 
     first = SparkCommunicationProcessor(
@@ -183,12 +171,10 @@ def test_two_clients_connect_to_driver() -> None:
     driver.start()
 
     first.start(
-        wait_signal=first_wait_signal,
         stop_signal=first_stop_signal,
     )
 
     second.start(
-        wait_signal=second_wait_signal,
         stop_signal=second_stop_signal,
     )
 
@@ -213,7 +199,7 @@ def test_two_clients_connect_to_driver() -> None:
 
 
 def test_messages_are_routed_to_correct_clients() -> None:
-    driver_stop_signal = Event()
+    driver_stop_signal = LocalEvent()
 
     driver = SparkCommunicationDriver(
         island_ids=[
@@ -221,13 +207,10 @@ def test_messages_are_routed_to_correct_clients() -> None:
             SECOND_ISLAND,
         ],
         port=PORT,
-        stop_signal=driver_stop_signal,  # type: ignore
+        stop_signal=driver_stop_signal,
     )
 
-    first_wait_signal = LocalEvent()
     first_stop_signal = LocalEvent()
-
-    second_wait_signal = LocalEvent()
     second_stop_signal = LocalEvent()
 
     first = SparkCommunicationProcessor(
@@ -245,12 +228,10 @@ def test_messages_are_routed_to_correct_clients() -> None:
     driver.start()
 
     first.start(
-        wait_signal=first_wait_signal,
         stop_signal=first_stop_signal,
     )
 
     second.start(
-        wait_signal=second_wait_signal,
         stop_signal=second_stop_signal,
     )
 
@@ -297,10 +278,9 @@ def test_multiple_messages_are_queued_in_order(
         SparkCommunicationDriver,
         SparkCommunicationProcessor,
         LocalEvent,
-        LocalEvent,
     ],
 ) -> None:
-    driver, processor, _, _ = communication
+    driver, processor, _ = communication
 
     messages = [
         "message-1",
@@ -322,25 +302,24 @@ def test_multiple_messages_are_queued_in_order(
     assert received == messages
 
 
-def test_etx_sets_wait_signal(
+def test_empty_message_is_received_when_etx_is_sent(
     communication: tuple[
         SparkCommunicationDriver,
         SparkCommunicationProcessor,
         LocalEvent,
-        LocalEvent,
     ],
 ) -> None:
-    driver, _, wait_signal, stop_signal = communication
+    driver, processor, stop_signal = communication
 
     driver.outgoing_queues[FIRST_ISLAND].put(
-        driver.ETX,
+        "",
     )
 
     wait_for(
-        wait_signal.is_set,
+        lambda: not processor.messages.empty(),
     )
 
-    assert wait_signal.is_set()
+    assert processor.messages.get() == ""
     assert not stop_signal.is_set()
 
 
@@ -349,25 +328,26 @@ def test_stop_sets_stop_signal(
         SparkCommunicationDriver,
         SparkCommunicationProcessor,
         LocalEvent,
-        LocalEvent,
     ],
 ) -> None:
-    driver, _, wait_signal, stop_signal = communication
+    driver, _, stop_signal = communication
 
-    driver.outgoing_queues[FIRST_ISLAND].put(
-        driver.STOP,
-    )
+    driver_stop_signal = driver._stop_signal
+
+    assert not driver_stop_signal.is_set()
+    assert not stop_signal.is_set()
+
+    driver_stop_signal.set()
 
     wait_for(
         stop_signal.is_set,
     )
 
     assert stop_signal.is_set()
-    assert not wait_signal.is_set()
 
 
 def test_driver_stop_signal_is_sent_to_all_clients() -> None:
-    driver_stop_signal = Event()
+    driver_stop_signal = LocalEvent()
 
     driver = SparkCommunicationDriver(
         island_ids=[
@@ -375,13 +355,10 @@ def test_driver_stop_signal_is_sent_to_all_clients() -> None:
             SECOND_ISLAND,
         ],
         port=PORT,
-        stop_signal=driver_stop_signal,  # type: ignore
+        stop_signal=driver_stop_signal,
     )
 
-    first_wait_signal = LocalEvent()
     first_stop_signal = LocalEvent()
-
-    second_wait_signal = LocalEvent()
     second_stop_signal = LocalEvent()
 
     first = SparkCommunicationProcessor(
@@ -399,12 +376,10 @@ def test_driver_stop_signal_is_sent_to_all_clients() -> None:
     driver.start()
 
     first.start(
-        wait_signal=first_wait_signal,
         stop_signal=first_stop_signal,
     )
 
     second.start(
-        wait_signal=second_wait_signal,
         stop_signal=second_stop_signal,
     )
 
@@ -439,10 +414,9 @@ def test_stx_etx_frame_message(
         SparkCommunicationDriver,
         SparkCommunicationProcessor,
         LocalEvent,
-        LocalEvent,
     ],
 ) -> None:
-    driver, processor, _, _ = communication
+    driver, processor, _ = communication
 
     assert processor._socket is not None
 
@@ -464,12 +438,9 @@ def create_processor_runtime(
     *,
     running: bool = True,
 ) -> None:
-    """Inicializa os recursos de execução sem abrir uma conexão TCP."""
-
     processor._running = Event()
-    processor._messages = __import__("queue").Queue()
-    processor._outgoing_queue = __import__("queue").Queue()
-    processor._wait_signal = LocalEvent()
+    processor._messages = Queue()
+    processor._outgoing_queue = Queue()
     processor._stop_signal = LocalEvent()
 
     if running:
@@ -477,13 +448,20 @@ def create_processor_runtime(
 
 
 def test_processor_stop_handles_shutdown_error_and_joins_thread() -> None:
-    processor = SparkCommunicationProcessor(HOST, PORT, FIRST_ISLAND)
+    processor = SparkCommunicationProcessor(
+        HOST,
+        PORT,
+        FIRST_ISLAND,
+    )
+
     socket_mock = Mock()
     socket_mock.shutdown.side_effect = OSError
+
     thread_mock = Mock()
 
     processor._socket = socket_mock
     processor._thread = thread_mock
+
     create_processor_runtime(processor)
 
     processor.stop()
@@ -493,10 +471,19 @@ def test_processor_stop_handles_shutdown_error_and_joins_thread() -> None:
 
     assert processor._socket is None
     assert processor._thread is None
+    assert processor._running is None
+    assert processor._messages is None
+    assert processor._outgoing_queue is None
+    assert processor._stop_signal is None
 
 
 def test_processor_stop_with_no_socket_but_existing_thread() -> None:
-    processor = SparkCommunicationProcessor(HOST, PORT, FIRST_ISLAND)
+    processor = SparkCommunicationProcessor(
+        HOST,
+        PORT,
+        FIRST_ISLAND,
+    )
+
     thread_mock = Mock()
 
     processor._thread = thread_mock
@@ -504,11 +491,17 @@ def test_processor_stop_with_no_socket_but_existing_thread() -> None:
     processor.stop()
 
     thread_mock.join.assert_called_once_with()
+
     assert processor._thread is None
 
 
 def test_processor_stop_with_socket_but_no_thread() -> None:
-    processor = SparkCommunicationProcessor(HOST, PORT, FIRST_ISLAND)
+    processor = SparkCommunicationProcessor(
+        HOST,
+        PORT,
+        FIRST_ISLAND,
+    )
+
     socket_mock = Mock()
 
     processor._socket = socket_mock
@@ -516,11 +509,16 @@ def test_processor_stop_with_socket_but_no_thread() -> None:
     processor.stop()
 
     socket_mock.close.assert_called_once_with()
+
     assert processor._socket is None
 
 
 def test_processor_receive_loop_requires_socket() -> None:
-    processor = SparkCommunicationProcessor(HOST, PORT, FIRST_ISLAND)
+    processor = SparkCommunicationProcessor(
+        HOST,
+        PORT,
+        FIRST_ISLAND,
+    )
 
     with pytest.raises(
         RuntimeError,
@@ -530,7 +528,12 @@ def test_processor_receive_loop_requires_socket() -> None:
 
 
 def test_processor_receive_loop_handles_timeout_and_clean_shutdown() -> None:
-    processor = SparkCommunicationProcessor(HOST, PORT, FIRST_ISLAND)
+    processor = SparkCommunicationProcessor(
+        HOST,
+        PORT,
+        FIRST_ISLAND,
+    )
+
     socket_mock = Mock()
 
     socket_mock.recv.side_effect = [
@@ -539,6 +542,7 @@ def test_processor_receive_loop_handles_timeout_and_clean_shutdown() -> None:
     ]
 
     processor._socket = socket_mock
+
     create_processor_runtime(processor)
 
     processor._receive_loop()
@@ -547,12 +551,17 @@ def test_processor_receive_loop_handles_timeout_and_clean_shutdown() -> None:
 
 
 def test_processor_receive_loop_sets_stop_on_socket_error() -> None:
-    processor = SparkCommunicationProcessor(HOST, PORT, FIRST_ISLAND)
-    socket_mock = Mock()
+    processor = SparkCommunicationProcessor(
+        HOST,
+        PORT,
+        FIRST_ISLAND,
+    )
 
+    socket_mock = Mock()
     socket_mock.recv.side_effect = OSError
 
     processor._socket = socket_mock
+
     create_processor_runtime(processor)
 
     processor._receive_loop()
@@ -562,12 +571,17 @@ def test_processor_receive_loop_sets_stop_on_socket_error() -> None:
 
 
 def test_processor_receive_loop_handles_invalid_utf8() -> None:
-    processor = SparkCommunicationProcessor(HOST, PORT, FIRST_ISLAND)
-    socket_mock = Mock()
+    processor = SparkCommunicationProcessor(
+        HOST,
+        PORT,
+        FIRST_ISLAND,
+    )
 
+    socket_mock = Mock()
     socket_mock.recv.return_value = b"\xff"
 
     processor._socket = socket_mock
+
     create_processor_runtime(processor)
 
     processor._receive_loop()
@@ -577,10 +591,16 @@ def test_processor_receive_loop_handles_invalid_utf8() -> None:
 
 
 def test_processor_receive_loop_exits_when_stopped_before_recv() -> None:
-    processor = SparkCommunicationProcessor(HOST, PORT, FIRST_ISLAND)
+    processor = SparkCommunicationProcessor(
+        HOST,
+        PORT,
+        FIRST_ISLAND,
+    )
+
     socket_mock = Mock()
 
     processor._socket = socket_mock
+
     create_processor_runtime(
         processor,
         running=False,
@@ -593,7 +613,11 @@ def test_processor_receive_loop_exits_when_stopped_before_recv() -> None:
 
 
 def test_processor_process_buffer_discards_data_without_frame() -> None:
-    processor = SparkCommunicationProcessor(HOST, PORT, FIRST_ISLAND)
+    processor = SparkCommunicationProcessor(
+        HOST,
+        PORT,
+        FIRST_ISLAND,
+    )
 
     create_processor_runtime(processor)
 
@@ -602,10 +626,15 @@ def test_processor_process_buffer_discards_data_without_frame() -> None:
     processor._process_buffer()
 
     assert processor._receive_buffer == ""
+    assert processor.messages.empty()
 
 
 def test_processor_process_buffer_discards_prefix_before_frame() -> None:
-    processor = SparkCommunicationProcessor(HOST, PORT, FIRST_ISLAND)
+    processor = SparkCommunicationProcessor(
+        HOST,
+        PORT,
+        FIRST_ISLAND,
+    )
 
     create_processor_runtime(processor)
 
@@ -618,7 +647,11 @@ def test_processor_process_buffer_discards_prefix_before_frame() -> None:
 
 
 def test_processor_process_buffer_handles_stop_after_frame() -> None:
-    processor = SparkCommunicationProcessor(HOST, PORT, FIRST_ISLAND)
+    processor = SparkCommunicationProcessor(
+        HOST,
+        PORT,
+        FIRST_ISLAND,
+    )
 
     create_processor_runtime(processor)
 
@@ -627,13 +660,19 @@ def test_processor_process_buffer_handles_stop_after_frame() -> None:
     processor._process_buffer()
 
     assert processor.messages.get() == "message"
+
     assert processor._stop_signal is not None
     assert processor._stop_signal.is_set()
+
     assert processor._receive_buffer == ""
 
 
 def test_processor_send_pending_messages_without_socket() -> None:
-    processor = SparkCommunicationProcessor(HOST, PORT, FIRST_ISLAND)
+    processor = SparkCommunicationProcessor(
+        HOST,
+        PORT,
+        FIRST_ISLAND,
+    )
 
     create_processor_runtime(processor)
 
@@ -643,12 +682,17 @@ def test_processor_send_pending_messages_without_socket() -> None:
 
 
 def test_processor_send_pending_messages_requeues_and_stops_on_error() -> None:
-    processor = SparkCommunicationProcessor(HOST, PORT, FIRST_ISLAND)
-    socket_mock = Mock()
+    processor = SparkCommunicationProcessor(
+        HOST,
+        PORT,
+        FIRST_ISLAND,
+    )
 
+    socket_mock = Mock()
     socket_mock.sendall.side_effect = OSError
 
     processor._socket = socket_mock
+
     create_processor_runtime(processor)
 
     processor.outgoing_queue.put("message")
@@ -656,6 +700,7 @@ def test_processor_send_pending_messages_requeues_and_stops_on_error() -> None:
     processor._send_pending_messages()
 
     assert processor.outgoing_queue.get() == "message"
+
     assert processor._stop_signal is not None
     assert processor._stop_signal.is_set()
 
@@ -663,12 +708,17 @@ def test_processor_send_pending_messages_requeues_and_stops_on_error() -> None:
 def test_processor_send_pending_messages_requeues_without_setting_stop_when_not_running() -> (
     None
 ):
-    processor = SparkCommunicationProcessor(HOST, PORT, FIRST_ISLAND)
-    socket_mock = Mock()
+    processor = SparkCommunicationProcessor(
+        HOST,
+        PORT,
+        FIRST_ISLAND,
+    )
 
+    socket_mock = Mock()
     socket_mock.sendall.side_effect = OSError
 
     processor._socket = socket_mock
+
     create_processor_runtime(
         processor,
         running=False,
@@ -679,6 +729,7 @@ def test_processor_send_pending_messages_requeues_without_setting_stop_when_not_
     processor._send_pending_messages()
 
     assert processor.outgoing_queue.get() == "message"
+
     assert processor._stop_signal is not None
     assert not processor._stop_signal.is_set()
 
@@ -687,7 +738,7 @@ def test_driver_start_while_running_raises() -> None:
     driver = SparkCommunicationDriver(
         [FIRST_ISLAND],
         PORT,
-        Event(),  # type: ignore
+        LocalEvent(),
     )
 
     driver._thread = Mock()

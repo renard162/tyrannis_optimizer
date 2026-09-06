@@ -60,7 +60,7 @@ class DummyMappedRDD:
         self.data = data
         self.function = function
 
-    def collect(self) -> list[tuple[str, dict]]:
+    def collect(self) -> list[tuple[str, dict | None]]:
         return [
             self.function(processor)  # type: ignore
             for processor in self.data
@@ -122,7 +122,7 @@ def create_processor_with_local_best(
         migration=migration,
     )
 
-    processor._status.best_particle_data = json.dumps(
+    processor._local_best = json.dumps(
         {
             "fitness": 1.0,
             "variables": {"x": 0.0},
@@ -171,7 +171,7 @@ def create_backend(
 def test_init() -> None:
     spark = DummySparkSession()
 
-    backend = SparkDistributed(  # type: ignore
+    backend = SparkDistributed(
         spark,  # type: ignore
         n_executors=3,
     )
@@ -188,7 +188,7 @@ def test_init() -> None:
 def test_init_converts_code_archive_to_path(tmp_path) -> None:
     archive = tmp_path / "code.zip"
 
-    backend = SparkDistributed(  # type: ignore
+    backend = SparkDistributed(
         DummySparkSession(),  # type: ignore
         n_executors=2,
         code_archive=str(archive),
@@ -201,7 +201,7 @@ def test_init_converts_code_archive_to_path(tmp_path) -> None:
 def test_init_accepts_path_code_archive(tmp_path) -> None:
     archive = tmp_path / "code.zip"
 
-    backend = SparkDistributed(  # type: ignore
+    backend = SparkDistributed(
         DummySparkSession(),  # type: ignore
         n_executors=2,
         code_archive=archive,
@@ -218,6 +218,28 @@ def test_init_rejects_none_spark() -> None:
         SparkDistributed(None)  # type: ignore
 
 
+def test_init_rejects_invalid_communication_port() -> None:
+    with pytest.raises(
+        ValueError,
+        match="communication_port must be between 1 and 65535",
+    ):
+        SparkDistributed(
+            DummySparkSession(),  # type: ignore
+            n_executors=2,
+            communication_port=0,
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="communication_port must be between 1 and 65535",
+    ):
+        SparkDistributed(
+            DummySparkSession(),  # type: ignore
+            n_executors=2,
+            communication_port=65536,
+        )
+
+
 def test_get_n_executors() -> None:
     spark = DummySparkSession()
 
@@ -230,7 +252,7 @@ def test_get_n_executors() -> None:
 
     spark.sparkContext._jsc = jsc  # type: ignore
 
-    backend = SparkDistributed(  # type: ignore
+    backend = SparkDistributed(
         spark,  # type: ignore
         n_executors=None,
     )
@@ -310,14 +332,14 @@ def test_execute_creates_processors_and_collects_results() -> None:
     }
 
 
-def test_run_processor_returns_empty_result_without_local_best() -> None:
+def test_run_processor_returns_none_without_local_best() -> None:
     processor = create_processor()
 
     result = _run_processor(processor)
 
     assert result == (
         processor.identifier,
-        {},
+        None,
     )
 
 
@@ -329,7 +351,7 @@ def test_run_processor_decodes_local_best() -> None:
         "variables": {"x": 0.25},
     }
 
-    processor._status.best_particle_data = json.dumps(
+    processor._local_best = json.dumps(
         local_best,
     )
 
@@ -367,7 +389,7 @@ def test_initialize_context_configures_migration() -> None:
         migration=migration,
     )
 
-    backend = SparkDistributed(  # type: ignore
+    backend = SparkDistributed(
         spark,  # type: ignore
         n_executors=3,
         communication_port=6063,
@@ -388,7 +410,7 @@ def test_initialize_context_configures_migration() -> None:
 
     assert kwargs["communication_processor_class"] is not None
     assert kwargs["communication_processor_kargs"] == {
-        "driver_ip": spark.conf.get(  # type: ignore
+        "driver_ip": spark.conf.get(
             "spark.driver.host",
         ),
         "port": 6063,

@@ -13,7 +13,7 @@ class DistributedBackendBase(BackendBase):
 
     _local_bests: dict[str, dict[str, float | dict[str, float]] | None]
     _n_executors: int
-    _migration_driver: MigrationDriverBase
+    _migration: MigrationDriverBase
 
     @abstractmethod
     def initialize_context(
@@ -38,7 +38,7 @@ class DistributedBackendBase(BackendBase):
         """
         Call super of this method and call initialize context of
         _migration_driver setting up the communication module.
-        
+
         If migration is None, set the default migration module.
         """
 

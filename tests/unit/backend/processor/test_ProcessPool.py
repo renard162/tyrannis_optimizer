@@ -173,13 +173,9 @@ def test_initialize_execution_context() -> None:
     processor.initialize_execution_context()
 
     assert isinstance(processor._stop_signal, StopSignal)
-    assert processor._wait_signal is not None
-
     assert not processor._stop_signal.is_set()
-    assert not processor._wait_signal.is_set()
 
     migration_processor.start.assert_called_once_with(
-        wait_signal=processor._wait_signal,
         stop_signal=processor._stop_signal,
     )
 
@@ -193,14 +189,10 @@ def test_clear_execution_context() -> None:
     processor.initialize_execution_context()
 
     processor._stop_signal.set()
-    processor._wait_signal.set()
 
     processor.finalize_execution_context()
 
     migration_processor.stop.assert_called_once()
 
     assert isinstance(processor._stop_signal, LocalEvent)
-    assert isinstance(processor._wait_signal, LocalEvent)
-
     assert not processor._stop_signal.is_set()
-    assert not processor._wait_signal.is_set()

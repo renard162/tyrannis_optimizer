@@ -18,7 +18,6 @@ class Serial(ProcessorBase):
 
     def initialize_execution_context(self) -> None:
         self._stop_signal = LocalEvent()
-        self._wait_signal = LocalEvent()
 
         self.start_migration()
 
@@ -28,14 +27,12 @@ class Serial(ProcessorBase):
     def run(self) -> None:
         self.init_particles()
         self._stop_signal.clear()
-        for actual_iter in range(self._n_iter + 1):
-            self.update_iter_counter(actual_iter)
 
-            self.wait_sync(actual_iter)
+        for actual_iter in range(self._n_iter + 1):
+            self.migration_control(actual_iter)
+
             if self._stop_signal.is_set():
                 break
-
-            self.migration_control()
 
             self._algorithm.pre_iteration(actual_iter)
 

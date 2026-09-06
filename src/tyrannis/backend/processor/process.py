@@ -121,7 +121,6 @@ class ProcessPool(ProcessorBase):
 
     def initialize_execution_context(self) -> None:
         self._stop_signal = StopSignal()
-        self._wait_signal = Event()
 
         self.start_migration()
 
@@ -129,7 +128,6 @@ class ProcessPool(ProcessorBase):
         self.stop_migration()
 
         self._stop_signal = LocalEvent()
-        self._wait_signal = LocalEvent()
 
     def run(self) -> None:
         self.init_particles()
@@ -144,16 +142,11 @@ class ProcessPool(ProcessorBase):
                 processes=self._n_process,
                 maxtasksperchild=self._maxtasksperchild,
             ) as pool:
-                self._status.n_process = pool._processes  # type: ignore
-
                 for actual_iter in range(self._n_iter + 1):
-                    self.update_iter_counter(actual_iter)
+                    self.migration_control(actual_iter)
 
-                    self.wait_sync(actual_iter)
                     if self._stop_signal.is_set():
                         break
-
-                    self.migration_control()
 
                     self._algorithm.pre_iteration(actual_iter)
 

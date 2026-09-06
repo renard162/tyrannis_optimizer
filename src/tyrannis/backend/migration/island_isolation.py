@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from ...core.backend_communication import CommunicationProcessorBase
@@ -25,17 +26,16 @@ class IslandIsolationProcessor(MigrationProcessorBase):
         **kwargs: Any,
     ) -> None:
         self._initial_iter = initial_iter
+        self._synchronization_iter = None
         self._communication_processor = communication_processor
 
     def start(
         self,
-        wait_signal: LocalEvent,
         stop_signal: LocalEvent,
     ) -> None:
         """Start the inactive communication processor."""
 
         self._communication_processor.start(
-            wait_signal=wait_signal,
             stop_signal=stop_signal,
         )
 
@@ -44,7 +44,13 @@ class IslandIsolationProcessor(MigrationProcessorBase):
 
         self._communication_processor.stop()
 
-    def check_particles(self) -> None:
+    def migration_control(
+        self,
+        actual_iter: int,
+        local_best: str | None,
+        insert_arrival_particle: Callable[[dict[str, Any]], None],
+        departure_particle: Callable[[str], None],
+    ) -> None:
         """Do nothing."""
 
 

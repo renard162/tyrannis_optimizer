@@ -98,8 +98,8 @@ class CommunicationProcessorBase(ABC):
         this queue and converting them to the representation required by its
         underlying communication mechanism.
 
-        The caller must not perform serialization, framing, encoding, database
-        insertion, socket operations, or any other transport-specific operation.
+        The caller must not perform serialization, framing, encoding, socket
+        operations, or any other transport-specific operation.
 
         Messages must be transmitted in the same order in which they are placed
         in the queue.
@@ -117,7 +117,6 @@ class CommunicationProcessorBase(ABC):
     @abstractmethod
     def start(
         self,
-        wait_signal: LocalEvent,
         stop_signal: LocalEvent,
     ) -> None:
         """Start the processor communication backend.
@@ -137,14 +136,13 @@ class CommunicationProcessorBase(ABC):
         implementation detail and must not be exposed through this interface.
 
         The method must configure the communication backend to use the supplied
-        events for communication with the processor's main loop.
+        stop signal for communication with the processor's main loop. The
+        communication backend must not control the processor's synchronization
+        or iteration state. Synchronization and migration decisions are the
+        responsibility of the migration processor.
 
         Parameters
         ----------
-        wait_signal:
-            Event used by the communication backend to signal that the processor
-            should enter or remain in a waiting state.
-
         stop_signal:
             Event used by the communication backend to signal that the
             communication must stop.
@@ -275,9 +273,10 @@ class CommunicationDriverBase(ABC):
         send to that processor.
 
         The dictionary key is the processor identifier that determines the
-        destination of the messages. Each dictionary value is a ``Queue[str]``
-        in which every item represents one complete application-level message
-        that must be delivered to the corresponding processor.
+        destination of the messages. Each dictionary value is a
+        ``Queue[str]`` in which every item represents one complete
+        application-level message that must be delivered to the corresponding
+        processor.
 
         The caller writes messages to the queues using the standard
         :class:`queue.Queue` interface. For example::

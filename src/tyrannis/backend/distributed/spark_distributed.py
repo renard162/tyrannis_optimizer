@@ -106,7 +106,9 @@ class SparkDistributed(DistributedBackendBase):
                 str(self._code_archive),
             )
 
-        self._processor.create_processors_pool(self._n_executors)
+        self._processor.create_processors_pool(
+            self._n_executors,
+        )
 
         self._migration.start()
 
@@ -123,6 +125,7 @@ class SparkDistributed(DistributedBackendBase):
             ).collect()
 
             self._local_bests = dict(results)
+
             self.update_result()
 
         finally:
@@ -130,12 +133,13 @@ class SparkDistributed(DistributedBackendBase):
 
     def _get_n_executors(self) -> int:
         jsc = cast(Any, self._spark.sparkContext._jsc)
+
         return jsc.sc().getExecutorMemoryStatus().size
 
 
 def _run_processor(
     processor: ProcessorBase,
-) -> tuple[str, dict]:
+) -> tuple[str, dict | None]:
     """
     Execute a processor inside a Spark executor.
 
@@ -150,8 +154,8 @@ def _run_processor(
 
         local_best = processor.local_best
 
-        if not local_best:
-            result: dict = {}
+        if local_best is None:
+            result = None
         else:
             result = json.loads(local_best)
 

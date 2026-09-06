@@ -69,8 +69,11 @@ def run_processor(seed: int = SEED) -> ThreadsPool:
     executor = next(iter(processor.processors_pool.values()))
 
     executor.initialize_execution_context()
-    executor.run()
-    executor.finalize_execution_context()
+
+    try:
+        executor.run()
+    finally:
+        executor.finalize_execution_context()
 
     return executor
 
@@ -81,7 +84,6 @@ def test_run_executes_algorithm() -> None:
     algorithm = processor._algorithm
 
     assert len(algorithm.population) == N_PARTICLES
-    assert processor._status.actual_iter == N_ITER
 
     for particle in algorithm.population.values():
         assert particle.fitness is not None
@@ -91,10 +93,18 @@ def test_run_executes_algorithm() -> None:
 def test_run_updates_status() -> None:
     processor = run_processor()
 
-    assert len(processor._status.population) == N_PARTICLES
-    assert processor._status.best_particle_data != ""
-    assert processor._status.best_particle_fitness is not None
-    assert np.isfinite(processor._status.best_particle_fitness)
+    algorithm = processor._algorithm
+
+    assert len(algorithm.population) == N_PARTICLES
+
+    best_particle = algorithm.local_best
+
+    assert best_particle is not None
+    assert best_particle.fitness is not None
+    assert np.isfinite(best_particle.fitness)
+
+    assert processor.local_best is not None
+    assert processor.local_best != ""
 
 
 def test_run_updates_local_best() -> None:
@@ -106,6 +116,7 @@ def test_run_updates_local_best() -> None:
     assert best_particle.fitness is not None
     assert np.isfinite(best_particle.fitness)
 
+    assert processor.local_best is not None
     assert processor.local_best != ""
 
 
@@ -113,7 +124,7 @@ def test_run_uses_configured_number_of_processes() -> None:
     processor = run_processor()
 
     np.testing.assert_equal(
-        processor._status.n_process,
+        processor._n_process,
         N_PROCESS,
     )
 

@@ -17,7 +17,7 @@ class Local(BackendBase):
     def __init__(self) -> None:
         self._cost_function_wrapper = LocalCostFunctionWrapper
         self._identifier = "Local"
-        self._global_best_data = None
+        self._global_best_data: str | None = None
 
     def initialize_context(
         self,
@@ -62,13 +62,16 @@ class Local(BackendBase):
             self._global_best_data = executor.local_best
             self._processor.update_processors_pool([executor])
             self.update_result()
+
         finally:
             executor.finalize_execution_context()
 
     def update_result(self) -> None:
         if self._global_best_data is None:
             return
+
         particle_data = json.loads(self._global_best_data)
+
         self._result = {
             key: value
             for key, value in particle_data.items()

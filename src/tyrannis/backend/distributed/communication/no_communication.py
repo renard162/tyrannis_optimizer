@@ -38,7 +38,6 @@ class NoCommunicationProcessor(CommunicationProcessorBase):
 
     def start(
         self,
-        wait_signal: LocalEvent,
         stop_signal: LocalEvent,
     ) -> None:
         self._messages = Queue()

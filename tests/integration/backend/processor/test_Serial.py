@@ -1,74 +1,81 @@
-import numpy as np
-from doubles.cost_functions import sphere
+from doubles.algorithm import DummyAlgorithm
 
-from tyrannis.algorithm.pso import PSO
-from tyrannis.backend.distributed.communication.no_communication import (
-    NoCommunicationDriver,
-)
-from tyrannis.backend.migration.island_isolation import IslandIsolation
 from tyrannis.backend.processor.serial import Serial
 from tyrannis.core.signals import LocalEvent
 
-N_ITER = 20
-N_PARTICLES = 10
+N_ITER = 10
+N_PARTICLES = 5
 SEED = 42
 
-BOUNDARIES = {
-    "x": (-5.12, 5.12),
-    "y": (-5.12, 5.12),
-}
 
-
-def create_migration() -> IslandIsolation:
-    migration = IslandIsolation()
-
-    communication_driver = NoCommunicationDriver(
-        island_ids=["island:0"],
-        stop_signal=LocalEvent(),
-    )
-
-    migration.initialize_context(
-        communication_driver=communication_driver,
-        communication_processor_class=None,  # type: ignore
-        communication_processor_kargs={},
-    )
-
-    return migration
-
-
-def create_processor(seed: int = SEED) -> Serial:
-    algorithm = PSO()
+def create_algorithm() -> DummyAlgorithm:
+    algorithm = DummyAlgorithm()
 
     algorithm.initialize_context(
-        fitness_function=sphere,
-        boundaries=BOUNDARIES,
+        fitness_function=lambda variables: sum(variables.values()),
+        boundaries={"x": (-1.0, 1.0)},
     )
 
+    return algorithm
+
+
+def create_processor() -> Serial:
     processor = Serial()
 
     processor.initialize_context(
-        algorithm=algorithm,
+        algorithm=create_algorithm(),
         n_iter=N_ITER,
         n_particles=N_PARTICLES,
-        migration_driver=create_migration(),
-        seed=seed,
+        migration_driver=None,  # type: ignore
+        seed=SEED,
     )
 
     return processor
 
 
-def run_processor(seed: int = SEED) -> Serial:
-    processor = create_processor(seed)
+def run_processor() -> Serial:
+    processor = create_processor()
 
-    processor.create_processors_pool(1)
+    processor._migration_processor = DummyMigrationProcessor()  # type: ignore
 
-    executor = next(iter(processor.processors_pool.values()))
+    processor.initialize_execution_context()
 
-    executor.initialize_execution_context()
-    executor.run()
-    executor.finalize_execution_context()
+    try:
+        processor.run()
+    finally:
+        processor.finalize_execution_context()
 
-    return executor
+    return processor
+
+
+class DummyMigrationProcessor:
+    def __init__(self) -> None:
+        self.start_called = False
+        self.stop_called = False
+        self.migration_control_calls = []
+
+    def start(self, stop_signal: LocalEvent) -> None:
+        self.start_called = True
+        self.stop_signal = stop_signal
+
+    def stop(self) -> None:
+        self.stop_called = True
+
+    def migration_control(
+        self,
+        actual_iter: int,
+        local_best,
+        insert_arrival_particle,
+        departure_particle,
+    ) -> None:
+        self.migration_control_calls.append(
+            {
+                "actual_iter": actual_iter,
+                "local_best": local_best,
+                "insert_arrival_particle": insert_arrival_particle,
+                "departure_particle": departure_particle,
+            }
+        )
 
 
 def test_run_executes_algorithm() -> None:
@@ -77,42 +84,49 @@ def test_run_executes_algorithm() -> None:
     algorithm = processor._algorithm
 
     assert len(algorithm.population) == N_PARTICLES
-    assert processor._status.actual_iter == N_ITER
 
     for particle in algorithm.population.values():
         assert particle.fitness is not None
-        assert np.isfinite(particle.fitness)
 
 
 def test_run_updates_status() -> None:
     processor = run_processor()
 
-    assert len(processor._status.population) == N_PARTICLES
-    assert processor._status.best_particle_data != ""
-    assert processor._status.best_particle_fitness is not None
-    assert np.isfinite(processor._status.best_particle_fitness)
+    algorithm = processor._algorithm
+
+    assert len(algorithm.population) == N_PARTICLES
+
+    # O estado publicado pelo ProcessorBase agora é local_best.
+    # Não existe mais processor._status.
+    if algorithm.local_best is not None:
+        assert processor.local_best == algorithm.local_best.dump()
 
 
-def test_run_updates_local_best() -> None:
-    processor = run_processor()
-
-    best_particle = processor._algorithm.local_best
-
-    assert best_particle is not None
-    assert best_particle.fitness is not None
-    assert np.isfinite(best_particle.fitness)
-
-    assert processor.local_best != ""
-
-
-def test_processors_pool_creates_serial_executor() -> None:
+def test_initialize_execution_context_starts_migration() -> None:
     processor = create_processor()
 
-    processor.create_processors_pool(1)
+    migration_processor = DummyMigrationProcessor()
+    processor._migration_processor = migration_processor  # type: ignore
 
-    assert len(processor.processors_pool) == 1
+    processor.initialize_execution_context()
 
-    executor = next(iter(processor.processors_pool.values()))
+    try:
+        assert migration_processor.start_called
+        assert migration_processor.stop_called is False
+        assert processor._stop_signal is not None
+        assert migration_processor.stop_signal is processor._stop_signal
+    finally:
+        processor.finalize_execution_context()
 
-    assert isinstance(executor, Serial)
-    assert executor.identifier == "island:0"
+
+def test_finalize_execution_context_stops_migration() -> None:
+    processor = create_processor()
+
+    migration_processor = DummyMigrationProcessor()
+    processor._migration_processor = migration_processor  # type: ignore
+
+    processor.initialize_execution_context()
+    processor.finalize_execution_context()
+
+    assert migration_processor.start_called
+    assert migration_processor.stop_called

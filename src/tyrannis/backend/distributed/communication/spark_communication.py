@@ -4,7 +4,7 @@ import selectors
 import socket
 from queue import Empty, Queue
 from threading import Event, Thread
-from typing import Final
+from typing import Final, cast
 
 from ....core.backend_communication import (
     CommunicationDriverBase,
@@ -30,12 +30,10 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
         self._port = port
         self._identification = identification
 
-        # Runtime resources are initialized by start().
         self._socket: socket.socket | None = None
         self._thread: Thread | None = None
         self._running: Event | None = None
 
-        self._wait_signal: LocalEvent | None = None
         self._stop_signal: LocalEvent | None = None
 
         self._messages: Queue[str] | None = None
@@ -63,7 +61,6 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
 
     def start(
         self,
-        wait_signal: LocalEvent,
         stop_signal: LocalEvent,
     ) -> None:
         if self._thread is not None and self._thread.is_alive():
@@ -71,7 +68,6 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
                 "Communication is already running.",
             )
 
-        self._wait_signal = wait_signal
         self._stop_signal = stop_signal
 
         self._running = Event()
@@ -82,14 +78,16 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
             socket.AF_INET,
             socket.SOCK_STREAM,
         )
+
         self._socket.connect(
             (self._driver_ip, self._port),
         )
 
         self._running.set()
 
-        # The identification is sent as a normal framed message.
-        self._send_message(self._identification)
+        self._send_message(
+            self._identification,
+        )
 
         self._thread = Thread(
             target=self._receive_loop,
@@ -108,7 +106,11 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
             except OSError:
                 pass
 
-            self._socket.close()
+            try:
+                self._socket.close()
+            except OSError:
+                pass
+
             self._socket = None
 
         if self._thread is not None:
@@ -120,8 +122,6 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
         self._outgoing_queue = None
 
         self._receive_buffer = ""
-
-        self._wait_signal = None
         self._stop_signal = None
 
     def _receive_loop(self) -> None:
@@ -160,6 +160,9 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
                 break
 
             if not data:
+                if running.is_set():
+                    stop_signal.set()
+
                 break
 
             try:
@@ -172,14 +175,15 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
 
     def _process_buffer(self) -> None:
         while self._receive_buffer:
-            # STOP is a control signal and is not part of a frame.
-            stop_position = self._receive_buffer.find(self.STOP)
+            stop_position = self._receive_buffer.find(
+                self.STOP,
+            )
 
             if stop_position != -1:
-                stx_position = self._receive_buffer.find(self.STX)
+                stx_position = self._receive_buffer.find(
+                    self.STX,
+                )
 
-                # If STOP occurs before the next frame, discard everything
-                # before STOP and process the stop signal.
                 if stx_position == -1 or stop_position < stx_position:
                     self._receive_buffer = self._receive_buffer[
                         stop_position + len(self.STOP) :
@@ -195,43 +199,30 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
                     stop_signal.set()
                     return
 
-            # Locate the beginning of the next frame.
-            stx_position = self._receive_buffer.find(self.STX)
+            stx_position = self._receive_buffer.find(
+                self.STX,
+            )
 
             if stx_position == -1:
-                # No frame can be completed with the current buffer.
                 self._receive_buffer = ""
                 return
 
-            # Discard bytes preceding STX.
             if stx_position > 0:
                 self._receive_buffer = self._receive_buffer[stx_position:]
 
-            # Locate the end of the frame.
             etx_position = self._receive_buffer.find(
                 self.ETX,
                 len(self.STX),
             )
 
             if etx_position == -1:
-                # The frame is incomplete. Keep it for the next recv().
                 return
 
             message = self._receive_buffer[len(self.STX) : etx_position]
 
             self._receive_buffer = self._receive_buffer[etx_position + len(self.ETX) :]
 
-            if message:
-                self.messages.put(message)
-            else:
-                wait_signal = self._wait_signal
-
-                if wait_signal is None:
-                    raise RuntimeError(
-                        "Communication wait signal is not initialized.",
-                    )
-
-                wait_signal.set()
+            self.messages.put(message)
 
     def _send_pending_messages(self) -> None:
         communication_socket = self._socket
@@ -273,7 +264,10 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
 
                 return
 
-    def _send_message(self, message: str) -> None:
+    def _send_message(
+        self,
+        message: str,
+    ) -> None:
         communication_socket = self._socket
 
         if communication_socket is None:
@@ -281,7 +275,7 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
                 "Communication socket is not initialized.",
             )
 
-        data = f"{self.STX}{message}{self.ETX}".encode()
+        data = (f"{self.STX}{message}{self.ETX}").encode()
 
         communication_socket.sendall(data)
 
@@ -311,11 +305,17 @@ class SparkCommunicationDriver(CommunicationDriverBase):
             island_id: Queue() for island_id in self._island_ids
         }
 
-        # Maps an island ID to its active TCP connection.
         self._connections: dict[str, socket.socket] = {}
 
-        # Keeps a receive buffer for each TCP connection.
-        self._receive_buffers: dict[socket.socket, str] = {}
+        self._connection_identifications: dict[
+            socket.socket,
+            str,
+        ] = {}
+
+        self._receive_buffers: dict[
+            socket.socket,
+            str,
+        ] = {}
 
         self._server_socket: socket.socket | None = None
         self._selector: selectors.BaseSelector | None = None
@@ -355,7 +355,10 @@ class SparkCommunicationDriver(CommunicationDriverBase):
             1,
         )
 
-        self._server_socket.bind(("", self._port))
+        self._server_socket.bind(
+            ("", self._port),
+        )
+
         self._server_socket.listen()
         self._server_socket.setblocking(False)
 
@@ -398,6 +401,7 @@ class SparkCommunicationDriver(CommunicationDriverBase):
                 pass
 
         self._connections.clear()
+        self._connection_identifications.clear()
         self._receive_buffers.clear()
 
         if self._selector is not None:
@@ -420,20 +424,23 @@ class SparkCommunicationDriver(CommunicationDriverBase):
                 "Server socket is not initialized.",
             )
 
-        while self._running.is_set():
-            if self._stop_signal.is_set() and not self._stop_sent:
-                self._send_stop_to_all()
-                self._stop_sent = True
+        while self._running.is_set() and not self._stop_signal.is_set():
+            self._send_pending_messages()
 
-            events = selector.select(timeout=0.1)
+            events = selector.select(
+                timeout=0.1,
+            )
 
             for key, mask in events:
                 if key.fileobj is server_socket:
                     self._accept_connection()
-                elif mask & selectors.EVENT_READ:
-                    self._receive(key)
 
-            self._send_pending_messages()
+                elif mask & selectors.EVENT_READ:
+                    self._receive_from_connection(
+                        cast(socket.socket, key.fileobj),
+                    )
+
+        self._send_stop_signal()
 
     def _accept_connection(self) -> None:
         server_socket = self._server_socket
@@ -443,9 +450,7 @@ class SparkCommunicationDriver(CommunicationDriverBase):
             return
 
         if selector is None:
-            raise RuntimeError(
-                "Selector is not initialized.",
-            )
+            return
 
         try:
             connection, _ = server_socket.accept()
@@ -459,102 +464,25 @@ class SparkCommunicationDriver(CommunicationDriverBase):
         selector.register(
             connection,
             selectors.EVENT_READ,
-            data=None,
         )
 
-    def _receive(
-        self,
-        key: selectors.SelectorKey,
-    ) -> None:
-        connection = key.fileobj
-
-        if not isinstance(connection, socket.socket):
-            return
-
-        # data=None means that the client has not yet identified itself.
-        if key.data is None:
-            self._receive_handshake(connection)
-            return
-
-        island_id = key.data
-
-        if not isinstance(island_id, str):
-            self._close_connection(connection)
-            return
-
-        self._receive_message(
-            connection,
-            island_id,
-        )
-
-    def _receive_handshake(
+    def _receive_from_connection(
         self,
         connection: socket.socket,
     ) -> None:
-        selector = self._selector
-
-        if selector is None:
-            raise RuntimeError(
-                "Selector is not initialized.",
-            )
-
-        if not self._receive_data(connection):
-            return
-
-        messages = self._extract_messages(connection)
-
-        for island_id in messages:
-            # The first framed message received from a new connection
-            # must be the client's identification.
-            if island_id not in self._island_ids:
-                self._close_connection(connection)
-                return
-
-            # Only one active connection is allowed for each island.
-            old_connection = self._connections.get(island_id)
-
-            if old_connection is not None:
-                self._close_connection(
-                    old_connection,
-                    island_id,
-                )
-
-            self._connections[island_id] = connection
-
-            # From this point onward, messages received through this
-            # socket are routed to this island's queue.
-            selector.modify(
-                connection,
-                selectors.EVENT_READ,
-                data=island_id,
-            )
-
-            return
-
-    def _receive_message(
-        self,
-        connection: socket.socket,
-        island_id: str,
-    ) -> None:
-        if not self._receive_data(connection):
-            return
-
-        for message in self._extract_messages(connection):
-            self._incoming_queues[island_id].put(message)
-
-    def _receive_data(
-        self,
-        connection: socket.socket,
-    ) -> bool:
         try:
             data = connection.recv(4096)
         except OSError:
             self._close_connection(connection)
-            return False
+            return
 
         if not data:
             self._close_connection(connection)
-            return False
+
+            if self._running.is_set():
+                self._stop_signal.set()
+
+            return
 
         try:
             self._receive_buffers[connection] += data.decode(
@@ -562,36 +490,43 @@ class SparkCommunicationDriver(CommunicationDriverBase):
             )
         except UnicodeDecodeError:
             self._close_connection(connection)
-            return False
+            self._stop_signal.set()
+            return
 
-        return True
+        self._process_driver_buffer(
+            connection,
+        )
 
-    def _extract_messages(
+    def _process_driver_buffer(
         self,
         connection: socket.socket,
-    ) -> list[str]:
-        buffer = self._receive_buffers[connection]
-        messages: list[str] = []
+    ) -> None:
+        buffer = self._receive_buffers.get(connection)
+
+        if buffer is None:
+            return
 
         while buffer:
-            # STOP is independent from STX/ETX framing.
-            stop_position = buffer.find(self.STOP)
+            stop_position = buffer.find(
+                self.STOP,
+            )
 
             if stop_position != -1:
-                stx_position = buffer.find(self.STX)
+                stx_position = buffer.find(
+                    self.STX,
+                )
 
                 if stx_position == -1 or stop_position < stx_position:
                     buffer = buffer[stop_position + len(self.STOP) :]
 
-                    self._receive_buffers[connection] = buffer
-                    self._handle_stop()
-
+                    self._stop_signal.set()
                     break
 
-            stx_position = buffer.find(self.STX)
+            stx_position = buffer.find(
+                self.STX,
+            )
 
             if stx_position == -1:
-                # Discard data that cannot form a frame.
                 buffer = ""
                 break
 
@@ -604,87 +539,148 @@ class SparkCommunicationDriver(CommunicationDriverBase):
             )
 
             if etx_position == -1:
-                # Incomplete frame; preserve it for the next recv().
                 break
 
             message = buffer[len(self.STX) : etx_position]
 
-            messages.append(message)
-
             buffer = buffer[etx_position + len(self.ETX) :]
+
+            if not self._register_connection(
+                connection,
+                message,
+            ):
+                self._route_message(
+                    connection,
+                    message,
+                )
 
         self._receive_buffers[connection] = buffer
 
-        return messages
+    def _register_connection(
+        self,
+        connection: socket.socket,
+        message: str,
+    ) -> bool:
+        if connection in self._connection_identifications:
+            return False
 
-    def _handle_stop(self) -> None:
-        self._stop_signal.set()
+        if message not in self._island_ids:
+            self._close_connection(connection)
+            self._stop_signal.set()
+            return True
 
-    def _send_pending_messages(self) -> None:
-        for island_id, queue in self._outgoing_queues.items():
-            connection = self._connections.get(island_id)
+        existing_connection = self._connections.get(
+            message,
+        )
 
-            if connection is None:
-                continue
+        if existing_connection is not None:
+            self._close_connection(connection)
+            self._stop_signal.set()
+            return True
 
-            while True:
-                try:
-                    message = queue.get_nowait()
-                except Empty:
-                    break
+        self._connection_identifications[connection] = message
+        self._connections[message] = connection
 
-                try:
-                    # STOP is a control signal, not a framed message.
-                    if message == self.STOP:
-                        data = self.STOP.encode("utf-8")
-                    else:
-                        data = (f"{self.STX}{message}{self.ETX}").encode()
+        return True
 
-                    connection.sendall(data)
+    def _route_message(
+        self,
+        connection: socket.socket,
+        message: str,
+    ) -> None:
+        island_id = self._connection_identifications.get(
+            connection,
+        )
 
-                except OSError:
-                    queue.put(message)
+        if island_id is None:
+            self._close_connection(connection)
+            self._stop_signal.set()
+            return
 
-                    self._close_connection(
-                        connection,
-                        island_id,
-                    )
-
-                    break
-
-    def _send_stop_to_all(self) -> None:
-        data = self.STOP.encode("utf-8")
-
-        for island_id, connection in list(
-            self._connections.items(),
-        ):
-            try:
-                connection.sendall(data)
-            except OSError:
-                self._close_connection(
-                    connection,
-                    island_id,
-                )
+        self._incoming_queues[island_id].put(
+            message,
+        )
 
     def _close_connection(
         self,
         connection: socket.socket,
-        island_id: str | None = None,
     ) -> None:
         selector = self._selector
 
         if selector is not None:
             try:
                 selector.unregister(connection)
-            except (KeyError, ValueError):
+            except (
+                KeyError,
+                ValueError,
+                OSError,
+            ):
                 pass
+
+        island_id = self._connection_identifications.pop(
+            connection,
+            None,
+        )
+
+        if island_id is not None:
+            active_connection = self._connections.get(
+                island_id,
+            )
+
+            if active_connection is connection:
+                del self._connections[island_id]
+
+        self._receive_buffers.pop(
+            connection,
+            None,
+        )
 
         try:
             connection.close()
         except OSError:
             pass
 
-        self._receive_buffers.pop(connection, None)
+    def _send_pending_messages(self) -> None:
+        for island_id, outgoing_queue in self._outgoing_queues.items():
+            connection = self._connections.get(
+                island_id,
+            )
 
-        if island_id is not None:
-            self._connections.pop(island_id, None)
+            if connection is None:
+                continue
+
+            while True:
+                try:
+                    message = outgoing_queue.get_nowait()
+                except Empty:
+                    break
+
+                try:
+                    data = (f"{self.STX}{message}{self.ETX}").encode()
+
+                    connection.sendall(data)
+
+                except OSError:
+                    outgoing_queue.put(message)
+                    self._close_connection(connection)
+
+                    if self._running.is_set():
+                        self._stop_signal.set()
+
+                    break
+
+    def _send_stop_signal(self) -> None:
+        if self._stop_sent:
+            return
+
+        self._stop_sent = True
+
+        for connection in list(
+            self._connections.values(),
+        ):
+            try:
+                connection.sendall(
+                    self.STOP.encode("utf-8"),
+                )
+            except OSError:
+                pass
