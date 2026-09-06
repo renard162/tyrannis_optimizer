@@ -1,7 +1,12 @@
 import json
 
+from ..backend.distributed.communication.no_communication import (
+    NoCommunicationDriver,
+    NoCommunicationProcessor,
+)
 from ..core.algorithm import CostFunctionWrapperBase
 from ..core.backend import BackendBase
+from ..core.signals import LocalEvent
 
 
 class LocalCostFunctionWrapper(CostFunctionWrapperBase):
@@ -13,6 +18,35 @@ class Local(BackendBase):
         self._cost_function_wrapper = LocalCostFunctionWrapper
         self._identifier = "Local"
         self._global_best_data = None
+
+    def initialize_context(
+        self,
+        algorithm,
+        n_iter: int,
+        n_particles: int,
+        migration,
+        processor=None,
+        fitness_failure_strategy: str = "invalidate",
+        seed: int | None = None,
+    ) -> None:
+        super().initialize_context(
+            algorithm=algorithm,
+            n_iter=n_iter,
+            n_particles=n_particles,
+            migration=migration,
+            processor=processor,
+            fitness_failure_strategy=fitness_failure_strategy,
+            seed=seed,
+        )
+
+        migration.initialize_context(
+            communication_driver=NoCommunicationDriver(
+                island_ids=["island:0"],
+                stop_signal=LocalEvent(),
+            ),
+            communication_processor_class=NoCommunicationProcessor,
+            communication_processor_kargs={},
+        )
 
     def execute(self) -> None:
         if self._processor is None:

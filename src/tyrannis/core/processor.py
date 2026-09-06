@@ -168,10 +168,12 @@ class ProcessorBase(ABC, Generic[SignalType]):
                 continue
             setattr(new_processor, name, deepcopy(value, memo))
 
-        new_processor._pool_count_sequence = None
         new_processor._seed_sequence = None
-        new_processor._migration_driver = None
+        new_processor._pool_count_sequence = None
         new_processor._processors_pool = {}
+        new_processor._migration_driver = None
+        new_processor._migration_processor = None
+
         return new_processor
 
     def initialize_context(
@@ -223,7 +225,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
         )
 
         new_processor._migration_processor = (
-            new_processor._migration_driver.create_processor_module(  # type: ignore
+            self._migration_driver.create_processor_module(  # type: ignore
                 identification=processor_identifier,
             )
         )
