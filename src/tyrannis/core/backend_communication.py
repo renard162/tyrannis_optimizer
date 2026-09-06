@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from queue import Queue
 
-from ..core.processor import LocalEvent
+from .signals import LocalEvent
 
 
 class CommunicationProcessorBase(ABC):

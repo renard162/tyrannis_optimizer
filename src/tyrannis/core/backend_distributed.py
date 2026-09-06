@@ -1,13 +1,11 @@
 from abc import abstractmethod
-from typing import Any
 
 import numpy as np
 
-from tyrannis.core.algorithm import AlgorithmBase
-from tyrannis.core.processor import ProcessorBase
-
+from .algorithm import AlgorithmBase
 from .backend import BackendBase
 from .backend_migration import MigrationDriverBase
+from .processor import ProcessorBase
 
 
 class DistributedBackendBase(BackendBase):

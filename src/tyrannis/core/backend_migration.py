@@ -5,7 +5,6 @@ from .backend_communication import (
     CommunicationDriverBase,
     CommunicationProcessorBase,
 )
-from .processor import LocalEvent
 
 
 class MigrationProcessorBase(ABC):

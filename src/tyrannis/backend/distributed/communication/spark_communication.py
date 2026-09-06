@@ -10,7 +10,7 @@ from ....core.backend_communication import (
     CommunicationDriverBase,
     CommunicationProcessorBase,
 )
-from ....core.processor import LocalEvent
+from ....core.signals import LocalEvent
 
 
 class SparkCommunicationProcessor(CommunicationProcessorBase):

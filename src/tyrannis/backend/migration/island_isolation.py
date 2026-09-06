@@ -7,7 +7,7 @@ from ...core.backend_migration import (
     MigrationDriverBase,
     MigrationProcessorBase,
 )
-from ...core.processor import LocalEvent
+from ...core.signals import LocalEvent
 from ..distributed.communication.no_communication import (
     NoCommunicationDriver,
     NoCommunicationProcessor,

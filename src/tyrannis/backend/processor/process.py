@@ -10,10 +10,10 @@ import cloudpickle
 
 from ...core.algorithm import CostFunctionWrapperBase
 from ...core.processor import (
-    LocalEvent,
     ProcessorBase,
     evaluate_particle,
 )
+from ...core.signals import LocalEvent
 
 
 class ProcessPoolCostFunctionWrapper(CostFunctionWrapperBase):

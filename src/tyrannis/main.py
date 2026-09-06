@@ -57,6 +57,7 @@ def parallel_test():
 
     backend = SparkParallel(spark)
     backend.initialize_context(
+        migration=IslandIsolation(),
         algorithm=algo,
         n_iter=3,  # 30,
         n_particles=30,  # 500,
@@ -80,6 +81,8 @@ def distributed_test():
         boundaries={f"{n}": (-32.768, 32.768) for n in range(2)},
     )
 
+    migration = IslandIsolation()
+
     # processor = Serial()
     # processor = ThreadsPool()
     processor = ProcessPool()
@@ -87,21 +90,23 @@ def distributed_test():
         algorithm=algo,
         n_iter=30,
         n_particles=15,  # 500,
+        migration_driver=migration,
         seed=42,
     )
 
-    # backend = Local()
+    backend = Local()
 
-    spark = generate_spark_session()
-    backend = SparkDistributed(
-        spark=spark,
-        n_executors=3,
-    )
+    # spark = generate_spark_session()
+    # backend = SparkDistributed(
+    #     spark=spark,
+    #     n_executors=3,
+    # )
 
     backend.initialize_context(
         algorithm=algo,
         n_iter=30,
         n_particles=15,
+        migration=migration,
         processor=processor,
     )
 
@@ -116,5 +121,5 @@ def distributed_test():
 
 
 if __name__ == "__main__":
-    # distributed_test()
-    parallel_test()
+    distributed_test()
+    # parallel_test()

@@ -7,8 +7,9 @@ from pyspark.sql import SparkSession
 from ...core.algorithm import CostFunctionWrapperBase
 from ...core.backend_distributed import DistributedBackendBase
 from ...core.backend_migration import MigrationDriverBase
-from ...core.processor import LocalEvent, ProcessorBase
-from ..distributed.communication.spark_communication import (
+from ...core.processor import ProcessorBase
+from ...core.signals import LocalEvent
+from .communication.spark_communication import (
     SparkCommunicationDriver,
     SparkCommunicationProcessor,
 )
