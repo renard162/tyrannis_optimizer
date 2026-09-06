@@ -23,6 +23,7 @@ class DummyMigrationProcessor(MigrationProcessorBase):
         self.start_calls: list[LocalEvent] = []
         self.stop_calls = 0
         self.migration_control_calls: list[int] = []
+        self.population_calls: list[dict[str, float | None]] = []
 
     def start(
         self,
@@ -36,11 +37,13 @@ class DummyMigrationProcessor(MigrationProcessorBase):
     def migration_control(
         self,
         actual_iter: int,
+        population: dict[str, float | None],
         local_best: str | None,
         insert_arrival_particle,
         departure_particle,
     ) -> None:
         self.migration_control_calls.append(actual_iter)
+        self.population_calls.append(population.copy())
 
 
 def create_processor() -> ThreadsPool:
@@ -147,6 +150,10 @@ def test_migration_control_delegates_to_migration_processor() -> None:
     processor = create_processor()
 
     processor._local_best = '{"fitness": 1.0}'
+    processor._population = {
+        "particle:0": 10.0,
+        "particle:1": 20.0,
+    }
 
     migration_processor = processor._migration_processor
 
@@ -155,3 +162,9 @@ def test_migration_control_delegates_to_migration_processor() -> None:
     processor.migration_control(5)
 
     assert migration_processor.migration_control_calls == [5]  # type: ignore
+    assert migration_processor.population_calls == [  # type: ignore
+        {
+            "particle:0": 10.0,
+            "particle:1": 20.0,
+        }
+    ]

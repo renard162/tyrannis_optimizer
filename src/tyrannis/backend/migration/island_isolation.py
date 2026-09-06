@@ -47,6 +47,7 @@ class IslandIsolationProcessor(MigrationProcessorBase):
     def migration_control(
         self,
         actual_iter: int,
+        population: dict[str, float | None],
         local_best: str | None,
         insert_arrival_particle: Callable[[dict[str, Any]], None],
         departure_particle: Callable[[str], None],

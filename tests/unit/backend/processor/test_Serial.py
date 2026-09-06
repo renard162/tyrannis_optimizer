@@ -26,6 +26,7 @@ class DummyMigrationProcessor(MigrationProcessorBase):
         self.start_calls: list[LocalEvent] = []
         self.stop_calls = 0
         self.migration_control_calls: list[int] = []
+        self.population_calls: list[dict[str, float | None]] = []
 
     def start(
         self,
@@ -39,11 +40,13 @@ class DummyMigrationProcessor(MigrationProcessorBase):
     def migration_control(
         self,
         actual_iter: int,
+        population: dict[str, float | None],
         local_best: str | None,
         insert_arrival_particle,
         departure_particle,
     ) -> None:
         self.migration_control_calls.append(actual_iter)
+        self.population_calls.append(population.copy())
 
 
 class DummyMigrationDriver(MigrationDriverBase):
@@ -151,6 +154,20 @@ def test_run() -> None:
 
     assert migration_processor is not None
     assert migration_processor.migration_control_calls == [0, 1]  # type: ignore
+
+    population_calls = migration_processor.population_calls  # type: ignore
+
+    assert len(population_calls) == 2
+    assert population_calls[0] == {}
+
+    assert set(population_calls[1]) == set(processor._algorithm.population)
+
+    assert population_calls[1] == {
+        particle.identifier: particle.fitness
+        for particle in processor._algorithm.population.values()
+    }
+
+    assert processor.population == population_calls[1]
 
     for particle in processor._algorithm.population.values():
         assert particle.fitness is not None

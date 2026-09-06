@@ -2,6 +2,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
+
 from .backend_communication import (
     CommunicationDriverBase,
     CommunicationProcessorBase,
@@ -43,44 +45,54 @@ class MigrationProcessorBase(ABC):
     def migration_control(
         self,
         actual_iter: int,
+        population: dict[str, float | None],
         local_best: str | None,
         insert_arrival_particle: Callable[[dict[str, Any]], None],
         departure_particle: Callable[[str], None],
     ) -> None:
         """
-        Control migration and synchronization for the current iteration.
-
-        The migration processor is responsible for determining whether the
-        processor must wait for synchronization and for applying pending
-        migration operations during the migration control window.
-
-        When `_synchronization_iter` is not `None`, the processor must block
-        whenever `actual_iter >= _synchronization_iter` until the
-        synchronization condition defined by the migration strategy is
-        satisfied.
-
-        A value of `None` for `_synchronization_iter` disables
-        iteration-based synchronization.
+        Control migration for the current iteration.
 
         Parameters
         ----------
         actual_iter:
             Current processor iteration.
 
+        population:
+            Current processor population represented as a dictionary mapping
+            particle identifiers to their fitness values.
+
+            The population is ordered by fitness in ascending order. Therefore,
+            the first entry represents the best particle and the last entry
+            represents the worst particle.
+
+            Tyrannis minimizes objective functions, so lower fitness values are
+            better.
+
         local_best:
             JSON-serialized representation of the best solution found by the
-            processor so far. A value of `None` indicates that no local best
-            solution has been established yet.
+            processor so far.
 
         insert_arrival_particle:
-            Callback used to insert a particle received through migration into
-            the processor population.
+            Callback used to insert or apply a particle received through migration.
 
         departure_particle:
-            Callback used to remove a particle selected for migration from the
-            processor population.
+            Callback used to remove a particle selected for migration.
         """
         raise NotImplementedError
+
+    @staticmethod
+    def _get_particle_fitness(
+        population: dict[str, float | None],
+        particle_id: str,
+    ) -> float:
+        """Return a particle fitness suitable for population ordering."""
+        fitness = population[particle_id]
+
+        if fitness is None:
+            return np.inf
+
+        return fitness
 
 
 class MigrationDriverBase(ABC):

@@ -31,6 +31,8 @@ class ProcessorBase(ABC, Generic[SignalType]):
     _migration_driver: MigrationDriverBase | None
     _migration_processor: MigrationProcessorBase | None
     _local_best: str | None
+    _population: dict[str, float | None]
+
     _excluded_attributes: tuple[str, ...] = (
         "_stop_signal",
         "_seed_sequence",
@@ -122,8 +124,8 @@ class ProcessorBase(ABC, Generic[SignalType]):
 
         This method must leave the processor in a state that can safely be
         serialized, deep-copied, or returned from a worker to the driver without
-        carrying resources that are specific to the execution context in which
-        it was run.
+        carrying resources that are specific to the execution context in which it
+        was run.
 
         Every resource initialized by `initialize_execution_context` must be
         released or replaced here before the processor leaves its execution
@@ -172,6 +174,8 @@ class ProcessorBase(ABC, Generic[SignalType]):
         self._migration_processor = None
         self._identifier = "MainProcessor"
         self._local_best = None
+        self._population = {}
+
         self._seed_sequence = np.random.SeedSequence(seed)
         self._pool_count_sequence = IntSequence()
         self._processors_pool = {}
@@ -219,6 +223,10 @@ class ProcessorBase(ABC, Generic[SignalType]):
     def local_best(self) -> str | None:
         return self._local_best
 
+    @property
+    def population(self) -> dict[str, float | None]:
+        return self._population
+
     def set_identifier(self, identifier: str) -> None:
         self._identifier = identifier
 
@@ -251,27 +259,13 @@ class ProcessorBase(ABC, Generic[SignalType]):
 
         self._migration_processor.migration_control(
             actual_iter=actual_iter,
+            population=self._population,
             local_best=self._local_best,
             insert_arrival_particle=self._insert_arrival_particle,
             departure_particle=self._departure_particle,
         )
 
-    def _insert_arrival_particle(
-        self,
-        particle_data: dict[str, Any],
-    ) -> None:
-        """
-        Insert an arriving particle into the algorithm population.
-
-        This method is the interface used by the migration processor to transfer
-        a particle received from another processor into the local algorithm.
-
-        Parameters
-        ----------
-        particle_data:
-            Serialized particle data required by the algorithm to create the
-            arriving particle.
-        """
+    def _insert_arrival_particle(self, particle_data: dict[str, Any]) -> None:
         particle_id = particle_data.get("identifier")
         if particle_id is None:
             raise ValueError("Arrival particle data must contain an identifier.")
@@ -279,29 +273,26 @@ class ProcessorBase(ABC, Generic[SignalType]):
         if particle_id not in self._algorithm.population:
             self._algorithm.create_particle(**particle_data)
 
-    def _departure_particle(
-        self,
-        particle_id: str,
-    ) -> None:
-        """
-        Remove a departing particle from the algorithm population.
-
-        This method is the interface used by the migration processor to remove
-        a particle selected for migration from the local algorithm.
-
-        Parameters
-        ----------
-        particle_id:
-            Identifier of the particle that must be removed.
-        """
+    def _departure_particle(self, particle_id: str) -> None:
         if particle_id not in self._algorithm.population:
             return
 
         del self._algorithm.population[particle_id]
 
     def update_status(self) -> None:
-        """Update the processor execution status."""
         self._update_partial_result()
+        self._update_population()
+
+    def _update_population(self) -> None:
+        self._population = dict(
+            sorted(
+                (
+                    (particle.identifier, particle.fitness)
+                    for particle in self._algorithm.population.values()
+                ),
+                key=lambda item: np.inf if item[1] is None else item[1],
+            )
+        )
 
     def _update_partial_result(self) -> None:
         if self._algorithm.local_best is None:
@@ -345,13 +336,17 @@ def evaluate_particle(
 ) -> ParticleBase:
     if stop_signal.is_set():
         return algorithm.get_unmodified_particle(particle_id)
+
     try:
         if initialize_particle:
             return algorithm.initialize_particle(particle_id)
+
         return algorithm.update_particle(particle_id)
+
     except Exception:
         if fitness_failure_strategy == "invalidate":
             particle = algorithm.population[particle_id]
             particle.candidate_fitness = np.inf
             return particle
+
         raise

@@ -50,6 +50,7 @@ class DummyMigrationProcessor(MigrationProcessorBase):
     def migration_control(
         self,
         actual_iter: int,
+        population: dict[str, float | None],
         local_best: str | None,
         insert_arrival_particle,
         departure_particle,
@@ -57,6 +58,7 @@ class DummyMigrationProcessor(MigrationProcessorBase):
         self.migration_control_called = True
         self.migration_control_args = {
             "actual_iter": actual_iter,
+            "population": population,
             "local_best": local_best,
             "insert_arrival_particle": insert_arrival_particle,
             "departure_particle": departure_particle,
@@ -375,53 +377,25 @@ def test_update_processors_pool_adds_processors() -> None:
     }
 
 
-def test_update_processors_pool_replaces_existing_processors() -> None:
+def test_update_processors_pool_replaces_processor_with_same_identifier() -> None:
     processor = create_processor()
 
     first = create_processor()
     first.set_identifier("island:0")
-
-    replacement = create_processor()
-    replacement.set_identifier("island:0")
-
-    processor.update_processors_pool([first])
-    processor.update_processors_pool([replacement])
-
-    assert processor.processors_pool == {
-        "island:0": replacement,
-    }
-
-
-def test_update_processors_pool_adds_and_replaces_processors() -> None:
-    processor = create_processor()
-
-    first = create_processor()
-    first.set_identifier("island:0")
-
-    replacement = create_processor()
-    replacement.set_identifier("island:0")
 
     second = create_processor()
-    second.set_identifier("island:1")
+    second.set_identifier("island:0")
 
     processor.update_processors_pool([first])
-
-    processor.update_processors_pool(
-        [
-            replacement,
-            second,
-        ]
-    )
+    processor.update_processors_pool([second])
 
     assert processor.processors_pool == {
-        "island:0": replacement,
-        "island:1": second,
+        "island:0": second,
     }
 
 
 def test_start_migration_requires_migration_processor() -> None:
     processor = create_processor()
-    processor.initialize_execution_context()
 
     with pytest.raises(
         RuntimeError,
@@ -430,13 +404,13 @@ def test_start_migration_requires_migration_processor() -> None:
         processor.start_migration()
 
 
-def test_start_migration_delegates_to_migration_processor() -> None:
+def test_start_migration() -> None:
     processor = create_processor()
-    processor.initialize_execution_context()
 
     migration_processor = create_migration_processor(processor)
 
     processor._migration_processor = migration_processor
+    processor.initialize_execution_context()
 
     processor.start_migration()
 
@@ -444,13 +418,13 @@ def test_start_migration_delegates_to_migration_processor() -> None:
     assert migration_processor.start_stop_signal is processor._stop_signal
 
 
-def test_stop_migration_without_migration_processor_is_noop() -> None:
+def test_stop_migration_without_migration_processor() -> None:
     processor = create_processor()
 
     processor.stop_migration()
 
 
-def test_stop_migration_delegates_to_migration_processor() -> None:
+def test_stop_migration() -> None:
     processor = create_processor()
 
     migration_processor = create_migration_processor(processor)
@@ -485,6 +459,7 @@ def test_migration_control_delegates_to_migration_processor() -> None:
 
     assert migration_processor.migration_control_args is not None
     assert migration_processor.migration_control_args["actual_iter"] == 7
+    assert migration_processor.migration_control_args["population"] == {}
     assert migration_processor.migration_control_args["local_best"] is None
     assert (
         migration_processor.migration_control_args["insert_arrival_particle"]
@@ -519,6 +494,9 @@ def test_migration_control_passes_local_best() -> None:
 
     assert migration_processor.migration_control_args is not None
     assert migration_processor.migration_control_args["local_best"] == particle.dump()
+    assert migration_processor.migration_control_args["population"] == {
+        "particle:0": 1.0,
+    }
 
 
 def test_insert_arrival_particle_creates_particle() -> None:

@@ -64,6 +64,7 @@ class DummyMigrationProcessor:
     def migration_control(
         self,
         actual_iter: int,
+        population: dict[str, float | None],
         local_best,
         insert_arrival_particle,
         departure_particle,
@@ -71,6 +72,7 @@ class DummyMigrationProcessor:
         self.migration_control_calls.append(
             {
                 "actual_iter": actual_iter,
+                "population": population,
                 "local_best": local_best,
                 "insert_arrival_particle": insert_arrival_particle,
                 "departure_particle": departure_particle,
