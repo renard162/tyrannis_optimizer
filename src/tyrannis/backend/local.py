@@ -20,11 +20,16 @@ class Local(BackendBase):
 
         self._processor.create_processors_pool(1)
         executor = next(iter(self._processor.processors_pool.values()))
+
         executor.initialize_execution_context()
-        executor.run()
-        self._global_best_data = executor.local_best
-        self._processor.update_processors_pool([executor])
-        self.update_result()
+
+        try:
+            executor.run()
+            self._global_best_data = executor.local_best
+            self._processor.update_processors_pool([executor])
+            self.update_result()
+        finally:
+            executor.finalize_execution_context()
 
     def update_result(self) -> None:
         if self._global_best_data is None:

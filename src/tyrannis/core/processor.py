@@ -9,6 +9,7 @@ from typing import Any, Generic, Self, TypeVar
 import numpy as np
 
 from .algorithm import AlgorithmBase, CostFunctionWrapperBase, ParticleBase
+from .backend_migration import MigrationDriverBase, MigrationProcessorBase
 
 
 class LocalEvent:
@@ -69,12 +70,15 @@ class ProcessorBase(ABC, Generic[SignalType]):
     _wait_signal: SignalType
     _cost_function_wrapper: type[CostFunctionWrapperBase]
     _processors_pool: dict[str, Self]
+    _migration_driver: MigrationDriverBase | None
+    _migration_processor: MigrationProcessorBase | None
     _excluded_attributes: tuple[str, ...] = (
         "_stop_signal",
         "_wait_signal",
         "_seed_sequence",
         "_processors_pool",
         "_pool_count_sequence",
+        "_migration_driver",
     )
 
     @abstractmethod
@@ -180,6 +184,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
 
         new_processor._pool_count_sequence = None
         new_processor._seed_sequence = None
+        new_processor._migration_driver = None
         new_processor._processors_pool = {}
         return new_processor
 
@@ -188,19 +193,24 @@ class ProcessorBase(ABC, Generic[SignalType]):
         algorithm: AlgorithmBase,
         n_iter: int,
         n_particles: int,
+        migration_driver: MigrationDriverBase,
         fitness_failure_strategy: str = "invalidate",
         seed: int | None = None,
     ) -> None:
         self._algorithm = algorithm
         self._n_iter = n_iter
         self._n_particles = n_particles
+
         if fitness_failure_strategy not in ("invalidate", "raise"):
             raise ValueError(
                 f"Invalid fitness failure strategy {fitness_failure_strategy!r}. "
                 "The strategy must be either 'invalidate' or 'raise'."
             )
-        self._fitness_failure_strategy = fitness_failure_strategy
 
+        self._fitness_failure_strategy = fitness_failure_strategy
+        self._migration_driver = migration_driver
+
+        self._migration_processor = None
         self._identifier = "MainProcessor"
         self._control = ControlVariables()
         self._status = StatusVariables(population={})
@@ -224,6 +234,12 @@ class ProcessorBase(ABC, Generic[SignalType]):
             identifier=f"{processor_identifier}|algorithm",
             cost_function_wrapper=self._cost_function_wrapper,
             seed=self._seed_sequence.spawn(1)[0],
+        )
+
+        new_processor._migration_processor = (
+            new_processor._migration_driver.create_processor_module(  # type: ignore
+                identification=processor_identifier,
+            )
         )
 
         return new_processor
@@ -270,9 +286,26 @@ class ProcessorBase(ABC, Generic[SignalType]):
 
         self._status.iter_waiting = False
 
+    def start_migration(self) -> None:
+        if self._migration_processor is None:
+            raise RuntimeError("Migration processor has not been initialized.")
+
+        self._migration_processor.start(
+            wait_signal=self._wait_signal,
+            stop_signal=self._stop_signal,
+        )
+
+    def stop_migration(self) -> None:
+        if self._migration_processor is None:
+            return
+
+        self._migration_processor.stop()
+
     def migration_control(self) -> None:
-        self._insert_arrival_particle()
-        self._departure_particle()
+        if self._migration_processor is None:
+            raise RuntimeError("Migration processor has not been initialized.")
+
+        self._migration_processor.check_particles()
 
     def _insert_arrival_particle(self) -> None:
         if self._control.arrival_particle_id is None:

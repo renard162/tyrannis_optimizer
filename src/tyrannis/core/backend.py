@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from .algorithm import AlgorithmBase, CostFunctionWrapperBase
-from .backend_migration import MigrationBase
+from .backend_migration import MigrationDriverBase
 from .processor import ProcessorBase
 
 
@@ -74,8 +74,8 @@ class BackendBase(ABC):
         algorithm: AlgorithmBase,
         n_iter: int,
         n_particles: int,
+        migration: MigrationDriverBase,
         processor: ProcessorBase | None = None,
-        migration: MigrationBase | None = None,
         fitness_failure_strategy: str = "invalidate",
         seed: int | None = None,
     ) -> None:

@@ -20,8 +20,10 @@ class Serial(ProcessorBase):
         self._stop_signal = LocalEvent()
         self._wait_signal = LocalEvent()
 
+        self.start_migration()
+
     def finalize_execution_context(self) -> None:
-        return
+        self.stop_migration()
 
     def run(self) -> None:
         self.init_particles()

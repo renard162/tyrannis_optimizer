@@ -1,6 +1,13 @@
+from abc import abstractmethod
+from typing import Any
+
 import numpy as np
 
+from tyrannis.core.algorithm import AlgorithmBase
+from tyrannis.core.processor import ProcessorBase
+
 from .backend import BackendBase
+from .backend_migration import MigrationDriverBase
 
 
 class DistributedBackendBase(BackendBase):
@@ -8,6 +15,34 @@ class DistributedBackendBase(BackendBase):
 
     _local_bests: dict[str, dict[str, float | dict[str, float]] | None]
     _n_executors: int
+    _migration_driver: MigrationDriverBase
+
+    @abstractmethod
+    def initialize_context(
+        self,
+        algorithm: AlgorithmBase,
+        n_iter: int,
+        n_particles: int,
+        migration: MigrationDriverBase,
+        processor: ProcessorBase | None = None,
+        fitness_failure_strategy: str = "invalidate",
+        seed: int | None = None,
+    ) -> None:
+        super().initialize_context(
+            algorithm=algorithm,
+            n_iter=n_iter,
+            n_particles=n_particles,
+            processor=processor,
+            migration=migration,
+            fitness_failure_strategy=fitness_failure_strategy,
+            seed=seed,
+        )
+        """
+        Call super of this method and call initialize context of
+        _migration_driver setting up the communication module.
+        
+        If migration is None, set the default migration module.
+        """
 
     def init_processors(self) -> None:
         if self._processor is None:

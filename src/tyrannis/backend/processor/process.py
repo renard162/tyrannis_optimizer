@@ -123,7 +123,11 @@ class ProcessPool(ProcessorBase):
         self._stop_signal = StopSignal()
         self._wait_signal = Event()
 
-    def clear_execution_context(self) -> None:
+        self.start_migration()
+
+    def finalize_execution_context(self) -> None:
+        self.stop_migration()
+
         self._stop_signal = LocalEvent()
         self._wait_signal = LocalEvent()
 
