@@ -142,6 +142,10 @@ class SpaceBase(ABC):
         """
         raise NotImplementedError
 
+    @property
+    def encoded_boundaries(self) -> dict[str, tuple[float, float]]:
+        return self._encoded_boundaries.copy()
+
     def __call__(self, float_inputs: dict[str, float]) -> float:
         if self._cost_function is None:
             raise ValueError("cost_function cannot be None.")
