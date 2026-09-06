@@ -25,13 +25,15 @@ class DummyCommunicationProcessor(CommunicationProcessorBase):
     def outgoing_queue(self) -> Queue[str]:
         return self._outgoing_queue
 
-    def start(
-        self,
-        wait_signal: LocalEvent,
-        stop_signal: LocalEvent,
-    ) -> None:
-        self._wait_signal = wait_signal
-        self._stop_signal = stop_signal
+    def start(self, stop_signal: LocalEvent) -> None:
+        raise NotImplementedError
+
+    def stop(self) -> None:
+        raise NotImplementedError
+
+
+def start(self, stop_signal: LocalEvent) -> None:
+    self._stop_signal = stop_signal
 
     def stop(self) -> None:
         pass

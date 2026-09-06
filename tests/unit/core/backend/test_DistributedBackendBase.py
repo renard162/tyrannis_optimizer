@@ -81,7 +81,7 @@ class DummyMigrationProcessor(MigrationProcessorBase):
     def stop(self) -> None:
         self._stopped = True
 
-    def migration_control(
+    def migration_control(  # type: ignore
         self,
         actual_iter: int,
         local_best: str | None,

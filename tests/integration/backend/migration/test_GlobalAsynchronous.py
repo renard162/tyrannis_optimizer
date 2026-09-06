@@ -422,8 +422,8 @@ class TestGlobalAsynchronousConfiguration:
         # without starting a second TCP connection.
         communication = processor._communication_processor
 
-        communication._messages = __import__("queue").Queue()
-        communication._outgoing_queue = __import__("queue").Queue()
+        communication._messages = __import__("queue").Queue()  # type: ignore
+        communication._outgoing_queue = __import__("queue").Queue()  # type: ignore
 
         local_best = serialize_particle(
             identifier="particle:0",
@@ -997,7 +997,7 @@ class TestGlobalAsynchronousReception:
 
         processor.migration_control(
             actual_iter=1,
-            population=population,
+            population=population,  # type: ignore
             local_best=None,
             insert_arrival_particle=inserted.append,
             departure_particle=departed.append,
@@ -1059,7 +1059,7 @@ class TestGlobalAsynchronousReception:
 
         processor.migration_control(
             actual_iter=1,
-            population=population,
+            population=population,  # type: ignore
             local_best=None,
             insert_arrival_particle=inserted.append,
             departure_particle=departed.append,
@@ -1121,7 +1121,7 @@ class TestGlobalAsynchronousReception:
 
         processor.migration_control(
             actual_iter=1,
-            population=population,
+            population=population,  # type: ignore
             local_best=None,
             insert_arrival_particle=inserted.append,
             departure_particle=departed.append,
@@ -1224,7 +1224,7 @@ class TestGlobalAsynchronousReception:
 
         processor.migration_control(
             actual_iter=1,
-            population=population,
+            population=population,  # type: ignore
             local_best=None,
             insert_arrival_particle=inserted.append,
             departure_particle=departed.append,
@@ -1369,8 +1369,8 @@ class TestGlobalAsynchronousParallelExecution:
 
             communication_processor = migration_processor._communication_processor
 
-            assert communication_processor._thread is not None
-            assert communication_processor._thread.is_alive()
+            assert communication_processor._thread is not None  # type: ignore
+            assert communication_processor._thread.is_alive()  # type: ignore
 
             run_thread = Thread(
                 target=processor.run,
@@ -1386,8 +1386,8 @@ class TestGlobalAsynchronousParallelExecution:
 
             # The optimization loop is intentionally blocked inside
             # pre_iteration(). Communication must continue independently.
-            assert communication_processor._thread is not None
-            assert communication_processor._thread.is_alive()
+            assert communication_processor._thread is not None  # type: ignore
+            assert communication_processor._thread.is_alive()  # type: ignore
 
             assert FIRST_ISLAND in driver._connections
 
@@ -1430,7 +1430,7 @@ class TestGlobalAsynchronousParallelExecution:
 
             communication_processor = migration_processor._communication_processor
 
-            assert communication_processor._stop_signal is (processor._stop_signal)
+            assert communication_processor._stop_signal is (processor._stop_signal)  # type: ignore
 
         finally:
             processor.finalize_execution_context()
@@ -1723,15 +1723,17 @@ class TestGlobalAsynchronousSerialEndToEnd:
                 lambda: set(driver._connections) == set(ISLAND_IDS),
             )
 
+            assert first._migration_processor is not None
             first_communication = first._migration_processor._communication_processor
 
+            assert second._migration_processor is not None
             second_communication = second._migration_processor._communication_processor
 
-            assert first_communication._thread is not None
-            assert first_communication._thread.is_alive()
+            assert first_communication._thread is not None  # type: ignore
+            assert first_communication._thread.is_alive()  # type: ignore
 
-            assert second_communication._thread is not None
-            assert second_communication._thread.is_alive()
+            assert second_communication._thread is not None  # type: ignore
+            assert second_communication._thread.is_alive()  # type: ignore
 
             # Start the receiver FIRST.
             #
