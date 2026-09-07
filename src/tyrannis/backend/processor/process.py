@@ -48,7 +48,7 @@ class ProcessPoolCostFunctionWrapper(CostFunctionWrapperBase):
         return instance
 
 
-class StopSignal(LocalEvent):
+class PoolSignal(LocalEvent):
     def __init__(self) -> None:
         self._signal: EventProtocol = Event()
         self._manager_signal: EventProtocol | None = None
@@ -120,7 +120,7 @@ class ProcessPool(ProcessorBase):
         self._cost_function_wrapper = ProcessPoolCostFunctionWrapper
 
     def initialize_execution_context(self) -> None:
-        self._stop_signal = StopSignal()
+        self._stop_signal = PoolSignal()
 
         self.start_migration()
 
@@ -129,14 +129,33 @@ class ProcessPool(ProcessorBase):
 
         self._stop_signal = LocalEvent()
 
+    def initialize_loop_context(self) -> None:
+        self._stop_signal.clear()
+        self._migration_signal = PoolSignal()
+        if self._migration_processor is None:
+            raise RuntimeError("Migration processor cannot be None.")
+
+        self._migration_processor.initialize_loop_context(
+            migration_signal=self._migration_signal,
+        )
+
+    def finalize_loop_context(self) -> None:
+        if self._migration_processor is None:
+            raise RuntimeError("Migration processor cannot be None.")
+
+        self._migration_processor.finalize_loop_context()
+        self._migration_signal = None
+        self._stop_signal.clear_manager_signal()
+
     def run(self) -> None:
         self.init_particles()
-        self._stop_signal.clear()
+        self.initialize_loop_context()
 
         context = get_context(self._multiprocessing_context)
 
         with context.Manager() as manager:
             self._stop_signal.set_manager_signal(manager.Event())
+            self._migration_signal.set_manager_signal(manager.Event())
 
             with context.Pool(
                 processes=self._n_process,
@@ -185,4 +204,4 @@ class ProcessPool(ProcessorBase):
 
                     self.update_status()
 
-            self._stop_signal.clear_manager_signal()
+            self.finalize_loop_context()

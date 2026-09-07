@@ -29,6 +29,19 @@ class MigrationProcessorBase(ABC):
         """Initialize the migration processor."""
 
     @abstractmethod
+    def initialize_loop_context(
+        self,
+        migration_signal: LocalEvent,
+    ) -> None:
+        """Initialize the migration processor loop context."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def finalize_loop_context(self) -> None:
+        """Finalize the migration processor loop context."""
+        raise NotImplementedError
+
+    @abstractmethod
     def start(
         self,
         stop_signal: LocalEvent,

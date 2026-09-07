@@ -44,6 +44,12 @@ class IslandIsolationProcessor(MigrationProcessorBase):
 
         self._communication_processor.stop()
 
+    def initialize_loop_context(self, migration_signal: LocalEvent) -> None:
+        """Do nothing."""
+
+    def finalize_loop_context(self) -> None:
+        """Do nothing."""
+
     def migration_control(
         self,
         actual_iter: int,

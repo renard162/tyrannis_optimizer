@@ -24,9 +24,26 @@ class Serial(ProcessorBase):
     def finalize_execution_context(self) -> None:
         self.stop_migration()
 
+    def initialize_loop_context(self) -> None:
+        self._stop_signal.clear()
+        self._migration_signal = LocalEvent()
+        if self._migration_processor is None:
+            raise RuntimeError("Migration processor cannot be None.")
+
+        self._migration_processor.initialize_loop_context(
+            migration_signal=self._migration_signal,
+        )
+
+    def finalize_loop_context(self) -> None:
+        if self._migration_processor is None:
+            raise RuntimeError("Migration processor cannot be None.")
+
+        self._migration_processor.finalize_loop_context()
+        self._migration_signal = None
+
     def run(self) -> None:
         self.init_particles()
-        self._stop_signal.clear()
+        self.initialize_loop_context()
 
         for actual_iter in range(self._n_iter + 1):
             self.migration_control(actual_iter)
@@ -68,3 +85,4 @@ class Serial(ProcessorBase):
             self._algorithm.post_iteration(actual_iter)
 
             self.update_status()
+        self.finalize_loop_context()

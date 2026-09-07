@@ -63,13 +63,50 @@ class GlobalAsynchronousProcessor(MigrationProcessorBase):
         self._communication_processor = communication_processor
 
         self._last_published_fitness: float | None = None
+        self._migration_signal: LocalEvent | None = None
+
+        self._running = None
+        self._thread: Thread | None = None
+
+    def initialize_loop_context(
+        self,
+        migration_signal: LocalEvent,
+    ) -> None:
+        """Initialize resources required by the processor iteration loop."""
+
+        self._migration_signal = migration_signal
+        if self._running is None:
+            raise RuntimeError("_running cannot be None")
+
+        self._running.set()
+
+        self._thread = Thread(
+            target=self._migration_signal_loop,
+            name="global-asynchronous-migration-signal",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def finalize_loop_context(self) -> None:
+        """Finalize resources associated with the processor iteration loop."""
+
+        if self._running is None:
+            raise RuntimeError("_running cannot be None")
+
+        self._running.clear()
+
+        if self._thread is not None:
+            self._thread.join()
+            self._thread = None
+
+        self._migration_signal = None
 
     def start(
         self,
         stop_signal: LocalEvent,
     ) -> None:
         """Start the processor communication backend."""
-
+        self._running = Event()
         self._communication_processor.start(
             stop_signal=stop_signal,
         )
@@ -77,7 +114,15 @@ class GlobalAsynchronousProcessor(MigrationProcessorBase):
     def stop(self) -> None:
         """Stop the migration processor communication backend."""
 
+        if self._running is not None:
+            self._running.clear()
+
+        if self._thread is not None:
+            self._thread.join()
+            self._thread = None
+
         self._communication_processor.stop()
+        self._running = None
 
     def migration_control(
         self,
@@ -87,11 +132,16 @@ class GlobalAsynchronousProcessor(MigrationProcessorBase):
         insert_arrival_particle: Callable[[dict[str, Any]], None],
         departure_particle: Callable[[str], None],
     ) -> None:
+        if self._migration_signal is None:
+            raise RuntimeError("Migration loop context has not been initialized.")
+
         self._consume_messages(
             population=population,
             insert_arrival_particle=insert_arrival_particle,
             departure_particle=departure_particle,
         )
+
+        self._migration_signal.clear()
 
         if self._synchronization_iter is None:
             return
@@ -104,6 +154,21 @@ class GlobalAsynchronousProcessor(MigrationProcessorBase):
 
         while actual_iter >= self._synchronization_iter:
             self._synchronization_iter += self._check_interval
+
+    def _migration_signal_loop(self) -> None:
+        """Signal the iteration loop when a migration message is pending."""
+
+        if self._migration_signal is None:
+            raise RuntimeError("Migration loop context has not been initialized.")
+
+        if self._running is None:
+            raise RuntimeError("_running cannot be None")
+
+        while self._running.is_set():
+            if not self._communication_processor.messages.empty():
+                self._migration_signal.set()
+
+            sleep(0.01)
 
     def _publish_if_new_best(
         self,

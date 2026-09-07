@@ -26,6 +26,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
     """Base class for processor agent."""
 
     _stop_signal: SignalType
+    _migration_signal: SignalType
     _cost_function_wrapper: type[CostFunctionWrapperBase]
     _processors_pool: dict[str, Self]
     _migration_driver: MigrationDriverBase | None
@@ -35,6 +36,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
 
     _excluded_attributes: tuple[str, ...] = (
         "_stop_signal",
+        "_migration_signal",
         "_seed_sequence",
         "_processors_pool",
         "_pool_count_sequence",
@@ -131,6 +133,24 @@ class ProcessorBase(ABC, Generic[SignalType]):
         released or replaced here before the processor leaves its execution
         context.
         """
+
+    @abstractmethod
+    def initialize_loop_context(self) -> None:
+        """
+        Implement here all start logic related with migration event signal set
+
+        Set here the _migration_signal
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def finalize_loop_context(self) -> None:
+        """
+        Implement here all stop logic related with migration event signal set.
+
+        Unset hete the _migration_signal
+        """
+        raise NotImplementedError
 
     def __deepcopy__(self, memo: dict[int, object]) -> Self:
         new_processor = self.__class__.__new__(self.__class__)
@@ -265,6 +285,9 @@ class ProcessorBase(ABC, Generic[SignalType]):
             departure_particle=self._departure_particle,
         )
 
+        while self._migration_signal.is_set():
+            pass
+
     def _insert_arrival_particle(self, particle_data: dict[str, Any]) -> None:
         particle_id = particle_data.get("identifier")
         if particle_id is None:
@@ -314,10 +337,9 @@ class ProcessorBase(ABC, Generic[SignalType]):
         `migration_control` to allow the migration processor to enforce its
         synchronization policy and apply pending migration operations.
 
-        The migration processor must block the processor when the current
-        iteration is greater than or equal to its configured synchronization
-        iteration. A synchronization iteration of `None` disables iteration-based
-        synchronization.
+        The migration processor may block the processor loop through its migration
+        signal when synchronization or migration processing requires the iteration
+        loop to wait.
 
         The `stop_signal` control variable must be checked to allow the execution
         to be interrupted before subsequent iterations are performed.
