@@ -1627,9 +1627,39 @@ class TestGlobalAsynchronousSerialEndToEnd:
                 lambda: set(driver._connections) == set(ISLAND_IDS),
             )
 
+            # Start both optimization loops.
             for thread in threads:
                 thread.start()
 
+            # Wait until both processors have reached pre_iteration(1).
+            #
+            # MigrationTestAlgorithm intentionally blocks there until the test
+            # explicitly releases the iteration. This synchronization removes
+            # any dependency on thread scheduling or timeout expiration.
+            for processor in processors:
+                algorithm = processor._algorithm
+
+                assert isinstance(
+                    algorithm,
+                    MigrationTestAlgorithm,
+                )
+
+                wait_for(
+                    algorithm._iteration_started.is_set,
+                )
+
+            # Release both optimization loops explicitly.
+            for processor in processors:
+                algorithm = processor._algorithm
+
+                assert isinstance(
+                    algorithm,
+                    MigrationTestAlgorithm,
+                )
+
+                algorithm._release_iteration.set()
+
+            # The threads can now progress deterministically to completion.
             for thread in threads:
                 thread.join(
                     timeout=TIMEOUT,
@@ -1644,10 +1674,25 @@ class TestGlobalAsynchronousSerialEndToEnd:
             assert len(second_population) == 2
 
         finally:
+            # Always release the optimization loops in case an assertion above
+            # fails while one of them is blocked in pre_iteration(1).
+            for processor in processors:
+                algorithm = processor._algorithm
+
+                if isinstance(
+                    algorithm,
+                    MigrationTestAlgorithm,
+                ):
+                    algorithm._release_iteration.set()
+
+            for thread in threads:
+                if thread.is_alive():
+                    thread.join(
+                        timeout=TIMEOUT,
+                    )
+
             for processor in processors:
                 processor.finalize_execution_context()
-
-            migration.stop()
 
     def test_complete_migration_replaces_worst_particle_and_preserves_identity(
         self,
