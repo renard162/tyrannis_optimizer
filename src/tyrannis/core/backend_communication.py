@@ -7,7 +7,44 @@ from .signals import LocalEvent
 
 
 class CommunicationProcessorBase(ABC):
-    """Abstract interface for the processor communication layer."""
+    """
+    Base class for the communication layer running alongside an optimization
+    processor.
+
+    A communication processor provides the transport-independent interface
+    between one processor and the driver. It is responsible only for
+    transporting complete application-level messages and exposing them through
+    queues. It must not contain migration logic, optimization logic, or
+    decisions about how received messages affect the processor or algorithm.
+
+    The communication processor has two asynchronous boundaries:
+
+    - `messages` receives complete messages from the driver;
+    - `outgoing_queue` receives complete messages produced by the processor-side
+      components that must be sent to the driver.
+
+    The communication implementation is responsible for all transport-specific
+    operations, including connections, serialization, framing, encoding,
+    routing, retries, and background execution. None of these details should
+    be exposed through this interface.
+
+    The communication processor is started by `start` and remains active
+    independently of the processor's optimization loop until `stop` is called.
+    Therefore, communication may receive messages while the optimization
+    processor is executing other work.
+
+    `set_message_signal` provides an optional synchronization mechanism for
+    notifying the processor-side execution that a new message has been placed
+    in `messages`. The signal only reports communication activity; it must not
+    itself determine how or when the received message modifies processor or
+    algorithm state. Synchronization of migration and algorithm execution is
+    the responsibility of the migration layer.
+
+    Implementations must keep the communication interface independent from the
+    concrete transport mechanism. A TCP implementation, multiprocessing
+    implementation, Spark implementation, or any other backend must expose the
+    same application-level contract through this class.
+    """
 
     @abstractmethod
     def __init__(
@@ -15,102 +52,123 @@ class CommunicationProcessorBase(ABC):
         identification: str,
         **kwargs: object,
     ) -> None:
-        """Initialize the processor communication layer.
+        """
+        Initialize the processor communication configuration.
 
-        The constructor must receive and store all information required to
-        identify the processor and configure the communication backend.
+        The constructor must configure the communication object but must not
+        activate the communication backend.
 
-        The constructor must only initialize the communication object. It
-        must not establish a connection with the driver, start communication
-        threads, start background workers, or otherwise activate the
-        communication backend.
-
-        Activation of the communication backend must be performed exclusively
-        by :meth:`start`.
-
-        Implementations may require additional backend-specific parameters.
-        Such parameters must be accepted by the concrete implementation's
-        constructor and used only to configure the communication object.
+        In particular, the constructor must not establish connections, start
+        communication threads or processes, start background workers, or
+        otherwise perform operations that require an active execution
+        environment.
 
         Parameters
         ----------
         identification:
             Unique identifier assigned to this processor. The identifier is
-            used by the communication backend to associate the processor with
+            used by the communication backend to associate this processor with
             its corresponding driver-side endpoint.
+
         **kwargs:
-            Backend-specific configuration parameters required to initialize
+            Backend-specific configuration parameters required to configure
             the communication layer.
+
+        Notes
+        -----
+        Constructor arguments must describe communication configuration only.
+        Migration-specific behavior and optimization state must not be handled
+        by the communication layer.
+
+        Runtime resources are initialized by `start` and released by `stop`.
+        This separation is important because processor communication objects
+        may be constructed before they are materialized in their final
+        execution environment.
         """
         raise NotImplementedError
 
     @property
     @abstractmethod
     def messages(self) -> Queue[str]:
-        """Queue containing messages received from the driver.
+        """
+        Return the queue containing complete messages received from the driver.
 
-        Each item in the queue is a message represented by a ``str``. The
-        communication backend is responsible for receiving data from the driver,
-        decoding it according to its underlying protocol, and placing each
-        complete message into this queue.
+        Returns
+        -------
+        Queue[str]
+            Queue containing complete application-level messages received from
+            the driver.
 
-        Consumers read received messages using the standard
-        :class:`queue.Queue` interface. For example::
+        Notes
+        -----
+        Each queue item must be a complete message represented by `str`.
+        Transport details such as packet boundaries, framing, encoding,
+        serialization, connection metadata, or protocol control fields must
+        not be exposed through this interface.
+
+        The communication backend is responsible for receiving and decoding
+        transport data and placing each complete application-level message in
+        this queue.
+
+        Message order must be preserved: messages must be inserted into the
+        queue in the same order in which they are received from the driver.
+
+        Consumers interact with the queue using the standard
+        :class:`queue.Queue` interface, for example::
 
             message = processor.messages.get()
 
-        To process messages without blocking, ``get_nowait()`` may be used::
+        or, for non-blocking access::
 
             message = processor.messages.get_nowait()
 
-        The queue contains only complete application-level messages. Transport
-        details such as packet boundaries, framing, serialization, connection
-        management, database rows, or protocol control fields must not be exposed
-        through this API.
+        The queue object must remain stable while the communication backend is
+        running. An implementation must not replace the queue during normal
+        operation.
 
-        The order in which messages are inserted into the queue must be preserved
-        when they are consumed from the queue.
-
-        An implementation must not replace the queue object while the
-        communication backend is running.
+        The queue represents received communication only. Reading or
+        interpreting a message does not imply that the message's contents
+        should immediately modify processor or algorithm state.
         """
         raise NotImplementedError
 
     @property
     @abstractmethod
     def outgoing_queue(self) -> Queue[str]:
-        """Queue containing messages to be sent to the driver.
+        """
+        Return the queue containing messages to be sent to the driver.
 
-        Each item placed in the queue represents one complete application-level
-        message and must be a ``str``. The caller writes messages to the queue
-        using the standard :class:`queue.Queue` interface. For example::
+        Returns
+        -------
+        Queue[str]
+            Queue into which complete application-level messages are placed
+            for transmission to the driver.
 
-            processor.outgoing_queue.put("message")
-
-        Multiple messages may be queued before the communication backend sends
-        them::
-
-            processor.outgoing_queue.put("message 1")
-            processor.outgoing_queue.put("message 2")
-            processor.outgoing_queue.put("message 3")
+        Notes
+        -----
+        Each item placed in the queue must be a complete message represented
+        by `str`.
 
         The communication backend is responsible for consuming messages from
-        this queue and converting them to the representation required by its
-        underlying communication mechanism.
+        this queue and converting them into whatever representation is
+        required by the underlying transport.
 
         The caller must not perform serialization, framing, encoding, socket
         operations, or any other transport-specific operation.
 
-        Messages must be transmitted in the same order in which they are placed
-        in the queue.
+        Messages must be transmitted in the same order in which they are
+        placed in the queue.
 
-        The queue is an asynchronous boundary between the processor and the
-        communication backend. Calling ``put()`` only places the message in the
-        outgoing queue; it does not imply that the message has already been
-        transmitted to the driver.
+        Calling `put()` only places a message in the queue. It does not imply
+        that the message has already been transmitted or received by the
+        driver.
 
-        An implementation must not replace the queue object while the
-        communication backend is running.
+        The queue is therefore an asynchronous boundary between the
+        processor-side logic and the communication backend.
+
+        The queue object must remain stable while the communication backend is
+        running. An implementation must not replace it during normal
+        operation.
         """
         raise NotImplementedError
 
@@ -119,52 +177,61 @@ class CommunicationProcessorBase(ABC):
         self,
         stop_signal: LocalEvent,
     ) -> None:
-        """Start the processor communication backend.
+        """
+        Start the processor communication backend.
 
-        The communication backend must be started asynchronously so that this
-        method does not block the processor's main execution loop.
-
-        After this method returns, the communication backend must be running in
-        parallel with the processor's main execution loop. Communication tasks
-        such as receiving messages, processing incoming data, and transmitting
-        messages placed in :attr:`outgoing_queue` must be performed independently
-        of the processor's main loop.
-
-        The implementation may use threads, processes, asynchronous tasks, or
-        any other mechanism appropriate for its underlying communication
-        protocol. The mechanism used to achieve parallel execution is an
-        implementation detail and must not be exposed through this interface.
-
-        The method must configure the communication backend to use the supplied
-        stop signal for communication with the processor's main loop. The
-        communication backend must not control the processor's synchronization
-        or iteration state. Synchronization and migration decisions are the
-        responsibility of the migration processor.
+        The communication backend must begin its communication activity
+        asynchronously and return control to the processor without waiting
+        for the communication runtime to terminate.
 
         Parameters
         ----------
         stop_signal:
-            Event used by the communication backend to signal that the
-            communication must stop.
+            Shared local event used by the communication backend to propagate
+            a communication-level stop condition to the processor execution.
+
+            The communication backend may set this signal when a transport
+            failure, remote termination, or other communication condition
+            requires the processor execution to stop.
 
         Notes
         -----
-        This method must return only after the communication backend has been
-        successfully initialized and its asynchronous execution has been
-        started.
+        After this method returns, the communication backend must be operating
+        independently of the processor's main optimization loop.
 
-        The method must not wait for the communication backend to terminate.
-        Waiting for termination would prevent the processor's main execution loop
-        from running concurrently with the communication backend.
+        The implementation may use threads, processes, asynchronous tasks, or
+        any other mechanism appropriate to its transport. The mechanism is an
+        implementation detail and must not be exposed through this interface.
 
-        Calling this method must not require the caller to execute any additional
-        communication loop manually.
+        `start` must initialize all runtime resources required by the
+        communication backend. It must not require the caller to execute an
+        additional communication loop.
+
+        The communication backend must not use `stop_signal` to implement
+        migration or algorithm synchronization. Its responsibility is to
+        propagate communication-level termination; synchronization of the
+        optimization loop belongs to the migration layer.
         """
         raise NotImplementedError
 
     @abstractmethod
     def stop(self) -> None:
-        """Stop the processor communication backend and release its resources."""
+        """
+        Stop the processor communication backend and release its resources.
+
+        This method must terminate all communication activity started by
+        `start` and release every runtime resource owned by the communication
+        processor.
+
+        Notes
+        -----
+        After this method returns, no communication thread, process, worker,
+        connection, or other runtime resource created by `start` may remain
+        active.
+
+        The method must also leave the communication processor in a state
+        where its runtime resources are no longer considered available.
+        """
         raise NotImplementedError
 
     @abstractmethod
@@ -172,25 +239,81 @@ class CommunicationProcessorBase(ABC):
         self,
         message_signal: LocalEvent | None,
     ) -> None:
-        """Set the signal used to notify the processor of received messages.
-
-        The communication backend must set the supplied signal whenever a complete
-        application-level message is inserted into the :attr:`messages` queue.
-
-        Passing ``None`` disables message signaling. This is used when the
-        execution context associated with the signal is finalized.
+        """
+        Set or clear the signal used to notify message arrival.
 
         Parameters
         ----------
         message_signal:
-            Signal to set when a new message is inserted into the received-message
-            queue, or ``None`` to disable message signaling.
+            Shared local event used to notify the processor-side execution
+            that at least one complete application-level message has been
+            inserted into `messages`.
+
+            Passing `None` disables message-arrival signaling. This is used
+            when the loop context associated with the signal has been
+            finalized.
+
+        Notes
+        -----
+        Whenever a complete application-level message is inserted into
+        `messages`, the communication backend must set the configured signal.
+
+        The signal is a notification mechanism, not a migration or algorithm
+        synchronization policy. The communication backend must not use the
+        signal to directly modify processor or algorithm state.
+
+        In particular, receiving a message and setting this signal must not
+        cause the communication layer to insert, remove, or otherwise modify
+        particles. The migration processor is responsible for deciding when
+        and how received messages affect the optimization state.
+
+        The supplied signal may be a shared synchronization object created for
+        the processor's loop context. The communication implementation must
+        retain the exact object supplied by this method while signaling is
+        enabled.
+
+        Passing `None` must disable further signaling and release the
+        communication layer's reference to the previous signal when
+        appropriate.
         """
         raise NotImplementedError
 
 
 class CommunicationDriverBase(ABC):
-    """Abstract interface for the driver communication layer."""
+    """
+    Base class for the communication layer running on the optimization driver.
+
+    A communication driver provides the transport-independent communication
+    interface between the driver and all optimization processors. It is
+    responsible only for transporting complete application-level messages,
+    routing received messages to their source processor, and routing outgoing
+    messages to their destination processor.
+
+    The driver communication layer manages one incoming and one outgoing queue
+    for each processor:
+
+    - `incoming_queues[processor_id]` contains messages received from that
+      processor;
+    - `outgoing_queues[processor_id]` contains messages that must be sent to
+      that processor.
+
+    Queues form the asynchronous boundary between the driver-side application
+    logic and the communication backend. The application places or consumes
+    complete messages through these queues without knowing how the messages
+    are transported.
+
+    The communication driver must remain independent of migration and
+    optimization logic. It must not interpret application-level migration
+    messages or modify algorithm state based on their contents. Its
+    responsibility ends at delivering messages to the appropriate queues.
+
+    The communication backend runs independently of the driver's main
+    execution loop after `start` and remains active until `stop`.
+
+    Concrete implementations may use TCP, multiprocessing, Spark, message
+    brokers, shared memory, or any other transport mechanism, provided that
+    they preserve the communication contract defined by this class.
+    """
 
     @abstractmethod
     def __init__(
@@ -199,186 +322,175 @@ class CommunicationDriverBase(ABC):
         stop_signal: LocalEvent,
         **kwargs: object,
     ) -> None:
-        """Initialize the driver communication layer.
+        """
+        Initialize the driver communication configuration.
 
-        The constructor must receive and store all information required to
-        identify the communication endpoints managed by the driver and to
-        configure the communication backend.
+        The constructor must configure the communication object and establish
+        the endpoints that it will manage, but must not activate the
+        communication backend.
 
-        The constructor must only initialize the communication object. It
-        must not start a server, bind or listen on a communication endpoint,
-        establish connections, start communication threads, start background
-        workers, or otherwise activate the communication backend.
-
-        Activation of the communication backend must be performed exclusively
-        by :meth:`start`.
-
-        Implementations may require additional backend-specific parameters.
-        Such parameters must be accepted by the concrete implementation's
-        constructor and used only to configure the communication object.
+        In particular, the constructor must not start a server, bind or listen
+        on a communication endpoint, establish active connections, start
+        communication threads or processes, or otherwise activate runtime
+        communication.
 
         Parameters
         ----------
         island_ids:
-            Identifiers of the processor endpoints that this driver is
+            Identifiers of all processor endpoints that this driver is
             responsible for communicating with.
 
         stop_signal:
-            Event used by the communication backend to signal and propagate a
-            global stop condition.
+            Shared local event used by the communication backend to propagate
+            a global communication-level stop condition.
 
         **kwargs:
-            Backend-specific configuration parameters required to initialize
+            Backend-specific configuration parameters required to configure
             the communication layer.
+
+        Notes
+        -----
+        The constructor should establish configuration and data structures
+        required by the communication backend. Runtime resources that require
+        an active execution environment must be created by `start`.
+
+        The communication driver must not contain migration-specific or
+        algorithm-specific configuration.
         """
         raise NotImplementedError
 
     @property
     @abstractmethod
     def incoming_queues(self) -> dict[str, Queue[str]]:
-        """Queues containing messages received from processors.
+        """
+        Return the queues containing messages received from processors.
 
-        The dictionary maps each processor identifier to a
-        :class:`queue.Queue` containing the messages received from that
-        processor.
+        Returns
+        -------
+        dict[str, Queue[str]]
+            Dictionary mapping each processor identifier to the queue
+            containing complete application-level messages received from that
+            processor.
 
-        The dictionary key is the processor identifier used by the driver to
-        associate messages with their source. Each dictionary value is a
-        ``Queue[str]`` in which every item represents one complete
-        application-level message received from the corresponding processor.
+        Notes
+        -----
+        The dictionary key identifies the source processor. Each queue must
+        contain only complete messages received from that processor.
 
-        Messages are read from the queues using the standard
-        :class:`queue.Queue` interface. For example::
+        The communication backend is responsible for identifying the source,
+        decoding or deserializing transport data as necessary, and inserting
+        the resulting application-level messages into the corresponding queue.
+
+        Messages received from the same processor must be inserted in their
+        reception order.
+
+        Transport-specific information such as packet boundaries, framing,
+        serialization, sockets, database rows, message-broker metadata, or
+        connection state must not be exposed through this interface.
+
+        Consumers interact only with the queues. For example::
 
             message = driver.incoming_queues["island:0"].get()
 
-        To read a message without blocking, ``get_nowait()`` may be used::
+        or, for non-blocking access::
 
             message = driver.incoming_queues["island:0"].get_nowait()
 
-        Multiple messages may be waiting in the same queue::
-
-            message_1 = driver.incoming_queues["island:0"].get()
-            message_2 = driver.incoming_queues["island:0"].get()
-
-        Messages must be inserted into the queue in the same order in which
-        they are received from the corresponding processor.
-
-        The communication backend is responsible for receiving the data,
-        identifying its source processor, decoding and deserializing it as
-        necessary, and placing each complete application-level message into
-        the appropriate queue.
-
-        The messages exposed by this API must not contain transport-specific
-        information. Protocol framing, serialization, packet boundaries,
-        sockets, database rows, message-broker metadata, or other details of
-        the underlying communication mechanism must remain internal to the
-        implementation.
-
-        The caller only interacts with the resulting ``Queue[str]`` objects.
-        It must not perform any transport-specific receive operation.
-
-        The dictionary and its queues must remain valid while the communication
-        backend is running. An implementation must not replace the dictionary
-        or its queues during normal operation.
+        The dictionary and its queues must remain valid while the
+        communication backend is running. An implementation must not replace
+        them during normal operation.
         """
         raise NotImplementedError
 
     @property
     @abstractmethod
     def outgoing_queues(self) -> dict[str, Queue[str]]:
-        """Queues containing messages to be sent to processors.
+        """
+        Return the queues containing messages to be sent to processors.
 
-        The dictionary maps each processor identifier to a
-        :class:`queue.Queue` containing the messages that the driver intends to
-        send to that processor.
+        Returns
+        -------
+        dict[str, Queue[str]]
+            Dictionary mapping each processor identifier to the queue
+            containing complete application-level messages destined for that
+            processor.
 
-        The dictionary key is the processor identifier that determines the
-        destination of the messages. Each dictionary value is a
-        ``Queue[str]`` in which every item represents one complete
-        application-level message that must be delivered to the corresponding
-        processor.
+        Notes
+        -----
+        The dictionary key identifies the destination processor. Each item
+        placed in a queue must be delivered to the processor represented by
+        that key.
 
-        The caller writes messages to the queues using the standard
-        :class:`queue.Queue` interface. For example::
-
-            driver.outgoing_queues["island:0"].put("message")
-
-        Multiple messages may be queued before the communication backend sends
-        them::
-
-            driver.outgoing_queues["island:0"].put("message 1")
-            driver.outgoing_queues["island:0"].put("message 2")
-            driver.outgoing_queues["island:0"].put("message 3")
-
-        Messages placed in a queue must be sent to the processor identified by
-        that queue's dictionary key. Messages must be transmitted in the same
-        order in which they are placed in each processor's queue.
-
-        The communication backend is responsible for consuming the messages
-        from these queues and converting them into whatever representation is
-        required by the underlying communication mechanism.
+        The communication backend is responsible for consuming messages from
+        these queues and converting them into whatever representation is
+        required by the underlying transport.
 
         The caller must not perform serialization, framing, encoding, socket
-        operations, database insertion, message-broker operations, or any other
-        transport-specific operation.
+        operations, database operations, message-broker operations, or other
+        transport-specific work.
 
-        Calling ``put()`` only places the message in the outgoing queue. It does
-        not imply that the message has already been transmitted to the target
-        processor or that the processor has received it.
+        Messages placed in each queue must be transmitted in insertion order.
 
-        The queues therefore constitute an asynchronous boundary between the
-        driver and the communication backend.
+        Calling `put()` only places a message in the outgoing queue. It does
+        not imply that the message has already been transmitted or received
+        by the target processor.
 
-        The dictionary and its queues must remain valid while the communication
-        backend is running. An implementation must not replace the dictionary
-        or its queues during normal operation.
+        The dictionary and its queues must remain valid while the
+        communication backend is running. An implementation must not replace
+        them during normal operation.
         """
         raise NotImplementedError
 
     @abstractmethod
     def start(self) -> None:
-        """Start the driver communication backend.
+        """
+        Start the driver communication backend.
 
-        The communication backend must be started asynchronously so that this
-        method does not block the driver's main execution loop.
-
-        After this method returns, the communication backend must be running in
-        parallel with the driver's main execution loop. Communication tasks such
-        as accepting connections, receiving messages, routing messages to the
-        appropriate processor queues, and transmitting messages placed in
-        :attr:`outgoing_queues` must be performed independently of the driver's
-        main loop.
-
-        The implementation may use threads, processes, asynchronous tasks, or
-        any other mechanism appropriate for its underlying communication
-        protocol. The mechanism used to achieve parallel execution is an
-        implementation detail and must not be exposed through this interface.
-
-        The method is responsible for activating the communication mechanism,
-        such as starting a server, opening a database polling mechanism, creating
-        communication workers, or establishing other backend-specific resources.
-
-        Parameters
-        ----------
-        None
+        The communication backend must begin operating asynchronously and
+        return control to the driver's main execution without waiting for the
+        communication runtime to terminate.
 
         Notes
         -----
-        This method must return only after the communication backend has been
-        successfully initialized and its asynchronous execution has been
-        started.
+        After this method returns, the communication backend must operate
+        independently of the driver's main execution loop.
 
-        The method must not wait for the communication backend to terminate.
-        Waiting for termination would prevent the driver's main execution loop
-        from running concurrently with the communication backend.
+        Depending on the transport, this may include starting a server,
+        opening communication endpoints, establishing connections, starting
+        communication threads or processes, or initializing other
+        backend-specific runtime resources.
 
-        Calling this method must not require the caller to execute any additional
+        The implementation may use any mechanism appropriate to the transport.
+        The mechanism used to achieve asynchronous execution is an
+        implementation detail and must not be exposed through this interface.
+
+        The method must not require the caller to execute an additional
         communication loop manually.
+
+        Communication-level termination is controlled through the
+        `stop_signal` supplied during construction. The communication layer
+        may set that signal when a condition requires the global execution to
+        stop, but it must not use it to implement migration or optimization
+        synchronization.
         """
         raise NotImplementedError
 
     @abstractmethod
     def stop(self) -> None:
-        """Stop the driver communication backend and release its resources."""
+        """
+        Stop the driver communication backend and release its resources.
+
+        This method must terminate all communication activity started by
+        `start` and release every runtime resource owned by the communication
+        driver.
+
+        Notes
+        -----
+        After this method returns, no communication thread, process, worker,
+        server, connection, selector, or other runtime resource created by
+        `start` may remain active.
+
+        The communication driver must not leave background communication
+        activity running after the driver-side execution has finished.
+        """
         raise NotImplementedError
