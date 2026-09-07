@@ -141,14 +141,16 @@ class PSO(AlgorithmBase):
         del self._population[identifier]
 
     def pre_iteration(self, actual_iter: int) -> None:
-        for particle in self._population.values():
-            if not isinstance(particle, PSOParticle):
-                raise TypeError(
-                    f"Particle '{particle.identifier}' must be an instance of PSOParticle."
-                )
+        return
+
+    def create_random_cache(self, particle_ids: list[str]) -> None:
+        for particle_id in particle_ids:
+            particle = self._population[particle_id]
+
+            if len(particle.random_cache) >= 2 * len(self._boundaries):
+                continue
 
             particle.random_cache = []
-
             for _ in self._boundaries:
                 cognitive_random = self._rng.random()
                 social_random = self._rng.random()

@@ -171,6 +171,7 @@ class ProcessPool(ProcessorBase):
 
                     new_particles_ids = self._algorithm.new_particles_id
                     if new_particles_ids:
+                        self._algorithm.create_random_cache(new_particles_ids)
                         worker = partial(
                             evaluate_particle,
                             stop_signal=self._stop_signal.manager_signal,
@@ -186,6 +187,9 @@ class ProcessPool(ProcessorBase):
                         self._algorithm.update_population(new_particles)
 
                     if actual_iter > 0:
+                        self._algorithm.create_random_cache(
+                            [idx for idx in self._algorithm.population]
+                        )
                         worker = partial(
                             evaluate_particle,
                             stop_signal=self._stop_signal.manager_signal,
