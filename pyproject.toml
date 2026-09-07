@@ -54,7 +54,7 @@ testpaths = [
 ]
 pythonpath = ["tests"]
 addopts = "--import-mode=importlib"
-# addopts = "--cov=tyrannis --cov-report=term-missing"
+# addopts = "--import-mode=importlib --cov=tyrannis --cov-report=term-missing"
 
 [tool.coverage.run]
 branch = true
