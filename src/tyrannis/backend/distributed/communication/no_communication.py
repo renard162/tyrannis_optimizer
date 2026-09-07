@@ -47,6 +47,12 @@ class NoCommunicationProcessor(CommunicationProcessorBase):
         self._messages = None
         self._outgoing_queue = None
 
+    def set_message_signal(
+        self,
+        message_signal: LocalEvent | None,
+    ) -> None:
+        """Set the signal used to notify the processor of received messages."""
+
 
 class NoCommunicationDriver(CommunicationDriverBase):
     """Inactive communication layer for driver modules."""
