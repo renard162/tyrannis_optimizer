@@ -1,22 +1,127 @@
-import json
-from time import perf_counter, sleep
+from __future__ import annotations
 
-import numpy as np
+from typing import Any
 
-from .algorithm import PSO
-from .backend import SparkDistributed, SparkParallel
 from .backend.local import Local
-from .backend.migration import IslandIsolation
-from .backend.processor import ProcessPool, ThreadsPool
+from .backend.migration.island_isolation import IslandIsolation
 from .backend.processor.serial import Serial
-from .examples.many_local_minima import ackley
-from .space import Continuous
+from .core.algorithm import AlgorithmBase
+from .core.backend import BackendBase
+from .core.backend_migration import MigrationDriverBase
+from .core.processor import ProcessorBase
+from .core.space import SpaceBase
 
 
-def generate_spark_session():
+class Optimizer:
+    """Orchestrate the optimization execution."""
+
+    def __init__(
+        self,
+        space: SpaceBase,
+        algorithm: AlgorithmBase,
+        n_iterations: int,
+        n_particles: int,
+        backend: BackendBase | None = None,
+        processor: ProcessorBase | None = None,
+        migration: MigrationDriverBase | None = None,
+        seed: int | None = None,
+        fitness_failure_strategy: str = "invalidate",
+    ) -> None:
+        if not isinstance(n_iterations, int) or n_iterations < 1:
+            raise ValueError(
+                "n_iterations must be an integer greater than or equal to 1."
+            )
+
+        if not isinstance(n_particles, int) or n_particles < 1:
+            raise ValueError(
+                "n_particles must be an integer greater than or equal to 1."
+            )
+
+        self._space = space
+        self._algorithm = algorithm
+        self._n_iterations = n_iterations
+        self._n_particles = n_particles
+        self._backend = backend if backend is not None else Local()
+        self._processor = processor if processor is not None else Serial()
+        self._migration = migration if migration is not None else IslandIsolation()
+        self._seed = seed
+        self._fitness_failure_strategy = fitness_failure_strategy
+        self._result = None
+
+        self._space.initialize_context(seed=self._seed)
+
+        self._algorithm.initialize_context(
+            fitness_function=self._space,
+            boundaries=self._space.encoded_boundaries,
+        )
+
+        self._processor.initialize_context(
+            algorithm=self._algorithm,
+            n_iter=self._n_iterations,
+            n_particles=self._n_particles,
+            migration_driver=self._migration,
+            seed=self._seed,
+            fitness_failure_strategy=self._fitness_failure_strategy,
+        )
+
+        self._backend.initialize_context(
+            algorithm=self._algorithm,
+            n_iter=self._n_iterations,
+            n_particles=self._n_particles,
+            migration=self._migration,
+            processor=self._processor,
+            seed=self._seed,
+            fitness_failure_strategy=self._fitness_failure_strategy,
+        )
+
+    def fit(self) -> tuple[float, Any] | None:
+        """Execute the optimization and return the fitness and decoded result."""
+
+        self._backend.execute()
+
+        backend_result = self._backend.result
+
+        if backend_result is None:
+            self._result = None
+            return None
+
+        if not isinstance(backend_result, dict):
+            raise TypeError("Backend result must be a dictionary.")
+
+        self._result = backend_result
+        variables = self._result["variables"]
+
+        if not isinstance(variables, dict):
+            raise TypeError("Optimization result variables must be a dictionary.")
+
+        fitness = self._result["fitness"]
+
+        if not isinstance(fitness, float):
+            raise TypeError("Optimization result fitness must be a float.")
+
+        result_output = self._space.decode(variables)
+
+        return fitness, result_output
+
+
+if __name__ == "__main__":
     from pyspark.sql import SparkSession
 
-    # Use spark.stop() to terminate spark
+    from .algorithm import PSO
+    from .backend.parallel.spark_parallel import SparkParallel
+    from .backend.processor import ThreadsPool
+    from .examples.many_local_minima import ackley, schaffer_2
+    from .space import Continuous
+
+    def cost_function(*x) -> float:
+        return schaffer_2(*x)
+
+    space = Continuous(
+        cost_function=cost_function,
+        boundaries=[(-10, 10), (-10, 10)],
+    )
+    algo = PSO()
+    processor = ThreadsPool()
 
     spark = (
         SparkSession.builder.appName("SparkClusterTest")
@@ -27,112 +132,18 @@ def generate_spark_session():
         .config("spark.blockManager.port", "6061")
         .getOrCreate()
     )
+    backend = SparkParallel(spark=spark)
 
-    print("Spark version:", spark.version)
-    print("Master:", spark.sparkContext.master)
-    print("Application ID:", spark.sparkContext.applicationId)
-    return spark
-
-
-def test_function(*x):
-    result = ackley(*x)
-    # n_iter = 1_000_001  # Benchmark com 30 iter e 500 partículas
-    # sleep_time = 0.0  # Benchmark utiliza apenas tempo em consumo de CPU
-    n_iter = 10_001
-    sleep_time = 0.005  # Aproximadamente 75s a mais com 500 partículas e 30 iterações
-    for _ in range(n_iter):
-        result = result * 1.0000001
-    result /= np.exp(1)
-    sleep(sleep_time)
-    return float(result)
-
-
-def parallel_test():
-    space = Continuous(
-        cost_function=test_function,
-        boundaries=[(-32.768, 32.768) for _ in range(2)],
-    )
-
-    algo = PSO()
-    algo.initialize_context(
-        fitness_function=space,
-        boundaries=space.encoded_boundaries,
-    )
-
-    spark = generate_spark_session()
-
-    backend = SparkParallel(spark)
-    backend.initialize_context(
-        migration=IslandIsolation(),
+    obj = Optimizer(
+        space=space,
         algorithm=algo,
-        n_iter=3,  # 30,
-        n_particles=30,  # 500,
-        seed=42,
-    )
-
-    start = perf_counter()
-    backend.execute()
-    total_time = perf_counter() - start
-
-    results = None if backend.result is None else backend.result["fitness"]
-
-    print(f"{total_time=}")
-    print("Breakpoint here")
-
-
-def distributed_test():
-    space = Continuous(
-        cost_function=test_function,
-        boundaries=[(-32.768, 32.768) for _ in range(2)],
-    )
-    space.initialize_context(seed=None)
-
-    algo = PSO()
-    algo.initialize_context(
-        fitness_function=space,
-        boundaries=space.encoded_boundaries,
-    )
-
-    migration = IslandIsolation()
-
-    # processor = Serial()
-    processor = ThreadsPool()
-    # processor = ProcessPool()
-    processor.initialize_context(
-        algorithm=algo,
-        n_iter=30,
-        n_particles=15,  # 500,
-        migration_driver=migration,
+        processor=processor,
+        backend=backend,
+        n_iterations=200,
+        n_particles=50,
         seed=42,
         fitness_failure_strategy="raise",
     )
+    result = obj.fit()
 
-    backend = Local()
-
-    # spark = generate_spark_session()
-    # backend = SparkDistributed(
-    #     spark=spark,
-    #     n_executors=3,
-    # )
-
-    backend.initialize_context(
-        algorithm=algo,
-        n_iter=30,
-        n_particles=15,
-        migration=migration,
-        processor=processor,
-    )
-
-    start = perf_counter()
-    backend.execute()
-    total_time = perf_counter() - start
-
-    result = None if backend.result is None else backend.result["fitness"]
-
-    print(f"{total_time=}")
     print("Breakpoint here")
-
-
-if __name__ == "__main__":
-    distributed_test()
-    # parallel_test()
