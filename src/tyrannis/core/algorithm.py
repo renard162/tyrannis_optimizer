@@ -20,7 +20,27 @@ class CostFunctionWrapperBase(ABC):
 
 
 class ParticleBase(ABC):
-    """Base class for optimization particles."""
+    """
+    Base class for optimization particles.
+
+    A particle represents an isolated candidate solution and must contain all
+    state and behavior that is specific to that candidate. When implementing a
+    new optimization algorithm, a dedicated particle class must be created by
+    inheriting from `ParticleBase`, even when no additional behavior or state is
+    required.
+
+    A particle must remain independent from all other particles and from the
+    algorithm itself. Anything that concerns only the particle belongs in its
+    object, while logic that requires information about other particles,
+    population-wide state, or the algorithm must remain outside the particle
+    and be handled by `AlgorithmBase`. Particle objects must therefore not
+    maintain dependencies or references between one another.
+
+    During execution, the particle holds its current state and may temporarily
+    hold a candidate state produced by the algorithm. The algorithm is
+    responsible for determining how particles interact and for deciding when
+    candidate states are consolidated into the current state.
+    """
 
     def __init__(
         self,
@@ -155,7 +175,44 @@ class ParticleBase(ABC):
 
 
 class AlgorithmBase(ABC):
-    """Base class for optimization algorithm."""
+    """
+    Base class for optimization algorithms.
+
+    This class defines the execution contract of an optimization algorithm and
+    is responsible for all interactions between particles. Concrete algorithms
+    implement the particle creation, initialization, update, and consolidation
+    rules, while `AlgorithmBase` manages the population and coordinates their
+    execution.
+
+    The execution starts by creating the initial particles and then repeatedly
+    follows this lifecycle:
+
+        create_particle
+        -> pre_iteration
+        -> create_random_cache (new particles)
+        -> initialize_particle (new particles)
+        -> create_random_cache (entire population)
+        -> update_particle (entire population)
+        -> pos_iteration
+
+    `pre_iteration` prepares the particle states and algorithm state for the
+    iteration, including, but not limited to, creating or removing particles
+    from the population.
+
+    `create_random_cache` generates the random values required by
+    `initialize_particle` and `update_particle`.
+
+    `initialize_particle` performs the algorithm-specific initialization of
+    newly created particles, establishing their initial state.
+
+    `update_particle` computes the transition of particles from state k to
+    state k+1. The resulting candidate state is not necessarily consolidated
+    at this stage, since consolidation may require comparisons between
+    particles or other population-level decisions.
+
+    `pos_iteration` consolidates the new particle states and prepares the
+    algorithm and its particles for the next execution cycle.
+    """
 
     @abstractmethod
     def __init__(self, *args: Any, **kwargs: Any) -> None:
