@@ -7,10 +7,10 @@ import pytest
 from tyrannis.algorithm.pso import PSO
 from tyrannis.backend.distributed.spark_distributed import SparkDistributed
 from tyrannis.backend.local import Local
-from tyrannis.backend.migration.island_isolation import IslandIsolation
+from tyrannis.migration.island_isolation import IslandIsolation
 from tyrannis.backend.parallel.spark_parallel import SparkParallel
-from tyrannis.backend.processor.process import ProcessPool
-from tyrannis.backend.processor.serial import Serial
+from tyrannis.processor.process import ProcessPool
+from tyrannis.processor.serial import Serial
 from tyrannis.examples.bowl_shaped import sphere
 from tyrannis.space.continuous import Continuous
 

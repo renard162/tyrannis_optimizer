@@ -3,13 +3,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from ...core.backend_communication import CommunicationProcessorBase
-from ...core.backend_migration import (
+from ..core.backend_communication import CommunicationProcessorBase
+from ..core.backend_migration import (
     MigrationDriverBase,
     MigrationProcessorBase,
 )
-from ...core.signals import LocalEvent
-from ..distributed.communication.no_communication import (
+from ..core.signals import LocalEvent
+from ..backend.distributed.communication.no_communication import (
     NoCommunicationDriver,
     NoCommunicationProcessor,
 )

@@ -3,8 +3,8 @@ from doubles.cost_functions import sphere
 
 from tyrannis.algorithm.pso import PSO
 from tyrannis.backend.local import Local
-from tyrannis.backend.migration.island_isolation import IslandIsolation
-from tyrannis.backend.processor.serial import Serial
+from tyrannis.migration.island_isolation import IslandIsolation
+from tyrannis.processor.serial import Serial
 
 N_ITER = 20
 N_PARTICLES = 10

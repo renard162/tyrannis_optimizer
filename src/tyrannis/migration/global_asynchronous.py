@@ -7,12 +7,12 @@ from threading import Event, Thread
 from time import sleep
 from typing import Any
 
-from ...core.backend_communication import CommunicationProcessorBase
-from ...core.backend_migration import (
+from ..core.backend_communication import CommunicationProcessorBase
+from ..core.backend_migration import (
     MigrationDriverBase,
     MigrationProcessorBase,
 )
-from ...core.signals import LocalEvent
+from ..core.signals import LocalEvent
 
 
 class GlobalAsynchronousProcessor(MigrationProcessorBase):

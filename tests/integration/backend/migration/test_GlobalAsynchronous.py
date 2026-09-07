@@ -12,11 +12,11 @@ from tyrannis.backend.distributed.communication.spark_communication import (
     SparkCommunicationDriver,
     SparkCommunicationProcessor,
 )
-from tyrannis.backend.migration.global_asynchronous import (
+from tyrannis.migration.global_asynchronous import (
     GlobalAsynchronous,
     GlobalAsynchronousProcessor,
 )
-from tyrannis.backend.processor.serial import Serial
+from tyrannis.processor.serial import Serial
 from tyrannis.core.algorithm import AlgorithmBase, ParticleBase
 from tyrannis.core.signals import LocalEvent
 

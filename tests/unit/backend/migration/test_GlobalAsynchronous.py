@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from tyrannis.backend.migration.global_asynchronous import (
+from tyrannis.migration.global_asynchronous import (
     GlobalAsynchronous,
     GlobalAsynchronousProcessor,
 )

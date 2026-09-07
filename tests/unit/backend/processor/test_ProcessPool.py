@@ -3,7 +3,7 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 
-from tyrannis.backend.processor.process import (
+from tyrannis.processor.process import (
     PoolSignal,
     ProcessPool,
     ProcessPoolCostFunctionWrapper,

@@ -8,7 +8,7 @@ import pytest
 from pyspark.sql import SparkSession
 
 from tyrannis.algorithm.pso import PSO
-from tyrannis.backend.migration.island_isolation import IslandIsolation
+from tyrannis.migration.island_isolation import IslandIsolation
 from tyrannis.backend.parallel.spark_parallel import SparkParallel
 from tyrannis.examples.other import beale
 from tyrannis.space.continuous import Continuous

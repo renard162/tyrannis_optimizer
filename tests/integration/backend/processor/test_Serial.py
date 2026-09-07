@@ -1,6 +1,6 @@
 from doubles.algorithm import DummyAlgorithm
 
-from tyrannis.backend.processor.serial import Serial
+from tyrannis.processor.serial import Serial
 from tyrannis.core.signals import LocalEvent
 
 N_ITER = 10

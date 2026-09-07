@@ -2,12 +2,12 @@ from functools import partial
 from multiprocessing import Event
 from multiprocessing.pool import ThreadPool
 
-from ...core.algorithm import CostFunctionWrapperBase
-from ...core.processor import (
+from ..core.algorithm import CostFunctionWrapperBase
+from ..core.processor import (
     ProcessorBase,
     evaluate_particle,
 )
-from ...core.signals import LocalEvent
+from ..core.signals import LocalEvent
 
 
 class ThreadsPoolCostFunctionWrapper(CostFunctionWrapperBase):

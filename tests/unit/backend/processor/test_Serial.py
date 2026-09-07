@@ -1,7 +1,7 @@
 import numpy as np
 from doubles.algorithm import DummyAlgorithm
 
-from tyrannis.backend.processor.serial import (
+from tyrannis.processor.serial import (
     Serial,
     SerialCostFunctionWrapper,
 )

@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from .backend.local import Local
-from .backend.migration.island_isolation import IslandIsolation
-from .backend.processor.serial import Serial
+from .migration.island_isolation import IslandIsolation
+from .processor.serial import Serial
 from .core.algorithm import AlgorithmBase
 from .core.backend import BackendBase
 from .core.backend_migration import MigrationDriverBase

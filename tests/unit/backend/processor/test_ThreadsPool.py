@@ -1,6 +1,6 @@
 import pytest
 
-from tyrannis.backend.processor.threads import (
+from tyrannis.processor.threads import (
     ThreadsPool,
     ThreadsPoolCostFunctionWrapper,
 )

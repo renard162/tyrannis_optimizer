@@ -5,8 +5,8 @@ from tyrannis.algorithm.pso import PSO
 from tyrannis.backend.distributed.communication.no_communication import (
     NoCommunicationDriver,
 )
-from tyrannis.backend.migration.island_isolation import IslandIsolation
-from tyrannis.backend.processor.threads import ThreadsPool
+from tyrannis.migration.island_isolation import IslandIsolation
+from tyrannis.processor.threads import ThreadsPool
 from tyrannis.core.signals import LocalEvent
 
 N_ITER = 20
