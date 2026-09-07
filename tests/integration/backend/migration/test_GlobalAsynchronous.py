@@ -107,6 +107,26 @@ def serialize_update(
     )
 
 
+def create_migration_processor(
+    communication_processor: SparkCommunicationProcessor,
+    initial_iter: int = INITIAL_ITER,
+    check_interval: int = CHECK_INTERVAL,
+) -> GlobalAsynchronousProcessor:
+    """Create a migration processor with its loop context initialized."""
+
+    processor = GlobalAsynchronousProcessor(
+        initial_iter=initial_iter,
+        check_interval=check_interval,
+        communication_processor=communication_processor,
+    )
+
+    processor.initialize_loop_context(
+        migration_signal=LocalEvent(),
+    )
+
+    return processor
+
+
 # ============================================================================
 # Deterministic algorithm
 # ============================================================================
@@ -244,6 +264,13 @@ class MigrationTestAlgorithm(AlgorithmBase):
             ),
         )
 
+    def create_random_cache(
+        self,
+        particle_ids: list[str],
+    ) -> None:
+        for particle_id in particle_ids:
+            self._population[particle_id].random_cache = []
+
 
 def sphere(
     variables: dict[str, float],
@@ -364,9 +391,7 @@ class TestGlobalAsynchronousConfiguration:
             _,
         ) = communication_environment
 
-        processor = GlobalAsynchronousProcessor(
-            initial_iter=INITIAL_ITER,
-            check_interval=CHECK_INTERVAL,
+        processor = create_migration_processor(
             communication_processor=processors[FIRST_ISLAND],
         )
 
@@ -406,24 +431,24 @@ class TestGlobalAsynchronousConfiguration:
             _,
         ) = communication_environment
 
-        processor = GlobalAsynchronousProcessor(
-            initial_iter=INITIAL_ITER,
-            check_interval=CHECK_INTERVAL,
-            communication_processor=(
-                SparkCommunicationProcessor(
-                    driver_ip=HOST,
-                    port=driver._port,
-                    identification="test-island",
-                )
-            ),
+        communication = SparkCommunicationProcessor(
+            driver_ip=HOST,
+            port=driver._port,
+            identification="test-island",
         )
-
-        # Use a standalone communication processor whose queues are created
-        # without starting a second TCP connection.
-        communication = processor._communication_processor
 
         communication._messages = __import__("queue").Queue()  # type: ignore
         communication._outgoing_queue = __import__("queue").Queue()  # type: ignore
+
+        processor = GlobalAsynchronousProcessor(
+            initial_iter=INITIAL_ITER,
+            check_interval=CHECK_INTERVAL,
+            communication_processor=communication,
+        )
+
+        processor.initialize_loop_context(
+            migration_signal=LocalEvent(),
+        )
 
         local_best = serialize_particle(
             identifier="particle:0",
@@ -456,9 +481,7 @@ class TestGlobalAsynchronousConfiguration:
             _,
         ) = communication_environment
 
-        processor = GlobalAsynchronousProcessor(
-            initial_iter=INITIAL_ITER,
-            check_interval=CHECK_INTERVAL,
+        processor = create_migration_processor(
             communication_processor=processors[FIRST_ISLAND],
         )
 
@@ -486,13 +509,152 @@ class TestGlobalAsynchronousConfiguration:
 
         payload = json.loads(message)
 
-        assert payload["type"] == (GlobalAsynchronousProcessor.MESSAGE_TYPE)
+        assert payload["type"] == GlobalAsynchronousProcessor.MESSAGE_TYPE
 
-        assert payload["particle"]["identifier"] == (f"{FIRST_ISLAND}|particle:0")
+    def test_initialize_loop_context_sets_migration_signal(
+        self,
+        communication_environment,
+    ) -> None:
+        (
+            _migration,
+            _driver,
+            processors,
+            _,
+            _,
+        ) = communication_environment
 
-        assert payload["particle"]["fitness"] == 0.0
+        processor = GlobalAsynchronousProcessor(
+            initial_iter=INITIAL_ITER,
+            check_interval=CHECK_INTERVAL,
+            communication_processor=processors[FIRST_ISLAND],
+        )
 
-        assert processor._synchronization_iter == (INITIAL_ITER + CHECK_INTERVAL)
+        migration_signal = LocalEvent()
+
+        processor.initialize_loop_context(
+            migration_signal=migration_signal,
+        )
+
+        assert processor._migration_signal is migration_signal
+
+    def test_initialize_loop_context_sets_message_signal(
+        self,
+        communication_environment,
+    ) -> None:
+        (
+            _migration,
+            _driver,
+            processors,
+            _,
+            _,
+        ) = communication_environment
+
+        communication_processor = processors[FIRST_ISLAND]
+
+        processor = GlobalAsynchronousProcessor(
+            initial_iter=INITIAL_ITER,
+            check_interval=CHECK_INTERVAL,
+            communication_processor=communication_processor,
+        )
+
+        migration_signal = LocalEvent()
+
+        processor.initialize_loop_context(
+            migration_signal=migration_signal,
+        )
+
+        assert communication_processor._message_signal is migration_signal
+
+    def test_finalize_loop_context_clears_message_signal(
+        self,
+        communication_environment,
+    ) -> None:
+        (
+            _migration,
+            _driver,
+            processors,
+            _,
+            _,
+        ) = communication_environment
+
+        communication_processor = processors[FIRST_ISLAND]
+
+        processor = GlobalAsynchronousProcessor(
+            initial_iter=INITIAL_ITER,
+            check_interval=CHECK_INTERVAL,
+            communication_processor=communication_processor,
+        )
+
+        processor.initialize_loop_context(
+            migration_signal=LocalEvent(),
+        )
+
+        processor.finalize_loop_context()
+
+        assert processor._migration_signal is None
+        assert communication_processor._message_signal is None
+
+    def test_migration_control_requires_loop_context(
+        self,
+        communication_environment,
+    ) -> None:
+        (
+            _migration,
+            _driver,
+            processors,
+            _,
+            _,
+        ) = communication_environment
+
+        processor = GlobalAsynchronousProcessor(
+            initial_iter=INITIAL_ITER,
+            check_interval=CHECK_INTERVAL,
+            communication_processor=processors[FIRST_ISLAND],
+        )
+
+        with pytest.raises(
+            RuntimeError,
+            match="Migration loop context has not been initialized.",
+        ):
+            processor.migration_control(
+                actual_iter=INITIAL_ITER,
+                population={},
+                local_best=None,
+                insert_arrival_particle=lambda _: None,
+                departure_particle=lambda _: None,
+            )
+
+    def test_large_iteration_jump_advances_to_next_synchronization_point(
+        self,
+        communication_environment,
+    ) -> None:
+        (
+            _migration,
+            _driver,
+            processors,
+            _,
+            _,
+        ) = communication_environment
+
+        processor = GlobalAsynchronousProcessor(
+            initial_iter=2,
+            check_interval=3,
+            communication_processor=processors[FIRST_ISLAND],
+        )
+
+        processor.initialize_loop_context(
+            migration_signal=LocalEvent(),
+        )
+
+        processor.migration_control(
+            actual_iter=10,
+            population={},
+            local_best=None,
+            insert_arrival_particle=lambda _: None,
+            departure_particle=lambda _: None,
+        )
+
+        assert processor._synchronization_iter == 11
 
 
 # ============================================================================
@@ -967,9 +1129,7 @@ class TestGlobalAsynchronousReception:
             _,
         ) = communication_environment
 
-        processor = GlobalAsynchronousProcessor(
-            initial_iter=INITIAL_ITER,
-            check_interval=CHECK_INTERVAL,
+        processor = create_migration_processor(
             communication_processor=processors[SECOND_ISLAND],
         )
 
@@ -1027,9 +1187,7 @@ class TestGlobalAsynchronousReception:
             _,
         ) = communication_environment
 
-        processor = GlobalAsynchronousProcessor(
-            initial_iter=INITIAL_ITER,
-            check_interval=CHECK_INTERVAL,
+        processor = create_migration_processor(
             communication_processor=processors[SECOND_ISLAND],
         )
 
@@ -1092,9 +1250,7 @@ class TestGlobalAsynchronousReception:
             _,
         ) = communication_environment
 
-        processor = GlobalAsynchronousProcessor(
-            initial_iter=INITIAL_ITER,
-            check_interval=CHECK_INTERVAL,
+        processor = create_migration_processor(
             communication_processor=processors[SECOND_ISLAND],
         )
 
@@ -1145,9 +1301,7 @@ class TestGlobalAsynchronousReception:
             _,
         ) = communication_environment
 
-        processor = GlobalAsynchronousProcessor(
-            initial_iter=INITIAL_ITER,
-            check_interval=CHECK_INTERVAL,
+        processor = create_migration_processor(
             communication_processor=processors[SECOND_ISLAND],
         )
 
@@ -1189,9 +1343,7 @@ class TestGlobalAsynchronousReception:
             _,
         ) = communication_environment
 
-        processor = GlobalAsynchronousProcessor(
-            initial_iter=INITIAL_ITER,
-            check_interval=CHECK_INTERVAL,
+        processor = create_migration_processor(
             communication_processor=processors[SECOND_ISLAND],
         )
 
@@ -2001,7 +2153,9 @@ class TestGlobalAsynchronousSerialEndToEnd:
 
         processor.set_identifier(FIRST_ISLAND)
 
-        processor._migration_processor = migration.create_processor_module(FIRST_ISLAND)
+        processor._migration_processor = migration.create_processor_module(
+            FIRST_ISLAND,
+        )
 
         try:
             processor.initialize_execution_context()
@@ -2014,32 +2168,98 @@ class TestGlobalAsynchronousSerialEndToEnd:
 
             assert migration_processor is not None
 
+            processor.initialize_loop_context()
+
             assert migration_processor._synchronization_iter == 2
 
             processor.migration_control(0)
+
             assert migration_processor._synchronization_iter == 2
 
             processor.migration_control(1)
+
             assert migration_processor._synchronization_iter == 2
 
             processor.migration_control(2)
+
             assert migration_processor._synchronization_iter == 5
 
             processor.migration_control(3)
+
             assert migration_processor._synchronization_iter == 5
 
             processor.migration_control(4)
+
             assert migration_processor._synchronization_iter == 5
 
             processor.migration_control(5)
+
+            assert migration_processor._synchronization_iter == 8
+
+            processor.migration_control(6)
+
+            assert migration_processor._synchronization_iter == 8
+
+            processor.migration_control(7)
+
             assert migration_processor._synchronization_iter == 8
 
             processor.migration_control(8)
+
             assert migration_processor._synchronization_iter == 11
 
         finally:
             processor.finalize_execution_context()
             driver.stop()
+
+    def test_stop_processes_pending_messages(self) -> None:
+        port = find_free_port()
+
+        driver_stop_signal = LocalEvent()
+
+        driver = SparkCommunicationDriver(
+            island_ids=ISLAND_IDS,
+            port=port,
+            stop_signal=driver_stop_signal,
+        )
+
+        migration = GlobalAsynchronous(
+            initial_iter=INITIAL_ITER,
+            check_interval=CHECK_INTERVAL,
+        )
+
+        migration.initialize_context(
+            communication_driver=driver,
+            communication_processor_class=SparkCommunicationProcessor,
+            communication_processor_kargs={
+                "driver_ip": HOST,
+                "port": port,
+            },
+        )
+
+        message = json.dumps(
+            {
+                "type": GlobalAsynchronousProcessor.MESSAGE_TYPE,
+                "particle": {
+                    "identifier": "source|particle:0",
+                    "fitness": 1.0,
+                    "variables": {
+                        "x": 0.0,
+                    },
+                },
+            }
+        )
+
+        driver.incoming_queues[FIRST_ISLAND].put(message)
+
+        try:
+            migration.start()
+            migration.stop()
+
+            assert migration._global_best_fitness == 1.0
+
+        finally:
+            migration.stop()
 
 
 # ============================================================================
@@ -2103,9 +2323,7 @@ class TestGlobalAsynchronousInvalidProtocol:
             _,
         ) = communication_environment
 
-        processor = GlobalAsynchronousProcessor(
-            initial_iter=INITIAL_ITER,
-            check_interval=CHECK_INTERVAL,
+        processor = create_migration_processor(
             communication_processor=processors[SECOND_ISLAND],
         )
 
