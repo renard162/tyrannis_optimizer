@@ -167,6 +167,27 @@ class CommunicationProcessorBase(ABC):
         """Stop the processor communication backend and release its resources."""
         raise NotImplementedError
 
+    @abstractmethod
+    def set_message_signal(
+        self,
+        message_signal: LocalEvent | None,
+    ) -> None:
+        """Set the signal used to notify the processor of received messages.
+
+        The communication backend must set the supplied signal whenever a complete
+        application-level message is inserted into the :attr:`messages` queue.
+
+        Passing ``None`` disables message signaling. This is used when the
+        execution context associated with the signal is finalized.
+
+        Parameters
+        ----------
+        message_signal:
+            Signal to set when a new message is inserted into the received-message
+            queue, or ``None`` to disable message signaling.
+        """
+        raise NotImplementedError
+
 
 class CommunicationDriverBase(ABC):
     """Abstract interface for the driver communication layer."""

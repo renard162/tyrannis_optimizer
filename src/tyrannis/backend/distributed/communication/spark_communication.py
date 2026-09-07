@@ -34,6 +34,7 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
         self._thread: Thread | None = None
         self._running: Event | None = None
 
+        self._message_signal: LocalEvent | None = None
         self._stop_signal: LocalEvent | None = None
 
         self._messages: Queue[str] | None = None
@@ -58,6 +59,14 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
             )
 
         return self._outgoing_queue
+
+    def set_message_signal(
+        self,
+        message_signal: LocalEvent | None,
+    ) -> None:
+        """Set the signal used to notify the processor of received messages."""
+
+        self._message_signal = message_signal
 
     def start(
         self,
@@ -123,6 +132,7 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
 
         self._receive_buffer = ""
         self._stop_signal = None
+        self._message_signal = None
 
     def _receive_loop(self) -> None:
         communication_socket = self._socket
@@ -223,6 +233,9 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
             self._receive_buffer = self._receive_buffer[etx_position + len(self.ETX) :]
 
             self.messages.put(message)
+
+            if self._message_signal is not None:
+                self._message_signal.set()
 
     def _send_pending_messages(self) -> None:
         communication_socket = self._socket
