@@ -37,6 +37,15 @@ class DummyMigrationProcessor(MigrationProcessorBase):
         self.start_stop_signal = None
         self.migration_control_args = None
 
+    def initialize_loop_context(
+        self,
+        migration_signal: LocalEvent,
+    ) -> None:
+        pass
+
+    def finalize_loop_context(self) -> None:
+        pass
+
     def start(
         self,
         stop_signal: LocalEvent,
@@ -452,6 +461,7 @@ def test_migration_control_delegates_to_migration_processor() -> None:
     migration_processor = create_migration_processor(processor)
 
     processor._migration_processor = migration_processor
+    processor.initialize_loop_context()
 
     processor.migration_control(actual_iter=7)
 
@@ -489,6 +499,7 @@ def test_migration_control_passes_local_best() -> None:
 
     migration_processor = create_migration_processor(processor)
     processor._migration_processor = migration_processor
+    processor.initialize_loop_context()
 
     processor.migration_control(actual_iter=5)
 

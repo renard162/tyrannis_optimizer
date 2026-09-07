@@ -53,6 +53,16 @@ class DummyMigrationProcessor:
         self.start_called = False
         self.stop_called = False
         self.migration_control_calls = []
+        self.migration_signal = None
+
+    def initialize_loop_context(
+        self,
+        migration_signal: LocalEvent,
+    ) -> None:
+        self.migration_signal = migration_signal
+
+    def finalize_loop_context(self) -> None:
+        self.migration_signal = None
 
     def start(self, stop_signal: LocalEvent) -> None:
         self.start_called = True

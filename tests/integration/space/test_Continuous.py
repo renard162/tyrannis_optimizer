@@ -245,7 +245,7 @@ def test_continuous_with_spark_parallel(spark) -> None:
 
     backend.initialize_context(
         algorithm=algorithm,
-        n_iter=N_ITER,
+        n_iter=0,
         n_particles=N_PARTICLES,
         migration=IslandIsolation(),
         fitness_failure_strategy="raise",

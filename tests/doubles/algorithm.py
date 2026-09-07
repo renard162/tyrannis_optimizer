@@ -69,3 +69,7 @@ class DummyAlgorithm(AlgorithmBase):
 
     def post_iteration(self, actual_iter: int) -> None:
         pass
+
+    def create_random_cache(self, particle_ids: list[str]) -> None:
+        for particle_id in particle_ids:
+            self._population[particle_id].random_cache = []

@@ -28,6 +28,15 @@ class DummyMigrationProcessor(MigrationProcessorBase):
         self.migration_control_calls: list[int] = []
         self.population_calls: list[dict[str, float | None]] = []
 
+    def initialize_loop_context(
+        self,
+        migration_signal: LocalEvent,
+    ) -> None:
+        pass
+
+    def finalize_loop_context(self) -> None:
+        pass
+
     def start(
         self,
         stop_signal: LocalEvent,
@@ -84,6 +93,8 @@ def create_processor() -> Serial:
         ),
         boundaries={"x": (-1.0, 1.0)},
     )
+
+    algorithm.create_random_cache = lambda particle_ids: None
 
     migration_driver = DummyMigrationDriver()
 

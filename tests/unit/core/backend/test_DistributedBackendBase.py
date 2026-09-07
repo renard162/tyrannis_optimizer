@@ -29,6 +29,7 @@ class DummyCommunicationProcessor(CommunicationProcessorBase):
         self._started = False
         self._stopped = False
         self._stop_signal: LocalEvent | None = None
+        self._message_signal: LocalEvent | None = None
 
     @property
     def messages(self) -> Queue[str]:
@@ -37,6 +38,12 @@ class DummyCommunicationProcessor(CommunicationProcessorBase):
     @property
     def outgoing_queue(self) -> Queue[str]:
         return self._outgoing_queue
+
+    def set_message_signal(  # type: ignore
+        self,
+        message_signal: LocalEvent,
+    ) -> None:
+        self._message_signal = message_signal
 
     def start(
         self,
@@ -65,11 +72,21 @@ class DummyMigrationProcessor(MigrationProcessorBase):
         self._migration_control_calls: list[
             tuple[
                 int,
+                dict[str, float | None],
                 str | None,
                 Callable[[dict[str, Any]], None],
                 Callable[[str], None],
             ]
         ] = []
+
+    def initialize_loop_context(
+        self,
+        migration_signal: LocalEvent,
+    ) -> None:
+        pass
+
+    def finalize_loop_context(self) -> None:
+        pass
 
     def start(
         self,
@@ -84,6 +101,7 @@ class DummyMigrationProcessor(MigrationProcessorBase):
     def migration_control(  # type: ignore
         self,
         actual_iter: int,
+        population: dict[str, float | None],
         local_best: str | None,
         insert_arrival_particle: Callable[[dict[str, Any]], None],
         departure_particle: Callable[[str], None],
@@ -91,6 +109,7 @@ class DummyMigrationProcessor(MigrationProcessorBase):
         self._migration_control_calls.append(
             (
                 actual_iter,
+                population,
                 local_best,
                 insert_arrival_particle,
                 departure_particle,

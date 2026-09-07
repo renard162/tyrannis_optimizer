@@ -25,6 +25,15 @@ class DummyMigrationProcessor(MigrationProcessorBase):
         self.migration_control_calls: list[int] = []
         self.population_calls: list[dict[str, float | None]] = []
 
+    def initialize_loop_context(
+        self,
+        migration_signal: LocalEvent,
+    ) -> None:
+        self._migration_signal = migration_signal
+
+    def finalize_loop_context(self) -> None:
+        pass
+
     def start(
         self,
         stop_signal: LocalEvent,
@@ -148,6 +157,9 @@ def test_run_requires_algorithm() -> None:
 
 def test_migration_control_delegates_to_migration_processor() -> None:
     processor = create_processor()
+
+    processor.initialize_execution_context()
+    processor.initialize_loop_context()
 
     processor._local_best = '{"fitness": 1.0}'
     processor._population = {

@@ -31,11 +31,10 @@ class DummyCommunicationProcessor(CommunicationProcessorBase):
     def stop(self) -> None:
         raise NotImplementedError
 
-
-def start(self, stop_signal: LocalEvent) -> None:
-    self._stop_signal = stop_signal
-
-    def stop(self) -> None:
+    def set_message_signal(
+        self,
+        message_signal: LocalEvent | None,
+    ) -> None:
         pass
 
 

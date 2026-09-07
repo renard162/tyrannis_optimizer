@@ -4,7 +4,7 @@ from unittest.mock import Mock
 from doubles.algorithm import DummyAlgorithm
 
 from tyrannis.backend.local import Local, LocalCostFunctionWrapper
-from tyrannis.backend.migration import IslandIsolation
+from tyrannis.backend.migration.island_isolation import IslandIsolation
 
 
 def create_algorithm() -> DummyAlgorithm:

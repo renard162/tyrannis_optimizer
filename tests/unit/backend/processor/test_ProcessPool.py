@@ -4,9 +4,9 @@ import numpy as np
 import pytest
 
 from tyrannis.backend.processor.process import (
+    PoolSignal,
     ProcessPool,
     ProcessPoolCostFunctionWrapper,
-    StopSignal,
 )
 from tyrannis.core.backend_migration import MigrationProcessorBase
 from tyrannis.core.signals import LocalEvent
@@ -43,7 +43,7 @@ def test_cost_function_wrapper_serialization() -> None:
 
 
 def test_stop_signal() -> None:
-    signal = StopSignal()
+    signal = PoolSignal()
 
     assert not signal.is_set()
 
@@ -57,9 +57,9 @@ def test_stop_signal() -> None:
 
 
 def test_stop_signal_manager_signal() -> None:
-    signal = StopSignal()
+    signal = PoolSignal()
 
-    manager_signal = StopSignal()
+    manager_signal = PoolSignal()
 
     signal.set_manager_signal(manager_signal)  # type: ignore
 
@@ -75,11 +75,11 @@ def test_stop_signal_manager_signal() -> None:
 
 
 def test_stop_signal_manager_signal_reflects_current_state() -> None:
-    signal = StopSignal()
+    signal = PoolSignal()
 
     signal.set()
 
-    manager_signal = StopSignal()
+    manager_signal = PoolSignal()
 
     signal.set_manager_signal(manager_signal)  # type: ignore
 
@@ -91,9 +91,9 @@ def test_stop_signal_manager_signal_reflects_current_state() -> None:
 
 
 def test_stop_signal_clear_manager_signal() -> None:
-    signal = StopSignal()
+    signal = PoolSignal()
 
-    manager_signal = StopSignal()
+    manager_signal = PoolSignal()
 
     signal.set_manager_signal(manager_signal)  # type: ignore
     signal.clear_manager_signal()
@@ -105,7 +105,7 @@ def test_stop_signal_clear_manager_signal() -> None:
 
 
 def test_stop_signal_manager_signal_requires_initialization() -> None:
-    signal = StopSignal()
+    signal = PoolSignal()
 
     with pytest.raises(
         RuntimeError,
@@ -172,7 +172,7 @@ def test_initialize_execution_context() -> None:
 
     processor.initialize_execution_context()
 
-    assert isinstance(processor._stop_signal, StopSignal)
+    assert isinstance(processor._stop_signal, PoolSignal)
     assert not processor._stop_signal.is_set()
 
     migration_processor.start.assert_called_once_with(

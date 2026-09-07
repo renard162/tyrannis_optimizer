@@ -246,7 +246,7 @@ def test_get_n_executors() -> None:
     jsc = Mock()
 
     executor_memory_status = Mock()
-    executor_memory_status.size = 5
+    executor_memory_status.size.return_value = 5
 
     jsc.sc().getExecutorMemoryStatus.return_value = executor_memory_status
 
@@ -257,7 +257,7 @@ def test_get_n_executors() -> None:
         n_executors=None,
     )
 
-    assert backend._n_executors == 5
+    assert backend._n_executors == 4
 
 
 def test_execute_distributes_code_archive(tmp_path) -> None:

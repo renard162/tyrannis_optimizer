@@ -19,3 +19,20 @@ class DummyProcessor(ProcessorBase[LocalEvent]):
 
     def run(self) -> None:
         pass
+
+    def initialize_loop_context(self) -> None:
+        self._migration_signal = LocalEvent()
+
+        if self._migration_processor is None:
+            raise RuntimeError("Migration processor cannot be None.")
+
+        self._migration_processor.initialize_loop_context(
+            migration_signal=self._migration_signal,
+        )
+
+    def finalize_loop_context(self) -> None:
+        if self._migration_processor is None:
+            raise RuntimeError("Migration processor cannot be None.")
+
+        self._migration_processor.finalize_loop_context()
+        self._migration_signal = None  # type: ignore
