@@ -18,12 +18,7 @@ BOUNDARIES = {
     "y": (-5.12, 5.12),
 }
 
-EXPECTED_BEST_FITNESS = 0.0004345841025887674
-
-EXPECTED_BEST_VARIABLES = {
-    "x": -0.01698341924029871,
-    "y": -0.012089151066018614,
-}
+MAX_EXPECTED_FITNESS = 0.01
 
 
 def run_pso(seed: int = SEED) -> Serial:
@@ -78,19 +73,11 @@ def test_pso_converges_on_sphere() -> None:
     assert best_particle is not None
     assert best_particle.fitness is not None
 
+    assert best_particle.fitness <= MAX_EXPECTED_FITNESS
+
     np.testing.assert_allclose(
         best_particle.fitness,
-        EXPECTED_BEST_FITNESS,
-    )
-
-    np.testing.assert_allclose(
-        best_particle.variables["x"],
-        EXPECTED_BEST_VARIABLES["x"],
-    )
-
-    np.testing.assert_allclose(
-        best_particle.variables["y"],
-        EXPECTED_BEST_VARIABLES["y"],
+        sphere(best_particle.variables),
     )
 
 

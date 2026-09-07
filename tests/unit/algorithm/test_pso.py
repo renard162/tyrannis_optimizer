@@ -275,6 +275,13 @@ def test_update_particle() -> None:
         personal_best_fitness=2.0,
     )
 
+    particle.random_cache = [
+        0.5,
+        0.5,  # x: cognitive, social
+        0.5,
+        0.5,  # y: cognitive, social
+    ]
+
     algorithm._population[particle.identifier] = particle
     algorithm._local_best = PSOParticle(
         identifier="best",

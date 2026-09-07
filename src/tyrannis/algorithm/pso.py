@@ -141,7 +141,19 @@ class PSO(AlgorithmBase):
         del self._population[identifier]
 
     def pre_iteration(self, actual_iter: int) -> None:
-        return
+        for particle in self._population.values():
+            if not isinstance(particle, PSOParticle):
+                raise TypeError(
+                    f"Particle '{particle.identifier}' must be an instance of PSOParticle."
+                )
+
+            particle.random_cache = []
+
+            for _ in self._boundaries:
+                cognitive_random = self._rng.random()
+                social_random = self._rng.random()
+
+                particle.random_cache.extend((cognitive_random, social_random))
 
     def initialize_particle(self, identifier: str) -> ParticleBase:
         particle = self._population[identifier]
@@ -198,13 +210,16 @@ class PSO(AlgorithmBase):
             personal_best_variable = personal_best_variables[name]
             global_best_variable = global_best_variables[name]
 
+            cognitive_random = particle.random_cache.pop(0)
+            social_random = particle.random_cache.pop(0)
+
             velocity = (
                 self._inertia * current_velocity
                 + self._cognitive_coefficient
-                * self._rng.random()
+                * cognitive_random
                 * (personal_best_variable - current_variable)
                 + self._social_coefficient
-                * self._rng.random()
+                * social_random
                 * (global_best_variable - current_variable)
             )
 
