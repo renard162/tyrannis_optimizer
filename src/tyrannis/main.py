@@ -10,6 +10,7 @@ from .backend.migration import IslandIsolation
 from .backend.processor import ProcessPool, ThreadsPool
 from .backend.processor.serial import Serial
 from .examples.many_local_minima import ackley
+from .space import Continuous
 
 
 def generate_spark_session():
@@ -33,8 +34,8 @@ def generate_spark_session():
     return spark
 
 
-def test_function(x):
-    result = ackley(x)
+def test_function(*x):
+    result = ackley(*x)
     # n_iter = 1_000_001  # Benchmark com 30 iter e 500 partículas
     # sleep_time = 0.0  # Benchmark utiliza apenas tempo em consumo de CPU
     n_iter = 10_001
@@ -47,10 +48,15 @@ def test_function(x):
 
 
 def parallel_test():
+    space = Continuous(
+        cost_function=test_function,
+        boundaries=[(-32.768, 32.768) for _ in range(2)],
+    )
+
     algo = PSO()
     algo.initialize_context(
-        fitness_function=test_function,
-        boundaries={f"{n}": (-32.768, 32.768) for n in range(2)},
+        fitness_function=space,
+        boundaries=space.encoded_boundaries,
     )
 
     spark = generate_spark_session()
@@ -75,32 +81,39 @@ def parallel_test():
 
 
 def distributed_test():
+    space = Continuous(
+        cost_function=test_function,
+        boundaries=[(-32.768, 32.768) for _ in range(2)],
+    )
+    space.initialize_context(seed=None)
+
     algo = PSO()
     algo.initialize_context(
-        fitness_function=test_function,
-        boundaries={f"{n}": (-32.768, 32.768) for n in range(2)},
+        fitness_function=space,
+        boundaries=space.encoded_boundaries,
     )
 
     migration = IslandIsolation()
 
     # processor = Serial()
-    # processor = ThreadsPool()
-    processor = ProcessPool()
+    processor = ThreadsPool()
+    # processor = ProcessPool()
     processor.initialize_context(
         algorithm=algo,
         n_iter=30,
         n_particles=15,  # 500,
         migration_driver=migration,
         seed=42,
+        fitness_failure_strategy="raise",
     )
 
-    # backend = Local()
+    backend = Local()
 
-    spark = generate_spark_session()
-    backend = SparkDistributed(
-        spark=spark,
-        n_executors=3,
-    )
+    # spark = generate_spark_session()
+    # backend = SparkDistributed(
+    #     spark=spark,
+    #     n_executors=3,
+    # )
 
     backend.initialize_context(
         algorithm=algo,

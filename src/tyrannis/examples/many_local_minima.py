@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def ackley(x: list[float]) -> float:
+def ackley(*x: list[float]) -> float:
     """Ackley function with many local minima.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -10,7 +10,7 @@ def ackley(x: list[float]) -> float:
     Recommended domain: xi ∈ [-32.768, 32.768].
     Global minimum: f(0, ..., 0) = 0 at x = (0, ..., 0).
     """
-    values = np.fromiter(x, dtype=float)
+    values = np.array(x, dtype=float)
     dimension = values.size
 
     sum_squared = np.sum(values**2)
@@ -24,7 +24,7 @@ def ackley(x: list[float]) -> float:
     )
 
 
-def bukin_6(x: list[float]) -> float:
+def bukin_6(x1: float, x2: float) -> float:
     """Bukin function N. 6 with a narrow, curved ridge.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -33,12 +33,10 @@ def bukin_6(x: list[float]) -> float:
     Recommended domain: x1 ∈ [-15, -5], x2 ∈ [-3, 3].
     Global minimum: f(-10, 1) = 0 at x = (-10, 1).
     """
-    x1, x2 = np.fromiter(x, dtype=float)
-
     return float(100 * np.sqrt(np.abs(x2 - 0.01 * x1**2)) + 0.01 * np.abs(x1 + 10))
 
 
-def cross_in_tray(x: list[float]) -> float:
+def cross_in_tray(x1: float, x2: float) -> float:
     """Cross-in-Tray function with four global minima.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -48,8 +46,6 @@ def cross_in_tray(x: list[float]) -> float:
     Global minima: f ≈ -2.06261 at
     (±1.34941, ±1.34941).
     """
-    x1, x2 = np.fromiter(x, dtype=float)
-
     radius = np.sqrt(x1**2 + x2**2)
 
     value = np.sin(x1) * np.sin(x2) * np.exp(np.abs(100 - radius / np.pi))
@@ -57,7 +53,7 @@ def cross_in_tray(x: list[float]) -> float:
     return float(-0.0001 * (np.abs(value) + 1) ** 0.1)
 
 
-def drop_wave(x: list[float]) -> float:
+def drop_wave(x1: float, x2: float) -> float:
     """Drop-Wave function with many local minima.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -66,8 +62,6 @@ def drop_wave(x: list[float]) -> float:
     Recommended domain: x1, x2 ∈ [-5.12, 5.12].
     Global minimum: f(0, 0) = -1 at x = (0, 0).
     """
-    x1, x2 = np.fromiter(x, dtype=float)
-
     radius_squared = x1**2 + x2**2
 
     return float(
@@ -75,7 +69,7 @@ def drop_wave(x: list[float]) -> float:
     )
 
 
-def eggholder(x: list[float]) -> float:
+def eggholder(x1: float, x2: float) -> float:
     """Eggholder function with many local minima.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -84,15 +78,13 @@ def eggholder(x: list[float]) -> float:
     Recommended domain: x1, x2 ∈ [-512, 512].
     Global minimum: f(512, 404.2319) ≈ -959.6407.
     """
-    x1, x2 = np.fromiter(x, dtype=float)
-
     return float(
         -(x2 + 47) * np.sin(np.sqrt(np.abs(x2 + x1 / 2 + 47)))
         - x1 * np.sin(np.sqrt(np.abs(x1 - x2 - 47)))
     )
 
 
-def gramacy_lee(x: list[float]) -> float:
+def gramacy_lee(value: float) -> float:
     """Gramacy & Lee (2012) function with multiple local minima.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -101,12 +93,10 @@ def gramacy_lee(x: list[float]) -> float:
     Recommended domain: x ∈ [0.5, 2.5].
     Global minimum: f(0.548563) ≈ -0.869011.
     """
-    value = next(iter(x))
-
     return float(np.sin(10 * np.pi * value) / (2 * value) + (value - 1) ** 4)
 
 
-def griewank(x: list[float]) -> float:
+def griewank(*x: list[float]) -> float:
     """Griewank function with many widespread local minima.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -115,7 +105,7 @@ def griewank(x: list[float]) -> float:
     Recommended domain: xi ∈ [-600, 600].
     Global minimum: f(0, ..., 0) = 0 at x = (0, ..., 0).
     """
-    values = np.fromiter(x, dtype=float)
+    values = np.array(x, dtype=float)
     indices = np.arange(1, values.size + 1)
 
     sum_term = np.sum(values**2) / 4000
@@ -124,7 +114,7 @@ def griewank(x: list[float]) -> float:
     return float(sum_term - product_term + 1)
 
 
-def holder_table(x: list[float]) -> float:
+def holder_table(x1: float, x2: float) -> float:
     """Holder Table function with four global minima.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -134,14 +124,12 @@ def holder_table(x: list[float]) -> float:
     Global minima: f ≈ -19.2085 at
     (±8.05502, ±9.66459).
     """
-    x1, x2 = np.fromiter(x, dtype=float)
-
     value = np.sin(x1) * np.cos(x2) * np.exp(np.abs(1 - np.sqrt(x1**2 + x2**2) / np.pi))
 
     return float(-np.abs(value))
 
 
-def langermann(x: list[float]) -> float:
+def langermann(x1: float, x2: float) -> float:
     """Langermann function with several unevenly distributed local minima.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -152,8 +140,6 @@ def langermann(x: list[float]) -> float:
     Global minimum: approximately
     f(2.002992, 1.006096) ≈ -1.306.
     """
-    x1, x2 = np.fromiter(x, dtype=float)
-
     a = np.array([3, 5, 2, 1, 7], dtype=float)
     b = np.array([5, 2, 1, 4, 9], dtype=float)
     c = np.array([1, 2, 5, 2, 3], dtype=float)
@@ -163,7 +149,7 @@ def langermann(x: list[float]) -> float:
     return float(-np.sum(c * np.exp(-distance / np.pi) * np.cos(np.pi * distance)))
 
 
-def levy(x: list[float]) -> float:
+def levy(*x: list[float]) -> float:
     """Levy function with many local minima.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -172,7 +158,7 @@ def levy(x: list[float]) -> float:
     Recommended domain: xi ∈ [-10, 10].
     Global minimum: f(1, ..., 1) = 0 at x = (1, ..., 1).
     """
-    values = np.fromiter(x, dtype=float)
+    values = np.array(x, dtype=float)
     w = 1 + (values - 1) / 4
 
     term_1 = np.sin(np.pi * w[0]) ** 2
@@ -184,7 +170,7 @@ def levy(x: list[float]) -> float:
     return float(term_1 + term_2 + term_3)
 
 
-def levy_13(x: list[float]) -> float:
+def levy_13(x1: float, x2: float) -> float:
     """Levy function N. 13 with multiple local minima.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -193,8 +179,6 @@ def levy_13(x: list[float]) -> float:
     Recommended domain: x1, x2 ∈ [-10, 10].
     Global minimum: f(1, 1) = 0 at x = (1, 1).
     """
-    x1, x2 = np.fromiter(x, dtype=float)
-
     return float(
         np.sin(3 * np.pi * x1) ** 2
         + (x1 - 1) ** 2 * (1 + np.sin(3 * np.pi * x2) ** 2)
@@ -202,7 +186,7 @@ def levy_13(x: list[float]) -> float:
     )
 
 
-def rastrigin(x: list[float]) -> float:
+def rastrigin(*x: list[float]) -> float:
     """Rastrigin function with regularly distributed local minima.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -211,13 +195,13 @@ def rastrigin(x: list[float]) -> float:
     Recommended domain: xi ∈ [-5.12, 5.12].
     Global minimum: f(0, ..., 0) = 0 at x = (0, ..., 0).
     """
-    values = np.fromiter(x, dtype=float)
+    values = np.array(x, dtype=float)
     dimension = values.size
 
     return float(10 * dimension + np.sum(values**2 - 10 * np.cos(2 * np.pi * values)))
 
 
-def schaffer_2(x: list[float]) -> float:
+def schaffer_2(x1: float, x2: float) -> float:
     """Schaffer function N. 2 with multiple local minima.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -226,8 +210,6 @@ def schaffer_2(x: list[float]) -> float:
     Recommended domain: x1, x2 ∈ [-100, 100].
     Global minimum: f(0, 0) = 0 at x = (0, 0).
     """
-    x1, x2 = np.fromiter(x, dtype=float)
-
     difference = x1**2 - x2**2
     radius_squared = x1**2 + x2**2
 
@@ -236,7 +218,7 @@ def schaffer_2(x: list[float]) -> float:
     )
 
 
-def schaffer_4(x: list[float]) -> float:
+def schaffer_4(x1: float, x2: float) -> float:
     """Schaffer function N. 4 with multiple local minima.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -246,8 +228,6 @@ def schaffer_4(x: list[float]) -> float:
     Global minima: f ≈ 0.292579 at
     (0, ±1.253115) and (±1.253115, 0).
     """
-    x1, x2 = np.fromiter(x, dtype=float)
-
     difference = np.abs(x1**2 - x2**2)
     radius_squared = x1**2 + x2**2
 
@@ -257,7 +237,7 @@ def schaffer_4(x: list[float]) -> float:
     )
 
 
-def schwefel(x: list[float]) -> float:
+def schwefel(*x: list[float]) -> float:
     """Schwefel function with many local minima.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -266,7 +246,7 @@ def schwefel(x: list[float]) -> float:
     Recommended domain: xi ∈ [-500, 500].
     Global minimum: f(420.968746, ..., 420.968746) ≈ 0.
     """
-    values = np.fromiter(x, dtype=float)
+    values = np.array(x, dtype=float)
     dimension = values.size
 
     return float(
@@ -274,7 +254,7 @@ def schwefel(x: list[float]) -> float:
     )
 
 
-def shubert(x: list[float]) -> float:
+def shubert(x1: float, x2: float) -> float:
     """Shubert function with multiple local minima.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -283,8 +263,6 @@ def shubert(x: list[float]) -> float:
     Recommended domain: x1, x2 ∈ [-10, 10].
     Global minima: 18 global minima with f ≈ -186.7309.
     """
-    x1, x2 = np.fromiter(x, dtype=float)
-
     indices = np.arange(1, 6)
 
     sum_x1 = np.sum(indices * np.cos((indices + 1) * x1 + indices))

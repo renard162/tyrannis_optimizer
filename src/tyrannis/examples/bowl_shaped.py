@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def bohachevsky_1(x: list[float]) -> float:
+def bohachevsky_1(x1: float, x2: float) -> float:
     """Bohachevsky function N. 1 with a bowl-shaped surface.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -10,7 +10,6 @@ def bohachevsky_1(x: list[float]) -> float:
     Recommended domain: x1, x2 ∈ [-100, 100].
     Global minimum: f(0, 0) = 0 at x = (0, 0).
     """
-    x1, x2 = np.fromiter(x, dtype=float)
 
     return float(
         x1**2
@@ -21,7 +20,7 @@ def bohachevsky_1(x: list[float]) -> float:
     )
 
 
-def bohachevsky_2(x: list[float]) -> float:
+def bohachevsky_2(x1: float, x2: float) -> float:
     """Bohachevsky function N. 2 with a bowl-shaped surface.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -30,14 +29,12 @@ def bohachevsky_2(x: list[float]) -> float:
     Recommended domain: x1, x2 ∈ [-100, 100].
     Global minimum: f(0, 0) = 0 at x = (0, 0).
     """
-    x1, x2 = np.fromiter(x, dtype=float)
-
     return float(
         x1**2 + 2 * x2**2 - 0.3 * np.cos(3 * np.pi * x1) * np.cos(4 * np.pi * x2) + 0.3
     )
 
 
-def bohachevsky_3(x: list[float]) -> float:
+def bohachevsky_3(x1: float, x2: float) -> float:
     """Bohachevsky function N. 3 with a bowl-shaped surface.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -46,14 +43,12 @@ def bohachevsky_3(x: list[float]) -> float:
     Recommended domain: x1, x2 ∈ [-100, 100].
     Global minimum: f(0, 0) = 0 at x = (0, 0).
     """
-    x1, x2 = np.fromiter(x, dtype=float)
-
     return float(
         x1**2 + 2 * x2**2 - 0.3 * np.cos(3 * np.pi * x1 + 4 * np.pi * x2) + 0.3
     )
 
 
-def perm_0_d_beta(x: list[float]) -> float:
+def perm_0_d_beta(*x: list[float]) -> float:
     """Perm function 0,d,beta with a bowl-shaped surface.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -64,7 +59,7 @@ def perm_0_d_beta(x: list[float]) -> float:
     Global minimum: f(1, 1/2, ..., 1/d) = 0 at
     x_i = 1/i for i = 1, ..., d.
     """
-    values = np.fromiter(x, dtype=float)
+    values = np.array(x, dtype=float)
     dimension = values.size
     beta = 10.0
 
@@ -82,7 +77,7 @@ def perm_0_d_beta(x: list[float]) -> float:
     return float(np.sum(inner**2))
 
 
-def rotated_hyper_ellipsoid(x: list[float]) -> float:
+def rotated_hyper_ellipsoid(*x: list[float]) -> float:
     """Rotated Hyper-Ellipsoid function.
 
     The function is continuous, convex, and unimodal. It extends
@@ -95,14 +90,14 @@ def rotated_hyper_ellipsoid(x: list[float]) -> float:
     Recommended domain: xi ∈ [-65.536, 65.536].
     Global minimum: f(0, ..., 0) = 0 at x = (0, ..., 0).
     """
-    values = np.fromiter(x, dtype=float)
+    values = np.array(x, dtype=float)
 
     cumulative_sum = np.cumsum(values)
 
     return float(np.sum(cumulative_sum**2))
 
 
-def sphere(x: list[float]) -> float:
+def sphere(*x: list[float]) -> float:
     """Sphere function with a simple bowl-shaped surface.
 
     The function is continuous, convex, and unimodal.
@@ -113,12 +108,12 @@ def sphere(x: list[float]) -> float:
     Recommended domain: xi ∈ [-5.12, 5.12].
     Global minimum: f(0, ..., 0) = 0 at x = (0, ..., 0).
     """
-    values = np.fromiter(x, dtype=float)
+    values = np.array(x, dtype=float)
 
     return float(np.sum(values**2))
 
 
-def sum_of_different_powers(x: list[float]) -> float:
+def sum_of_different_powers(*x: list[float]) -> float:
     """Sum of Different Powers function.
 
     The function is unimodal and has increasing powers for successive
@@ -130,13 +125,13 @@ def sum_of_different_powers(x: list[float]) -> float:
     Recommended domain: xi ∈ [-1, 1].
     Global minimum: f(0, ..., 0) = 0 at x = (0, ..., 0).
     """
-    values = np.fromiter(x, dtype=float)
+    values = np.array(x, dtype=float)
     powers = np.arange(2, values.size + 2, dtype=float)
 
     return float(np.sum(np.abs(values) ** powers))
 
 
-def sum_squares(x: list[float]) -> float:
+def sum_squares(*x: list[float]) -> float:
     """Sum Squares function, also known as the Axis Parallel
     Hyper-Ellipsoid function.
 
@@ -149,13 +144,13 @@ def sum_squares(x: list[float]) -> float:
     Recommended domain: xi ∈ [-10, 10].
     Global minimum: f(0, ..., 0) = 0 at x = (0, ..., 0).
     """
-    values = np.fromiter(x, dtype=float)
+    values = np.array(x, dtype=float)
     indices = np.arange(1, values.size + 1, dtype=float)
 
     return float(np.sum(indices * values**2))
 
 
-def trid(x: list[float]) -> float:
+def trid(*x: list[float]) -> float:
     """Trid function with a single global minimum.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -165,7 +160,7 @@ def trid(x: list[float]) -> float:
     Global minimum: f(x*) = -d(d + 4)(d - 1) / 6, where
     x_i = i(d + 1 - i) for i = 1, ..., d.
     """
-    values = np.fromiter(x, dtype=float)
+    values = np.array(x, dtype=float)
 
     sum_squared = np.sum((values - 1) ** 2)
     adjacent_product = np.sum(values[1:] * values[:-1])
