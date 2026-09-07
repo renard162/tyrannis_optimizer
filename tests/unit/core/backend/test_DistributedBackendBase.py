@@ -162,7 +162,7 @@ class DummyDistributedBackend(DistributedBackendBase, DummyBackend):
 
 
 def create_algorithm() -> DummyAlgorithm:
-    algorithm = DummyAlgorithm()
+    algorithm = DummyAlgorithm()  # type: ignore
 
     algorithm.initialize_context(
         fitness_function=lambda variables: sum(variables.values()),
