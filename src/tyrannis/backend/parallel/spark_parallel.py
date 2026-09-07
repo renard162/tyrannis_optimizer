@@ -74,12 +74,16 @@ class SparkParallel(ParallelBackendBase):
 
             new_particles_ids = self._algorithm.new_particles_id
             if new_particles_ids:
+                self._algorithm.create_random_cache(new_particles_ids)
                 initialized_particles = self._parallel_initialize_particles(
                     new_particles_ids
                 )
                 self._algorithm.update_population(initialized_particles)
 
             if actual_iter > 0:
+                self._algorithm.create_random_cache(
+                    [idx for idx in self._algorithm.population]
+                )
                 updated_particles = self._parallel_update_particles(
                     self._algorithm.population
                 )
