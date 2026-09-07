@@ -1,5 +1,5 @@
-from .island_isolation import IslandIsolation
+from .global_asynchronous import GlobalAsynchronous
 
 __all__ = [
-    "IslandIsolation",
+    "GlobalAsynchronous",
 ]
