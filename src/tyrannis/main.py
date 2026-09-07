@@ -101,4 +101,4 @@ class Optimizer:
 
         result_output = self._space.decode(variables)
 
-        return fitness, result_output
+        return result_output, fitness
