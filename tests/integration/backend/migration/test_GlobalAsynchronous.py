@@ -12,13 +12,13 @@ from tyrannis.backend.distributed.communication.spark_communication import (
     SparkCommunicationDriver,
     SparkCommunicationProcessor,
 )
+from tyrannis.core.algorithm import AlgorithmBase, ParticleBase
+from tyrannis.core.signals import LocalEvent
 from tyrannis.migration.global_asynchronous import (
     GlobalAsynchronous,
     GlobalAsynchronousProcessor,
 )
 from tyrannis.processor.serial import Serial
-from tyrannis.core.algorithm import AlgorithmBase, ParticleBase
-from tyrannis.core.signals import LocalEvent
 
 # ============================================================================
 # Constants
@@ -1519,7 +1519,7 @@ class TestGlobalAsynchronousParallelExecution:
 
             assert migration_processor is not None
 
-            communication_processor = migration_processor._communication_processor
+            communication_processor = migration_processor._communication_processor  # type: ignore
 
             assert communication_processor._thread is not None  # type: ignore
             assert communication_processor._thread.is_alive()  # type: ignore
@@ -1580,7 +1580,7 @@ class TestGlobalAsynchronousParallelExecution:
 
             assert migration_processor is not None
 
-            communication_processor = migration_processor._communication_processor
+            communication_processor = migration_processor._communication_processor  # type: ignore
 
             assert communication_processor._stop_signal is (processor._stop_signal)  # type: ignore
 
@@ -1710,7 +1710,7 @@ class TestGlobalAsynchronousSerialEndToEnd:
 
                 assert migration_processor is not None
 
-                assert migration_processor._synchronization_iter == (INITIAL_ITER)
+                assert migration_processor._synchronization_iter == (INITIAL_ITER)  # type: ignore
 
         finally:
             for processor in processors:
@@ -1921,10 +1921,10 @@ class TestGlobalAsynchronousSerialEndToEnd:
             )
 
             assert first._migration_processor is not None
-            first_communication = first._migration_processor._communication_processor
+            first_communication = first._migration_processor._communication_processor  # type: ignore
 
             assert second._migration_processor is not None
-            second_communication = second._migration_processor._communication_processor
+            second_communication = second._migration_processor._communication_processor  # type: ignore
 
             assert first_communication._thread is not None  # type: ignore
             assert first_communication._thread.is_alive()  # type: ignore
@@ -2170,43 +2170,43 @@ class TestGlobalAsynchronousSerialEndToEnd:
 
             processor.initialize_loop_context()
 
-            assert migration_processor._synchronization_iter == 2
+            assert migration_processor._synchronization_iter == 2  # type: ignore
 
             processor.migration_control(0)
 
-            assert migration_processor._synchronization_iter == 2
+            assert migration_processor._synchronization_iter == 2  # type: ignore
 
             processor.migration_control(1)
 
-            assert migration_processor._synchronization_iter == 2
+            assert migration_processor._synchronization_iter == 2  # type: ignore
 
             processor.migration_control(2)
 
-            assert migration_processor._synchronization_iter == 5
+            assert migration_processor._synchronization_iter == 5  # type: ignore
 
             processor.migration_control(3)
 
-            assert migration_processor._synchronization_iter == 5
+            assert migration_processor._synchronization_iter == 5  # type: ignore
 
             processor.migration_control(4)
 
-            assert migration_processor._synchronization_iter == 5
+            assert migration_processor._synchronization_iter == 5  # type: ignore
 
             processor.migration_control(5)
 
-            assert migration_processor._synchronization_iter == 8
+            assert migration_processor._synchronization_iter == 8  # type: ignore
 
             processor.migration_control(6)
 
-            assert migration_processor._synchronization_iter == 8
+            assert migration_processor._synchronization_iter == 8  # type: ignore
 
             processor.migration_control(7)
 
-            assert migration_processor._synchronization_iter == 8
+            assert migration_processor._synchronization_iter == 8  # type: ignore
 
             processor.migration_control(8)
 
-            assert migration_processor._synchronization_iter == 11
+            assert migration_processor._synchronization_iter == 11  # type: ignore
 
         finally:
             processor.finalize_execution_context()
