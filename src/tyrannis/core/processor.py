@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from copy import deepcopy
+from time import sleep
 from typing import Any, Generic, Self, TypeVar
 
 import numpy as np
@@ -286,7 +287,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
         )
 
         while self._migration_signal.is_set():
-            pass
+            sleep(0.005)
 
     def _insert_arrival_particle(self, particle_data: dict[str, Any]) -> None:
         particle_id = particle_data.get("identifier")
