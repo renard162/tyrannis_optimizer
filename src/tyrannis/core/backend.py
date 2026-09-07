@@ -7,7 +7,49 @@ from .processor import ProcessorBase
 
 
 class BackendBase(ABC):
-    """Base class for all backends."""
+    """
+    Base class for all optimization execution backends.
+
+    A backend defines how an optimization is executed in a particular
+    computational environment. It is the highest-level execution abstraction
+    of Tyrannis and is responsible for connecting the optimization algorithm
+    with the execution mechanism provided by the concrete backend.
+
+    Different backends may implement fundamentally different execution models.
+    A backend may operate standalone, such as a parallel backend that executes
+    all particles within a single island and therefore has no migration
+    concept, or it may use processors and migration to distribute the
+    optimization across multiple islands.
+
+    Consequently, `BackendBase` does not impose a particular population,
+    processor, parallelization, distribution, or migration model. These are
+    implementation details of concrete backends.
+
+    The backend receives the optimization configuration through
+    `initialize_context` and executes the configured optimization through
+    `execute`. The concrete backend is responsible for translating the
+    generic optimization context into its own execution model while
+    preserving the contracts established by the core abstractions.
+
+    The backend constructor defines the resources and configuration intrinsic
+    to the execution environment. Optimization-specific configuration is
+    provided later through `initialize_context`.
+
+    The general lifecycle is:
+
+        __init__
+        -> initialize_context
+        -> execute
+        -> result
+
+    `execute` may internally use completely different execution flows
+    depending on the backend. For example, a standalone parallel backend may
+    directly execute particles, whereas a distributed backend may coordinate
+    processors, communication, and migration.
+
+    The backend owns the final execution result, which becomes available
+    through the `result` property after the optimization has completed.
+    """
 
     _result_keys: tuple[str, ...] = ("identifier", "fitness", "variables")
     _identifier: str
@@ -16,57 +58,56 @@ class BackendBase(ABC):
     @abstractmethod
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         """
-        Initialize the backend interface with the user.
+        Initialize the backend with resources intrinsic to its execution model.
 
-        This method must receive only arguments that are specific to the
-        backend implementation. Arguments related to the optimization
-        algorithm or to the optimization process itself must not be defined
-        here.
+        The constructor must receive only arguments that are specific to the
+        concrete backend and to the computational environment in which it
+        operates. Arguments that configure the optimization algorithm or a
+        particular optimization execution must be provided later through
+        `initialize_context`.
 
-        The backend identifier and cost function wrapper class must also be
-        set during initialization. The identifier must uniquely represent the
+        A backend may require resources such as a Spark session, an MPI communicator,
+        a Ray context, a Dask client, or other execution-environment-specific objects.
+        The exact requirements are defined by the concrete backend.
+
+        The constructor must also establish the backend identifier and the cost
+        function wrapper class. The identifier must uniquely represent the
         backend instance within the optimization execution. The cost function
         wrapper must be assigned as a class derived from
-        ``CostFunctionWrapperBase``, rather than as an instance of that
-        class.
+        `CostFunctionWrapperBase`, rather than as an instance of that class.
 
-        For example, a Spark-based backend may receive a SparkSession,
-        while other implementations may receive backend-specific resources
-        such as an MPI communicator, a Ray context, or a Dask client.
+        Notes
+        -----
+        The constructor must not require arguments that are specific to another
+        backend execution model. In particular, the existence of processor or
+        migration concepts must not be assumed by the base interface.
+
+        A standalone backend may therefore require neither a processor nor a
+        migration strategy, while a distributed backend may use both.
         """
 
     @abstractmethod
     def execute(self) -> None:
         """
-        Execute the optimization process.
+        Execute the configured optimization process.
 
-        The execution consists of an initialization stage followed by
-        ``n_iter + 1`` execution cycles. Iteration zero is reserved for
-        establishing the initial state of the population and therefore does
-        not represent an iterative step of the optimization algorithm itself.
+        The concrete backend is responsible for executing the optimization
+        according to its execution model. The implementation must use the
+        optimization context configured through `initialize_context` and must
+        preserve the behavioral contracts of the algorithm and other core
+        components used by that backend.
 
-        At the beginning of each iteration, the processor controls the
-        migration state before allowing the algorithm to execute. This
-        includes any synchronization required by the migration strategy and
-        the application of pending migration operations.
+        The internal execution flow is backend-specific. A standalone backend
+        may execute the population directly, while a distributed backend may
+        delegate execution to processors and coordinate multiple islands through
+        communication and migration.
 
-        After the pre-iteration processing, any new particles identified by
-        the algorithm are initialized using the parallel execution mechanism
-        and incorporated into the population. For iterations greater than
-        zero, the particles belonging to the current population are then
-        processed in parallel to update their state, and the resulting
-        particles are incorporated into the population.
+        The backend must not impose execution mechanisms that are not required by
+        its own model. In particular, migration and processor-based execution are
+        not requirements of this interface.
 
-        Once the particle states have been updated, the algorithm's
-        ``post_iteration`` method is called. This stage consolidates the
-        results obtained from the particles during the iteration, including
-        the evaluation of the cost-function values for their candidate
-        solutions and the corresponding update of the optimization state.
-
-        After ``post_iteration``, the processor updates its local best
-        result. After all ``n_iter + 1`` iterations have been completed, the
-        final optimization result is obtained from the best solution
-        maintained by the processor.
+        After execution has completed, the backend must make the final
+        optimization result available through the `result` property.
         """
 
     def initialize_context(
@@ -79,6 +120,60 @@ class BackendBase(ABC):
         fitness_failure_strategy: str = "invalidate",
         seed: int | None = None,
     ) -> None:
+        """
+        Configure the optimization execution context.
+
+        This method supplies the optimization algorithm and execution parameters
+        required by the backend. The concrete backend may use only the components
+        relevant to its execution model.
+
+        Parameters
+        ----------
+        algorithm:
+            Optimization algorithm to be executed.
+
+        n_iter:
+            Number of optimization iterations.
+
+        n_particles:
+            Number of initial particles allocated to each island.
+
+            For execution models with a single island, such as serial or purely
+            parallel backends, this corresponds to the initial population size.
+
+            For distributed execution models, this corresponds to the initial
+            population size of each island. The total initial number of particles
+            is therefore determined by the number of islands and this value.
+
+        migration:
+            Migration strategy available to backends whose execution model uses
+            migration between islands.
+
+        processor:
+            Optional processor used by backends whose execution model delegates
+            particle execution to a processor. A standalone backend may not use
+            this component.
+
+        fitness_failure_strategy:
+            Strategy used when evaluation of a particle's fitness fails.
+
+        seed:
+            Optional seed used to initialize the algorithm's random state.
+
+        Notes
+        -----
+        This method separates optimization configuration from backend
+        construction. The backend itself is constructed with resources intrinsic
+        to its execution environment, while the optimization to be executed is
+        supplied here.
+
+        Not every argument is necessarily meaningful to every concrete backend.
+        For example, a standalone backend may not use `migration` or `processor`,
+        while a distributed backend may require both.
+
+        The backend must configure the algorithm with the backend identifier and
+        the cost-function wrapper associated with its execution model.
+        """
         self._algorithm = algorithm
         self._n_iter = n_iter
         self._n_particles = n_particles
