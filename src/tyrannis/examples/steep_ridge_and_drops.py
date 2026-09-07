@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def dejong_5(x: dict[str, float]) -> float:
+def dejong_5(x: list[float]) -> float:
     """De Jong function N. 5 with very sharp drops on a flat surface.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -10,7 +10,7 @@ def dejong_5(x: dict[str, float]) -> float:
     Recommended domain: x1, x2 ∈ [-65.536, 65.536].
     Global minimum: f(-32, -32) ≈ 0.998004.
     """
-    x1, x2 = np.fromiter(x.values(), dtype=float)
+    x1, x2 = np.fromiter(x, dtype=float)
 
     a = np.array([-32, -16, 0, 16, 32], dtype=float)
 
@@ -24,7 +24,7 @@ def dejong_5(x: dict[str, float]) -> float:
     return float(1 / (0.002 + np.sum(1 / denominator)))
 
 
-def easom(x: dict[str, float]) -> float:
+def easom(x: list[float]) -> float:
     """Easom function with a narrow global minimum.
 
     The function is unimodal, although the global minimum occupies
@@ -36,14 +36,14 @@ def easom(x: dict[str, float]) -> float:
     Recommended domain: x1, x2 ∈ [-100, 100].
     Global minimum: f(π, π) = -1 at x = (π, π).
     """
-    x1, x2 = np.fromiter(x.values(), dtype=float)
+    x1, x2 = np.fromiter(x, dtype=float)
 
     return float(
         -np.cos(x1) * np.cos(x2) * np.exp(-((x1 - np.pi) ** 2) - (x2 - np.pi) ** 2)
     )
 
 
-def michalewicz(x: dict[str, float]) -> float:
+def michalewicz(x: list[float]) -> float:
     """Michalewicz function with steep valleys and ridges.
 
     The function has d! local minima. The parameter m controls the
@@ -58,7 +58,7 @@ def michalewicz(x: dict[str, float]) -> float:
     Global minimum depends on the dimension. For d=2, the global
     minimum is approximately f(2.20, 1.57) ≈ -1.8013.
     """
-    values = np.fromiter(x.values(), dtype=float)
+    values = np.fromiter(x, dtype=float)
     indices = np.arange(1, values.size + 1, dtype=float)
     m = 10
 

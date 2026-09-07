@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def beale(x: dict[str, float]) -> float:
+def beale(x: list[float]) -> float:
     """Beale function with sharp peaks near the domain boundaries.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -10,7 +10,7 @@ def beale(x: dict[str, float]) -> float:
     Recommended domain: x1, x2 ∈ [-4.5, 4.5].
     Global minimum: f(3, 0.5) = 0 at x = (3, 0.5).
     """
-    x1, x2 = np.fromiter(x.values(), dtype=float)
+    x1, x2 = np.fromiter(x, dtype=float)
 
     return float(
         (1.5 - x1 + x1 * x2) ** 2
@@ -19,7 +19,7 @@ def beale(x: dict[str, float]) -> float:
     )
 
 
-def branin(x: dict[str, float]) -> float:
+def branin(x: list[float]) -> float:
     """Branin-Hoo function with three global minima.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -29,7 +29,7 @@ def branin(x: dict[str, float]) -> float:
     Global minima: f ≈ 0.397887 at
     (-π, 12.275), (π, 2.275), and (9.42478, 2.475).
     """
-    x1, x2 = np.fromiter(x.values(), dtype=float)
+    x1, x2 = np.fromiter(x, dtype=float)
 
     a = 1.0
     b = 5.1 / (4 * np.pi**2)
@@ -41,7 +41,7 @@ def branin(x: dict[str, float]) -> float:
     return float(a * (x2 - b * x1**2 + c * x1 - r) ** 2 + s * (1 - t) * np.cos(x1) + s)
 
 
-def colville(x: dict[str, float]) -> float:
+def colville(x: list[float]) -> float:
     """Colville function with strong variable interactions.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -50,7 +50,7 @@ def colville(x: dict[str, float]) -> float:
     Recommended domain: xi ∈ [-10, 10].
     Global minimum: f(1, 1, 1, 1) = 0 at x = (1, 1, 1, 1).
     """
-    x1, x2, x3, x4 = np.fromiter(x.values(), dtype=float)
+    x1, x2, x3, x4 = np.fromiter(x, dtype=float)
 
     return float(
         100 * (x1**2 - x2) ** 2
@@ -62,7 +62,7 @@ def colville(x: dict[str, float]) -> float:
     )
 
 
-def forrester(x: dict[str, float]) -> float:
+def forrester(x: list[float]) -> float:
     """Forrester et al. (2008) function with one global minimum,
     one local minimum, and a zero-gradient inflection point.
 
@@ -72,12 +72,12 @@ def forrester(x: dict[str, float]) -> float:
     Recommended domain: x ∈ [0, 1].
     Global minimum: f(0.757249) ≈ -6.020740.
     """
-    value = next(iter(x.values()))
+    value = next(iter(x))
 
     return float((6 * value - 2) ** 2 * np.sin(12 * value - 4))
 
 
-def goldstein_price(x: dict[str, float]) -> float:
+def goldstein_price(x: list[float]) -> float:
     """Goldstein-Price function with several local minima.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -86,7 +86,7 @@ def goldstein_price(x: dict[str, float]) -> float:
     Recommended domain: x1, x2 ∈ [-2, 2].
     Global minimum: f(0, -1) = 3 at x = (0, -1).
     """
-    x1, x2 = np.fromiter(x.values(), dtype=float)
+    x1, x2 = np.fromiter(x, dtype=float)
 
     factor_1 = 1 + (x1 + x2 + 1) ** 2 * (
         19 - 14 * x1 + 3 * x1**2 - 14 * x2 + 6 * x1 * x2 + 3 * x2**2
@@ -99,7 +99,7 @@ def goldstein_price(x: dict[str, float]) -> float:
     return float(factor_1 * factor_2)
 
 
-def hartmann_3(x: dict[str, float]) -> float:
+def hartmann_3(x: list[float]) -> float:
     """Hartmann 3-dimensional function with four local minima.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -109,7 +109,7 @@ def hartmann_3(x: dict[str, float]) -> float:
     Global minimum: f ≈ -3.86278 at approximately
     x = (0.114614, 0.555649, 0.852547).
     """
-    values = np.fromiter(x.values(), dtype=float)
+    values = np.fromiter(x, dtype=float)
 
     alpha = np.array([1.0, 1.2, 3.0, 3.2])
 
@@ -139,7 +139,7 @@ def hartmann_3(x: dict[str, float]) -> float:
     return float(-np.sum(alpha * np.exp(-distance)))
 
 
-def hartmann_4(x: dict[str, float]) -> float:
+def hartmann_4(x: list[float]) -> float:
     """Hartmann 4-dimensional function.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -149,7 +149,7 @@ def hartmann_4(x: dict[str, float]) -> float:
     Global minimum: f ≈ -3.13547 at approximately
     x = (0.1873, 0.1909, 0.5563, 0.2645).
     """
-    values = np.fromiter(x.values(), dtype=float)
+    values = np.fromiter(x, dtype=float)
 
     alpha = np.array([1.0, 1.2, 3.0, 3.2])
 
@@ -181,7 +181,7 @@ def hartmann_4(x: dict[str, float]) -> float:
     return float((1.1 - outer) / 0.839)
 
 
-def hartmann_6(x: dict[str, float]) -> float:
+def hartmann_6(x: list[float]) -> float:
     """Hartmann 6-dimensional function with six local minima.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -191,7 +191,7 @@ def hartmann_6(x: dict[str, float]) -> float:
     Global minimum: f ≈ -3.04246 at approximately
     x = (0.20169, 0.15001, 0.47687, 0.27533, 0.31165, 0.65730).
     """
-    values = np.fromiter(x.values(), dtype=float)
+    values = np.fromiter(x, dtype=float)
 
     alpha = np.array([1.0, 1.2, 3.0, 3.2])
 
@@ -223,7 +223,7 @@ def hartmann_6(x: dict[str, float]) -> float:
     return float(-(2.58 + outer) / 1.94)
 
 
-def perm_d_beta(x: dict[str, float]) -> float:
+def perm_d_beta(x: list[float]) -> float:
     """Perm function d, beta.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -233,7 +233,7 @@ def perm_d_beta(x: dict[str, float]) -> float:
     Default parameter: beta = 0.5.
     Global minimum: f(1, ..., 1) = 0 at x = (1, ..., 1).
     """
-    values = np.fromiter(x.values(), dtype=float)
+    values = np.fromiter(x, dtype=float)
     dimension = values.size
     beta = 0.5
 
@@ -252,7 +252,7 @@ def perm_d_beta(x: dict[str, float]) -> float:
     return float(np.sum(inner**2))
 
 
-def powell(x: dict[str, float]) -> float:
+def powell(x: list[float]) -> float:
     """Powell function with groups of four interacting variables.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -261,7 +261,7 @@ def powell(x: dict[str, float]) -> float:
     Recommended domain: xi ∈ [-4, 5].
     Global minimum: f(0, ..., 0) = 0 at x = (0, ..., 0).
     """
-    values = np.fromiter(x.values(), dtype=float)
+    values = np.fromiter(x, dtype=float)
 
     if values.size % 4 != 0:
         raise ValueError(
@@ -280,7 +280,7 @@ def powell(x: dict[str, float]) -> float:
     )
 
 
-def shekel(x: dict[str, float]) -> float:
+def shekel(x: list[float]) -> float:
     """Shekel function with multiple local minima.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -290,7 +290,7 @@ def shekel(x: dict[str, float]) -> float:
     Default parameters: m = 10.
     Global minimum: f(4, 4, 4, 4) ≈ -10.5364.
     """
-    values = np.fromiter(x.values(), dtype=float)
+    values = np.fromiter(x, dtype=float)
 
     b = 0.1 * np.array(
         [1, 2, 2, 4, 4, 6, 3, 7, 5, 5],
@@ -320,7 +320,7 @@ def shekel(x: dict[str, float]) -> float:
     return float(-np.sum(1 / (distance + b)))
 
 
-def styblinski_tang(x: dict[str, float]) -> float:
+def styblinski_tang(x: list[float]) -> float:
     """Styblinski-Tang function with multiple local minima.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -330,6 +330,6 @@ def styblinski_tang(x: dict[str, float]) -> float:
     Global minimum: f(x*) ≈ -39.16617 * d, where
     x_i ≈ -2.903534 for every i.
     """
-    values = np.fromiter(x.values(), dtype=float)
+    values = np.fromiter(x, dtype=float)
 
     return float(0.5 * np.sum(values**4 - 16 * values**2 + 5 * values))

@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def three_hump_camel(x: dict[str, float]) -> float:
+def three_hump_camel(x: list[float]) -> float:
     """Three-Hump Camel function with a valley-shaped surface.
 
     www.sfu.ca/~ssurjano/optimization.html
@@ -10,12 +10,12 @@ def three_hump_camel(x: dict[str, float]) -> float:
     Recommended domain: x1, x2 ∈ [-5, 5].
     Global minimum: f(0, 0) = 0 at x = (0, 0).
     """
-    x1, x2 = np.fromiter(x.values(), dtype=float)
+    x1, x2 = np.fromiter(x, dtype=float)
 
     return float(2 * x1**2 - 1.05 * x1**4 + x1**6 / 6 + x1 * x2 + x2**2)
 
 
-def six_hump_camel(x: dict[str, float]) -> float:
+def six_hump_camel(x: list[float]) -> float:
     """Six-Hump Camel function with a valley-shaped surface.
 
     The function has six local minima, two of which are global.
@@ -27,14 +27,14 @@ def six_hump_camel(x: dict[str, float]) -> float:
     Global minima: f ≈ -1.031628 at
     (±0.089842, ∓0.712656).
     """
-    x1, x2 = np.fromiter(x.values(), dtype=float)
+    x1, x2 = np.fromiter(x, dtype=float)
 
     return float(
         (4 - 2.1 * x1**2 + x1**4 / 3) * x1**2 + x1 * x2 + (-4 + 4 * x2**2) * x2**2
     )
 
 
-def dixon_price(x: dict[str, float]) -> float:
+def dixon_price(x: list[float]) -> float:
     """Dixon-Price function with a valley-shaped surface.
 
     The function is unimodal and has a single global minimum.
@@ -46,7 +46,7 @@ def dixon_price(x: dict[str, float]) -> float:
     Global minimum: f(x*) = 0, where
     x*_i = 2^(-(2^i - 2) / 2^i), for i = 1, ..., d.
     """
-    values = np.fromiter(x.values(), dtype=float)
+    values = np.fromiter(x, dtype=float)
     indices = np.arange(2, values.size + 1)
 
     return float(
@@ -55,7 +55,7 @@ def dixon_price(x: dict[str, float]) -> float:
     )
 
 
-def rosenbrock(x: dict[str, float]) -> float:
+def rosenbrock(x: list[float]) -> float:
     """Rosenbrock function, also known as the Valley or Banana function.
 
     The function is unimodal, with a narrow parabolic valley leading
@@ -68,7 +68,7 @@ def rosenbrock(x: dict[str, float]) -> float:
     Alternative restricted domain: xi ∈ [-2.048, 2.048].
     Global minimum: f(1, ..., 1) = 0 at x = (1, ..., 1).
     """
-    values = np.fromiter(x.values(), dtype=float)
+    values = np.fromiter(x, dtype=float)
 
     return float(
         np.sum(100 * (values[1:] - values[:-1] ** 2) ** 2 + (values[:-1] - 1) ** 2)
