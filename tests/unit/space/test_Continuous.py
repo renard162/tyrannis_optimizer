@@ -4,11 +4,11 @@ import pytest
 from tyrannis.space.continuous import Continuous
 
 
-def list_cost_function(inputs: list[float]) -> float:
+def list_cost_function(*inputs: float) -> float:
     return sum(value**2 for value in inputs)
 
 
-def dict_cost_function(inputs: dict[str, float]) -> float:
+def dict_cost_function(**inputs: float) -> float:
     return sum(value**2 for value in inputs.values())
 
 

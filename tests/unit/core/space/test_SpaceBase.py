@@ -19,7 +19,7 @@ class DummySpace(SpaceBase):
         self._args = args
         self._kwargs = kwargs
 
-    def initialize_context(self, seed: int) -> None:
+    def initialize_context(self, seed: int | None) -> None:  # type: ignore
         raise NotImplementedError
 
     def decode(self, float_inputs: dict[str, float]) -> Any:
@@ -30,8 +30,8 @@ class DummySpace(SpaceBase):
         raise NotImplementedError
 
 
-class CallableDummySpace(SpaceBase):
-    """Concrete implementation used to test SpaceBase.__call__."""
+class PositionalCallableDummySpace(SpaceBase):
+    """Concrete implementation used to test positional cost-function calls."""
 
     def __init__(
         self,
@@ -43,7 +43,34 @@ class CallableDummySpace(SpaceBase):
         self._args = args
         self._kwargs = kwargs
 
-    def initialize_context(self, seed: int) -> None:
+    def initialize_context(self, seed: int | None) -> None:  # type: ignore
+        pass
+
+    def decode(self, float_inputs: dict[str, float]) -> list[float]:
+        return [
+            float_inputs["x"] * 2.0,
+            float_inputs["y"] * 2.0,
+        ]
+
+    @property
+    def is_kargs(self) -> bool:
+        return False
+
+
+class KeywordCallableDummySpace(SpaceBase):
+    """Concrete implementation used to test keyword cost-function calls."""
+
+    def __init__(
+        self,
+        cost_function: Callable[..., float] | None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        self._cost_function = cost_function
+        self._args = args
+        self._kwargs = kwargs
+
+    def initialize_context(self, seed: int | None) -> None:  # type: ignore
         pass
 
     def decode(self, float_inputs: dict[str, float]) -> dict[str, float]:
@@ -61,7 +88,7 @@ def test_space_base_is_abstract() -> None:
 
 def test_init_is_abstract() -> None:
     class IncompleteSpace(SpaceBase):
-        def initialize_context(self, seed: int) -> None:
+        def initialize_context(self, seed: int | None) -> None:  # type: ignore
             pass
 
         def decode(self, float_inputs: dict[str, float]) -> Any:
@@ -96,15 +123,31 @@ def test_is_kargs_is_abstract() -> None:
         space.is_kargs  # noqa: B018
 
 
-def test_call_decodes_inputs_before_evaluating_cost_function() -> None:
+def test_call_decodes_inputs_before_evaluating_positional_cost_function() -> None:
+    received_inputs: list[tuple[float, float]] = []
+
+    def cost_function(x: float, y: float) -> float:
+        received_inputs.append((x, y))
+
+        return x + y
+
+    space = PositionalCallableDummySpace(cost_function)
+
+    result = space({"x": 2.0, "y": 3.0})
+
+    assert result == 10.0
+    assert received_inputs == [(4.0, 6.0)]
+
+
+def test_call_decodes_inputs_before_evaluating_keyword_cost_function() -> None:
     received_inputs: list[dict[str, float]] = []
 
-    def cost_function(inputs: dict[str, float]) -> float:
+    def cost_function(**inputs: float) -> float:
         received_inputs.append(inputs)
 
         return sum(inputs.values())
 
-    space = CallableDummySpace(cost_function)
+    space = KeywordCallableDummySpace(cost_function)
 
     result = space({"x": 2.0, "y": 3.0})
 
@@ -117,11 +160,30 @@ def test_call_decodes_inputs_before_evaluating_cost_function() -> None:
     ]
 
 
-def test_call_returns_cost_function_result() -> None:
-    def cost_function(inputs: dict[str, float]) -> float:
-        return inputs["x"] ** 2
+def test_call_returns_positional_cost_function_result() -> None:
+    def cost_function(x: float) -> float:
+        return x**2
 
-    space = CallableDummySpace(cost_function)
+    class SingleInputPositionalSpace(PositionalCallableDummySpace):
+        def decode(self, float_inputs: dict[str, float]) -> list[float]:
+            return [float_inputs["x"] * 2.0]
+
+    space = SingleInputPositionalSpace(cost_function)
+
+    result = space({"x": 3.0})
+
+    assert result == 36.0
+
+
+def test_call_returns_keyword_cost_function_result() -> None:
+    def cost_function(x: float) -> float:
+        return x**2
+
+    class SingleInputKeywordSpace(KeywordCallableDummySpace):
+        def decode(self, float_inputs: dict[str, float]) -> dict[str, float]:
+            return {"x": float_inputs["x"] * 2.0}
+
+    space = SingleInputKeywordSpace(cost_function)
 
     result = space({"x": 3.0})
 
@@ -129,7 +191,7 @@ def test_call_returns_cost_function_result() -> None:
 
 
 def test_call_rejects_none_cost_function() -> None:
-    space = CallableDummySpace(None)
+    space = PositionalCallableDummySpace(None)
 
     with pytest.raises(
         ValueError,

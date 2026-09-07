@@ -18,13 +18,13 @@ N_ITER = 2
 N_PARTICLES = 3
 
 
-def list_sphere(values: list[float]) -> float:
+def list_sphere(*values: float) -> float:
     """Sphere cost function using positional arguments."""
     return float(sum(value**2 for value in values))
 
 
 def create_algorithm(space: Continuous) -> PSO:
-    """Create a PSO whose fitness function is the search-space wrapper."""
+    """Create and initialize a PSO using the search space."""
     space.initialize_context(SEED)
 
     algorithm = PSO()
@@ -85,6 +85,7 @@ def test_list_boundaries_with_local_serial() -> None:
         n_iter=N_ITER,
         n_particles=N_PARTICLES,
         migration_driver=migration,
+        fitness_failure_strategy="raise",
         seed=SEED,
     )
 
@@ -118,10 +119,12 @@ def test_list_boundaries_with_local_serial() -> None:
 
 def test_dict_boundaries_with_local_serial() -> None:
     """A dictionary-based space preserves the named cost-function inputs."""
-    from tyrannis.examples.bowl_shaped import sphere
+
+    def dict_sphere(**values: float) -> float:
+        return float(sum(value**2 for value in values.values()))
 
     space = Continuous(
-        cost_function=sphere,
+        cost_function=dict_sphere,
         boundaries={
             "x": (-5.0, 5.0),
             "y": (-5.0, 5.0),
@@ -146,6 +149,7 @@ def test_dict_boundaries_with_local_serial() -> None:
         n_iter=N_ITER,
         n_particles=N_PARTICLES,
         migration_driver=migration,
+        fitness_failure_strategy="raise",
         seed=SEED,
     )
 
@@ -179,10 +183,12 @@ def test_dict_boundaries_with_local_serial() -> None:
 
 def test_continuous_with_process_pool() -> None:
     """The complete Space wrapper can be serialized by ProcessPool."""
-    from tyrannis.examples.bowl_shaped import sphere
+
+    def dict_sphere(**values: float) -> float:
+        return float(sum(value**2 for value in values.values()))
 
     space = Continuous(
-        cost_function=sphere,
+        cost_function=dict_sphere,
         boundaries={
             "x": (-5.0, 5.0),
             "y": (-5.0, 5.0),
@@ -203,6 +209,7 @@ def test_continuous_with_process_pool() -> None:
         n_iter=N_ITER,
         n_particles=N_PARTICLES,
         migration_driver=migration,
+        fitness_failure_strategy="raise",
         seed=SEED,
     )
 
