@@ -220,3 +220,4 @@ __marimo__/
 # Project
 pytest-cov.bat
 clear-cache.bat
+tyrannis_test.py
