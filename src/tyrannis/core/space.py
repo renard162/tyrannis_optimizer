@@ -61,7 +61,7 @@ class SpaceBase(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def initialize_context(self, seed: int) -> None:
+    def initialize_context(self, seed: int | None = None) -> None:
         """
         Initialize the execution context of the search space.
 
@@ -150,4 +150,8 @@ class SpaceBase(ABC):
         if self._cost_function is None:
             raise ValueError("cost_function cannot be None.")
         inputs = self.decode(float_inputs)
-        return self._cost_function(inputs)
+
+        if self.is_kargs:
+            return self._cost_function(**inputs)
+
+        return self._cost_function(*inputs)

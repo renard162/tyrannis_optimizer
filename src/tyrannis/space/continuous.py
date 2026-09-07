@@ -45,7 +45,7 @@ class Continuous(SpaceBase):
         self._cost_function = cost_function
         self._boundaries = boundaries
 
-    def initialize_context(self, seed: int) -> None:
+    def initialize_context(self, seed: int | None = None) -> None:
         if isinstance(self._boundaries, dict):
             self._encoded_boundaries = self._boundaries.copy()
             return
