@@ -11,8 +11,6 @@ from ..core.algorithm import (
 class PSOParticle(ParticleBase):
     """Particle implementation for the Particle Swarm Optimization algorithm."""
 
-    temp_iter: int
-
     def __init__(
         self,
         identifier: str,
@@ -149,7 +147,6 @@ class PSO(AlgorithmBase):
                     f"Particle '{particle.identifier}' must be an instance of PSOParticle."
                 )
 
-            particle.temp_iter = actual_iter
             particle.random_cache = []
 
             for _ in self._boundaries:
@@ -179,18 +176,6 @@ class PSO(AlgorithmBase):
 
     def update_particle(self, identifier: str) -> ParticleBase:
         particle = self._population[identifier]
-
-        expected_cache_size = 2 * len(self._boundaries)
-
-        if len(particle.random_cache) != expected_cache_size:
-            raise RuntimeError(
-                f"Invalid random cache before update: "
-                f"algorithm={self.identifier}, "
-                f"particle={identifier}, "
-                f"size={len(particle.random_cache)}, "
-                f"expected={expected_cache_size}",
-                f"actual_iter={particle.temp_iter}",
-            )
 
         if not isinstance(particle, PSOParticle):
             raise TypeError(
