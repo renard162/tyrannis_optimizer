@@ -10,15 +10,16 @@ from pyspark.sql import SparkSession
 from tyrannis.algorithm.pso import PSO
 from tyrannis.backend.migration.island_isolation import IslandIsolation
 from tyrannis.backend.parallel.spark_parallel import SparkParallel
-from tyrannis.examples.bowl_shaped import sphere
+from tyrannis.examples.other import beale
+from tyrannis.space.continuous import Continuous
 
 N_ITER = 2
 N_PARTICLES = 20
 SEED = 42
 
 BOUNDARIES = {
-    "x": (-5.12, 5.12),
-    "y": (-5.12, 5.12),
+    "x1": (-4.5, 4.5),
+    "x2": (-4.5, 4.5),
 }
 
 
@@ -26,13 +27,19 @@ def create_backend(
     spark: SparkSession,
     seed: int = SEED,
     code_archive: str | Path | None = None,
-    fitness_function=sphere,
+    fitness_function=beale,
 ) -> SparkParallel:
+    space = Continuous(
+        cost_function=fitness_function,
+        boundaries=BOUNDARIES,
+    )
+    space.initialize_context(seed)
+
     algorithm = PSO()
 
     algorithm.initialize_context(
-        fitness_function=fitness_function,
-        boundaries=BOUNDARIES,
+        fitness_function=space,
+        boundaries=space.encoded_boundaries,
     )
 
     backend = SparkParallel(
@@ -45,6 +52,7 @@ def create_backend(
         n_iter=N_ITER,
         n_particles=N_PARTICLES,
         migration=IslandIsolation(),
+        fitness_failure_strategy="raise",
         seed=seed,
     )
 
@@ -199,13 +207,13 @@ def test_execute_is_reproducible(
     )
 
     np.testing.assert_allclose(
-        first_best.variables["x"],
-        second_best.variables["x"],
+        first_best.variables["x1"],
+        second_best.variables["x1"],
     )
 
     np.testing.assert_allclose(
-        first_best.variables["y"],
-        second_best.variables["y"],
+        first_best.variables["x2"],
+        second_best.variables["x2"],
     )
 
 
