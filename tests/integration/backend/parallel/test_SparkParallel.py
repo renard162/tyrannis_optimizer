@@ -73,14 +73,9 @@ def create_cost_function_archive(
 
     (package_dir / "functions.py").write_text(
         """
-import numpy as np
-
-
-def archive_cost(x: dict[str, float]) -> float:
-    values = np.fromiter(x.values(), dtype=float)
-
+def archive_cost(x1: float, x2: float) -> float:
     return float(
-        1000.0 + np.sum(values**2)
+        1000.0 + x1**2 + x2**2
     )
 """,
         encoding="utf-8",
