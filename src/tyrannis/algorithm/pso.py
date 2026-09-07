@@ -177,6 +177,17 @@ class PSO(AlgorithmBase):
     def update_particle(self, identifier: str) -> ParticleBase:
         particle = self._population[identifier]
 
+        expected_cache_size = 2 * len(self._boundaries)
+
+        if len(particle.random_cache) != expected_cache_size:
+            raise RuntimeError(
+                f"Invalid random cache before update: "
+                f"algorithm={self.identifier}, "
+                f"particle={identifier}, "
+                f"size={len(particle.random_cache)}, "
+                f"expected={expected_cache_size}"
+            )
+
         if not isinstance(particle, PSOParticle):
             raise TypeError(
                 f"Particle '{identifier}' must be an instance of PSOParticle."
