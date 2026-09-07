@@ -11,6 +11,7 @@ from tyrannis.backend.migration.island_isolation import IslandIsolation
 from tyrannis.backend.parallel.spark_parallel import SparkParallel
 from tyrannis.backend.processor.process import ProcessPool
 from tyrannis.backend.processor.serial import Serial
+from tyrannis.examples.bowl_shaped import sphere
 from tyrannis.space.continuous import Continuous
 
 SEED = 42
@@ -21,6 +22,11 @@ N_PARTICLES = 3
 def list_sphere(*values: float) -> float:
     """Sphere cost function using positional arguments."""
     return float(sum(value**2 for value in values))
+
+
+def dict_sphere(**values: float) -> float:
+    """Sphere cost function using keyword arguments."""
+    return float(sum(value**2 for value in values.values()))
 
 
 def create_algorithm(space: Continuous) -> PSO:
@@ -118,11 +124,7 @@ def test_list_boundaries_with_local_serial() -> None:
 
 
 def test_dict_boundaries_with_local_serial() -> None:
-    """A dictionary-based space preserves the named cost-function inputs."""
-
-    def dict_sphere(**values: float) -> float:
-        return float(sum(value**2 for value in values.values()))
-
+    """A dictionary-based space preserves named cost-function inputs."""
     space = Continuous(
         cost_function=dict_sphere,
         boundaries={
@@ -183,16 +185,12 @@ def test_dict_boundaries_with_local_serial() -> None:
 
 def test_continuous_with_process_pool() -> None:
     """The complete Space wrapper can be serialized by ProcessPool."""
-
-    def dict_sphere(**values: float) -> float:
-        return float(sum(value**2 for value in values.values()))
-
     space = Continuous(
-        cost_function=dict_sphere,
-        boundaries={
-            "x": (-5.0, 5.0),
-            "y": (-5.0, 5.0),
-        },
+        cost_function=sphere,
+        boundaries=[
+            (-5.0, 5.0),
+            (-5.0, 5.0),
+        ],
     )
 
     algorithm = create_algorithm(space)
@@ -233,14 +231,12 @@ def test_continuous_with_process_pool() -> None:
 @pytest.mark.usefixtures("spark")
 def test_continuous_with_spark_parallel(spark) -> None:
     """The complete Space wrapper can be serialized by SparkParallel."""
-    from tyrannis.examples.bowl_shaped import sphere
-
     space = Continuous(
         cost_function=sphere,
-        boundaries={
-            "x": (-5.0, 5.0),
-            "y": (-5.0, 5.0),
-        },
+        boundaries=[
+            (-5.0, 5.0),
+            (-5.0, 5.0),
+        ],
     )
 
     algorithm = create_algorithm(space)
@@ -266,14 +262,12 @@ def test_continuous_with_spark_distributed_and_island_isolation(
     spark,
 ) -> None:
     """The Space wrapper works with SparkDistributed and IslandIsolation."""
-    from tyrannis.examples.bowl_shaped import sphere
-
     space = Continuous(
         cost_function=sphere,
-        boundaries={
-            "x": (-5.0, 5.0),
-            "y": (-5.0, 5.0),
-        },
+        boundaries=[
+            (-5.0, 5.0),
+            (-5.0, 5.0),
+        ],
     )
 
     algorithm = create_algorithm(space)
