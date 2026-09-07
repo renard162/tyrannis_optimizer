@@ -133,8 +133,8 @@ class SparkDistributed(DistributedBackendBase):
 
     def _get_n_executors(self) -> int:
         jsc = cast(Any, self._spark.sparkContext._jsc)
-
-        return jsc.sc().getExecutorMemoryStatus().size
+        n_executors = jsc.sc().getExecutorMemoryStatus().size() - 1
+        return n_executors
 
 
 def _run_processor(
