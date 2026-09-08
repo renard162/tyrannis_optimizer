@@ -16,6 +16,9 @@ class Continuous(SpaceBase):
         self,
         cost_function: Callable[..., float] | None,
         boundaries: Boundaries,
+        use_cache: bool = False,
+        cache_type: str = "lru",
+        cache_size: int = 100_000,
     ) -> None:
         """
         Initialize the user-facing continuous search space.
@@ -41,8 +44,25 @@ class Continuous(SpaceBase):
             Search-space boundaries. A list contains one ``(lower, upper)``
             tuple for each positional input. A dictionary maps each input
             name to its ``(lower, upper)`` tuple.
+        use_cache:
+            Whether cost-function evaluations should be cached. When
+            ``False``, no cache is created or used.
+        cache_type:
+            Cache strategy to use when caching is enabled. Supported
+            strategies are ``"lru"``, ``"lfu"``, ``"fifo"``, ``"rr"``, and
+            ``"disk"``. The default ``"lru"`` uses the Python standard
+            library.
+        cache_size:
+            Maximum cache size. For in-memory caches, this represents the
+            maximum number of cached records. For the disk cache, this
+            represents the maximum size in megabytes.
         """
-        self._cost_function = cost_function
+        super().__init__(
+            cost_function,
+            use_cache=use_cache,
+            cache_type=cache_type,
+            cache_size=cache_size,
+        )
         self._boundaries = boundaries
 
     def initialize_context(self, seed: int | None = None) -> None:
