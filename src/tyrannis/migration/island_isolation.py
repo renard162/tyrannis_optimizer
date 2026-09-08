@@ -83,8 +83,6 @@ class IslandIsolation(MigrationDriverBase):
             communication_driver.incoming_queues.keys(),
         )
 
-        no_communication_stop_signal = LocalEvent()
-
         no_communication_driver = NoCommunicationDriver(
             island_ids=island_ids,
         )
