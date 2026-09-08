@@ -3,13 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 from .backend.local import Local
-from .migration.island_isolation import IslandIsolation
-from .processor.serial import Serial
 from .core.algorithm import AlgorithmBase
 from .core.backend import BackendBase
 from .core.backend_migration import MigrationDriverBase
 from .core.processor import ProcessorBase
 from .core.space import SpaceBase
+from .migration.island_isolation import IslandIsolation
+from .processor.serial import Serial
 
 
 class Optimizer:
