@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import TypeAlias
+from typing import TypeAlias, cast
 
 from tyrannis.core.space import SpaceBase
 
@@ -71,6 +71,24 @@ class Continuous(SpaceBase):
             return float_inputs
 
         return [float_inputs[str(index)] for index in range(len(self._boundaries))]
+
+    def encode_cache(
+        self,
+        inputs: list[float] | dict[str, float],
+    ) -> tuple[float, ...] | tuple[tuple[str, float], ...]:
+        if isinstance(inputs, dict):
+            return tuple(sorted(inputs.items()))
+
+        return tuple(inputs)
+
+    def decode_cache(
+        self,
+        inputs: tuple[float, ...] | tuple[tuple[str, float], ...],
+    ) -> list[float] | dict[str, float]:
+        if self.is_kwargs:
+            return dict(cast(tuple[tuple[str, float], ...], inputs))
+
+        return list(cast(tuple[float, ...], inputs))
 
     @property
     def is_kwargs(self) -> bool:
