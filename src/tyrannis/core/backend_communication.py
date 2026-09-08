@@ -167,32 +167,19 @@ class CommunicationProcessorBase(ABC):
         processor-side logic and the communication backend.
 
         The queue object must remain stable while the communication backend is
-        running. An implementation must not replace it during normal
+        running. An implementation must not replace the queue during normal
         operation.
         """
         raise NotImplementedError
 
     @abstractmethod
-    def start(
-        self,
-        stop_signal: LocalEvent,
-    ) -> None:
+    def start(self) -> None:
         """
         Start the processor communication backend.
 
         The communication backend must begin its communication activity
         asynchronously and return control to the processor without waiting
         for the communication runtime to terminate.
-
-        Parameters
-        ----------
-        stop_signal:
-            Shared local event used by the communication backend to propagate
-            a communication-level stop condition to the processor execution.
-
-            The communication backend may set this signal when a transport
-            failure, remote termination, or other communication condition
-            requires the processor execution to stop.
 
         Notes
         -----
@@ -206,11 +193,6 @@ class CommunicationProcessorBase(ABC):
         `start` must initialize all runtime resources required by the
         communication backend. It must not require the caller to execute an
         additional communication loop.
-
-        The communication backend must not use `stop_signal` to implement
-        migration or algorithm synchronization. Its responsibility is to
-        propagate communication-level termination; synchronization of the
-        optimization loop belongs to the migration layer.
         """
         raise NotImplementedError
 
@@ -319,7 +301,6 @@ class CommunicationDriverBase(ABC):
     def __init__(
         self,
         island_ids: list[str],
-        stop_signal: LocalEvent,
         **kwargs: object,
     ) -> None:
         """
@@ -339,10 +320,6 @@ class CommunicationDriverBase(ABC):
         island_ids:
             Identifiers of all processor endpoints that this driver is
             responsible for communicating with.
-
-        stop_signal:
-            Shared local event used by the communication backend to propagate
-            a global communication-level stop condition.
 
         **kwargs:
             Backend-specific configuration parameters required to configure
@@ -466,12 +443,6 @@ class CommunicationDriverBase(ABC):
 
         The method must not require the caller to execute an additional
         communication loop manually.
-
-        Communication-level termination is controlled through the
-        `stop_signal` supplied during construction. The communication layer
-        may set that signal when a condition requires the global execution to
-        stop, but it must not use it to implement migration or optimization
-        synchronization.
         """
         raise NotImplementedError
 
