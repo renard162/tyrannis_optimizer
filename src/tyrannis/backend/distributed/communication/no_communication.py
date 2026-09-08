@@ -57,11 +57,9 @@ class NoCommunicationDriver(CommunicationDriverBase):
     def __init__(
         self,
         island_ids: list[str],
-        stop_signal: LocalEvent,
         **kwargs: object,
     ) -> None:
         self._island_ids = set(island_ids)
-        self._stop_signal = stop_signal
 
         self._incoming_queues: dict[str, Queue[str]] = {
             island_id: Queue() for island_id in self._island_ids

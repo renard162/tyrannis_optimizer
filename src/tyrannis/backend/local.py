@@ -42,7 +42,6 @@ class Local(BackendBase):
         migration.initialize_context(
             communication_driver=NoCommunicationDriver(
                 island_ids=["island:0"],
-                stop_signal=LocalEvent(),
             ),
             communication_processor_class=NoCommunicationProcessor,
             communication_processor_kargs={},

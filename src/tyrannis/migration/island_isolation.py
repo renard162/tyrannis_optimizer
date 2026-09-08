@@ -87,7 +87,6 @@ class IslandIsolation(MigrationDriverBase):
 
         no_communication_driver = NoCommunicationDriver(
             island_ids=island_ids,
-            stop_signal=no_communication_stop_signal,
         )
 
         super().initialize_context(

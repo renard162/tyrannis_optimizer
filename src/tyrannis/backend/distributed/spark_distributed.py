@@ -71,12 +71,9 @@ class SparkDistributed(DistributedBackendBase):
 
         island_ids = [f"island:{idx}" for idx in range(self._n_executors)]
 
-        communication_stop_signal = LocalEvent()
-
         communication_driver = SparkCommunicationDriver(
             island_ids=island_ids,
             port=self._communication_port,
-            stop_signal=communication_stop_signal,
         )
 
         driver_ip = self._spark.conf.get(
