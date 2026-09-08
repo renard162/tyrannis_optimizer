@@ -29,15 +29,10 @@ class IslandIsolationProcessor(MigrationProcessorBase):
         self._synchronization_iter = None
         self._communication_processor = communication_processor
 
-    def start(
-        self,
-        stop_signal: LocalEvent,
-    ) -> None:
+    def start(self) -> None:
         """Start the inactive communication processor."""
 
-        self._communication_processor.start(
-            stop_signal=stop_signal,
-        )
+        self._communication_processor.start()
 
     def stop(self) -> None:
         """Stop the inactive communication processor."""
