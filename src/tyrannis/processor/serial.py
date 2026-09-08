@@ -17,15 +17,12 @@ class Serial(ProcessorBase):
         self._cost_function_wrapper = SerialCostFunctionWrapper
 
     def initialize_execution_context(self) -> None:
-        self._stop_signal = LocalEvent()
-
         self.start_migration()
 
     def finalize_execution_context(self) -> None:
         self.stop_migration()
 
     def initialize_loop_context(self) -> None:
-        self._stop_signal.clear()
         self._migration_signal = LocalEvent()
         if self._migration_processor is None:
             raise RuntimeError("Migration processor cannot be None.")
@@ -48,9 +45,6 @@ class Serial(ProcessorBase):
         for actual_iter in range(self._n_iter + 1):
             self.migration_control(actual_iter)
 
-            if self._stop_signal.is_set():
-                break
-
             self._algorithm.pre_iteration(actual_iter)
 
             new_particles_ids = self._algorithm.new_particles_id
@@ -58,7 +52,6 @@ class Serial(ProcessorBase):
                 self._algorithm.create_random_cache(new_particles_ids)
                 worker = partial(
                     evaluate_particle,
-                    stop_signal=self._stop_signal,
                     algorithm=self._algorithm,
                     fitness_failure_strategy=self._fitness_failure_strategy,
                     initialize_particle=True,
@@ -75,7 +68,6 @@ class Serial(ProcessorBase):
                 )
                 worker = partial(
                     evaluate_particle,
-                    stop_signal=self._stop_signal,
                     algorithm=self._algorithm,
                     fitness_failure_strategy=self._fitness_failure_strategy,
                     initialize_particle=False,
@@ -89,4 +81,5 @@ class Serial(ProcessorBase):
             self._algorithm.post_iteration(actual_iter)
 
             self.update_status()
+
         self.finalize_loop_context()
