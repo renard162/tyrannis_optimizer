@@ -175,7 +175,7 @@ class SpaceBase(ABC):
 
     @property
     @abstractmethod
-    def is_kargs(self) -> bool:
+    def is_kwargs(self) -> bool:
         """
         Identify whether the user-provided search space can be used as keyword
         arguments when calling the cost function.
@@ -202,7 +202,7 @@ class SpaceBase(ABC):
             raise ValueError("cost_function cannot be None.")
         inputs = self.decode(float_inputs)
 
-        if self.is_kargs:
+        if self.is_kwargs:
             return self._cost_function(**inputs)
 
         return self._cost_function(*inputs)

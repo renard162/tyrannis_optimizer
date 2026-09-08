@@ -26,7 +26,7 @@ class DummySpace(SpaceBase):
         raise NotImplementedError
 
     @property
-    def is_kargs(self) -> bool:
+    def is_kwargs(self) -> bool:
         raise NotImplementedError
 
 
@@ -53,7 +53,7 @@ class PositionalCallableDummySpace(SpaceBase):
         ]
 
     @property
-    def is_kargs(self) -> bool:
+    def is_kwargs(self) -> bool:
         return False
 
 
@@ -77,7 +77,7 @@ class KeywordCallableDummySpace(SpaceBase):
         return {key: value * 2.0 for key, value in float_inputs.items()}
 
     @property
-    def is_kargs(self) -> bool:
+    def is_kwargs(self) -> bool:
         return True
 
 
@@ -95,7 +95,7 @@ def test_init_is_abstract() -> None:
             return float_inputs
 
         @property
-        def is_kargs(self) -> bool:
+        def is_kwargs(self) -> bool:
             return False
 
     with pytest.raises(TypeError):
@@ -116,11 +116,11 @@ def test_decode_is_abstract() -> None:
         space.decode({"0": 1.0})
 
 
-def test_is_kargs_is_abstract() -> None:
+def test_is_kwargs_is_abstract() -> None:
     space = DummySpace(None)
 
     with pytest.raises(NotImplementedError):
-        space.is_kargs  # noqa: B018
+        space.is_kwargs  # noqa: B018
 
 
 def test_call_decodes_inputs_before_evaluating_positional_cost_function() -> None:

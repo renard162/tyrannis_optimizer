@@ -73,5 +73,5 @@ class Continuous(SpaceBase):
         return [float_inputs[str(index)] for index in range(len(self._boundaries))]
 
     @property
-    def is_kargs(self) -> bool:
+    def is_kwargs(self) -> bool:
         return isinstance(self._boundaries, dict)

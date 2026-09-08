@@ -151,7 +151,7 @@ def test_initialize_context_ignores_seed() -> None:
     assert first_context == second_context
 
 
-def test_is_kargs_is_false_for_list_boundaries() -> None:
+def test_is_kwargs_is_false_for_list_boundaries() -> None:
     space = Continuous(
         list_cost_function,
         [
@@ -160,10 +160,10 @@ def test_is_kargs_is_false_for_list_boundaries() -> None:
         ],
     )
 
-    assert space.is_kargs is False
+    assert space.is_kwargs is False
 
 
-def test_is_kargs_is_true_for_dict_boundaries() -> None:
+def test_is_kwargs_is_true_for_dict_boundaries() -> None:
     space = Continuous(
         dict_cost_function,
         {
@@ -172,7 +172,7 @@ def test_is_kargs_is_true_for_dict_boundaries() -> None:
         },
     )
 
-    assert space.is_kargs is True
+    assert space.is_kwargs is True
 
 
 def test_decode_list_boundaries_returns_ordered_list() -> None:
@@ -452,7 +452,7 @@ def test_continuous_is_serializable() -> None:
     assert isinstance(restored, Continuous)
     assert restored._boundaries == space._boundaries
     assert restored._encoded_boundaries == space._encoded_boundaries
-    assert restored.is_kargs is False
+    assert restored.is_kwargs is False
 
     assert (
         restored(

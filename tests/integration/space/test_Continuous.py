@@ -75,7 +75,7 @@ def test_list_boundaries_with_local_serial() -> None:
 
     algorithm = create_algorithm(space)
 
-    assert space.is_kargs is False
+    assert space.is_kwargs is False
 
     assert space.encoded_boundaries == {
         "0": (0.0, 1.0),
@@ -135,7 +135,7 @@ def test_dict_boundaries_with_local_serial() -> None:
 
     algorithm = create_algorithm(space)
 
-    assert space.is_kargs is True
+    assert space.is_kwargs is True
 
     assert space.encoded_boundaries == {
         "x": (-5.0, 5.0),
