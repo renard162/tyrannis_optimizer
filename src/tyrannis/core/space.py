@@ -4,7 +4,58 @@ from typing import Any
 
 
 class SpaceBase(ABC):
-    """Abstract base class for optimization search spaces."""
+    """
+    Base class for optimization search-space wrappers.
+
+    A space is the interface between the user-defined domain of an optimization
+    problem and the continuous numerical domain used internally by Tyrannis.
+    It wraps the user-provided cost function and is responsible for translating
+    values between these two representations.
+
+    The user defines the optimization problem in an arbitrary domain supported
+    by the concrete space implementation. During initialization, the space
+    converts that domain into an encoded continuous search space and exposes
+    its encoded boundaries to the optimization algorithm.
+
+    During optimization, Tyrannis operates exclusively on the encoded
+    continuous representation. When a candidate solution needs to be
+    evaluated, the space decodes the continuous variables back into the
+    representation expected by the user-defined cost function and evaluates
+    that function using the decoded values.
+
+    The complete evaluation flow is:
+
+        encoded continuous variables
+        -> __call__
+        -> decode
+        -> user-defined cost_function
+        -> fitness
+
+    Conversely, `decode` provides the conversion from the internal continuous
+    representation to the original representation of the optimization
+    problem.
+
+    Because the space acts as a wrapper around the cost function, calling a
+    space object is equivalent to evaluating the user-defined cost function
+    through the space. The supplied continuous variables are first validated
+    against the encoded `boundaries`; values outside those boundaries must be
+    rejected rather than silently clipped, wrapped, or otherwise modified.
+
+    The concrete space defines how the user's domain is encoded and decoded.
+    `SpaceBase` therefore does not assume that the original variables are
+    continuous, numerical, or represented in any particular way. The only
+    invariant required by the optimization core is that the encoded
+    representation exposed to Tyrannis is continuous and bounded.
+
+    The space is also responsible for preserving the calling convention of
+    the user-defined cost function. Depending on the concrete representation,
+    decoded values may be supplied as positional or keyword arguments.
+
+    The space must contain only the logic required to translate and evaluate
+    the optimization problem. Optimization-algorithm behavior, population
+    management, particle state, and interactions between particles do not
+    belong in the space.
+    """
 
     _cost_function: Callable[..., float] | None
     _args: tuple[Any, ...]
