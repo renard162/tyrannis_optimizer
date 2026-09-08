@@ -426,22 +426,25 @@ class SpaceBase(ABC):
         """
         Create an LFU cache using cachetools.
 
-        A reentrant lock protects the cache structure while a condition
-        coordinates concurrent evaluations of the same cache key.
+        A reentrant lock protects concurrent access to the cache. When the
+        installed cachetools version supports ``condition``, it is also used
+        to prevent concurrent evaluations of the same cache key.
         """
         from threading import Condition, RLock
 
+        import cachetools
         from cachetools import LFUCache, cached
 
         lock = RLock()
-        condition = Condition(lock)
         cache = LFUCache(maxsize=cache_size)
+        cached_kwargs: dict[str, Any] = {"lock": lock}
 
-        return cached(
-            cache,
-            lock=lock,
-            condition=condition,
-        )(function)
+        major_version = int(cachetools.__version__.split(".", maxsplit=1)[0])
+
+        if major_version >= 6:
+            cached_kwargs["condition"] = Condition(lock)
+
+        return cached(cache, **cached_kwargs)(function)
 
     @staticmethod
     def _create_fifo_cache(
@@ -451,22 +454,25 @@ class SpaceBase(ABC):
         """
         Create a FIFO cache using cachetools.
 
-        A reentrant lock protects the cache structure while a condition
-        coordinates concurrent evaluations of the same cache key.
+        A reentrant lock protects concurrent access to the cache. When the
+        installed cachetools version supports ``condition``, it is also used
+        to prevent concurrent evaluations of the same cache key.
         """
         from threading import Condition, RLock
 
+        import cachetools
         from cachetools import FIFOCache, cached
 
         lock = RLock()
-        condition = Condition(lock)
         cache = FIFOCache(maxsize=cache_size)
+        cached_kwargs: dict[str, Any] = {"lock": lock}
 
-        return cached(
-            cache,
-            lock=lock,
-            condition=condition,
-        )(function)
+        major_version = int(cachetools.__version__.split(".", maxsplit=1)[0])
+
+        if major_version >= 6:
+            cached_kwargs["condition"] = Condition(lock)
+
+        return cached(cache, **cached_kwargs)(function)
 
     @staticmethod
     def _create_rr_cache(
@@ -476,22 +482,25 @@ class SpaceBase(ABC):
         """
         Create a random-replacement cache using cachetools.
 
-        A reentrant lock protects the cache structure while a condition
-        coordinates concurrent evaluations of the same cache key.
+        A reentrant lock protects concurrent access to the cache. When the
+        installed cachetools version supports ``condition``, it is also used
+        to prevent concurrent evaluations of the same cache key.
         """
         from threading import Condition, RLock
 
+        import cachetools
         from cachetools import RRCache, cached
 
         lock = RLock()
-        condition = Condition(lock)
         cache = RRCache(maxsize=cache_size)
+        cached_kwargs: dict[str, Any] = {"lock": lock}
 
-        return cached(
-            cache,
-            lock=lock,
-            condition=condition,
-        )(function)
+        major_version = int(cachetools.__version__.split(".", maxsplit=1)[0])
+
+        if major_version >= 6:
+            cached_kwargs["condition"] = Condition(lock)
+
+        return cached(cache, **cached_kwargs)(function)
 
     @staticmethod
     def _create_disk_cache(
@@ -510,7 +519,7 @@ class SpaceBase(ABC):
         from joblib import Memory
 
         temporary_directory = TemporaryDirectory(prefix="tyrannis_cache_")
-        memory = Memory(location=temporary_directory.name)
+        memory = Memory(location=temporary_directory.name, verbose=0)
 
         def evaluate(cache_key: Any) -> float:
             return function(cache_key)
