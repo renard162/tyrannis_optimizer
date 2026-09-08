@@ -125,10 +125,7 @@ class MigrationProcessorBase(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def start(
-        self,
-        stop_signal: LocalEvent,
-    ) -> None:
+    def start(self) -> None:
         """
         Initialize the migration runtime after distributed serialization.
 
@@ -139,11 +136,6 @@ class MigrationProcessorBase(ABC):
         Resources created here are not tied to the optimization loop. They
         remain available throughout the processor execution, including before
         and after the loop context.
-
-        Parameters
-        ----------
-        stop_signal:
-            Local event used to signal termination of the processor execution.
 
         Notes
         -----

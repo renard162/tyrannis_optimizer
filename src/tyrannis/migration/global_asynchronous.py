@@ -83,15 +83,10 @@ class GlobalAsynchronousProcessor(MigrationProcessorBase):
         self._communication_processor.set_message_signal(None)
         self._migration_signal = None
 
-    def start(
-        self,
-        stop_signal: LocalEvent,
-    ) -> None:
+    def start(self) -> None:
         """Start the processor communication backend."""
 
-        self._communication_processor.start(
-            stop_signal=stop_signal,
-        )
+        self._communication_processor.start()
 
     def stop(self) -> None:
         """Stop the migration processor communication backend."""
