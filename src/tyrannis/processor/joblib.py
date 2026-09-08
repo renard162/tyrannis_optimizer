@@ -4,6 +4,7 @@ from multiprocessing import Event
 from typing import cast
 
 from joblib import Parallel, delayed
+from joblib.parallel import BACKENDS
 
 from ..core.algorithm import CostFunctionWrapperBase, ParticleBase
 from ..core.processor import (
@@ -13,7 +14,7 @@ from ..core.processor import (
 
 
 class JoblibCostFunctionWrapper(CostFunctionWrapperBase):
-    """Threads pool processor cost-function wrapper."""
+    """Joblib processor cost-function wrapper."""
 
 
 class Joblib(ProcessorBase):
@@ -21,9 +22,55 @@ class Joblib(ProcessorBase):
         self,
         n_process: int | None = None,
         joblib_backend: str = "loky",
+        batch_size: int | str = "auto",
+        pre_dispatch: int | str = "2 * n_jobs",
     ) -> None:
+        if n_process is not None:
+            if isinstance(n_process, bool):
+                raise TypeError("n_process must be an integer or None.")
+
+            if not isinstance(n_process, int):
+                raise TypeError("n_process must be an integer or None.")
+
+            if n_process == 0:
+                raise ValueError("n_process cannot be zero.")
+
+        if not isinstance(joblib_backend, str):
+            raise TypeError("joblib_backend must be a string.")
+
+        if joblib_backend not in BACKENDS:
+            available_backends = ", ".join(sorted(BACKENDS))
+            raise ValueError(
+                f"Invalid Joblib backend {joblib_backend!r}. "
+                f"Available backends are: {available_backends}."
+            )
+
+        if isinstance(batch_size, bool):
+            raise TypeError("batch_size must be a positive integer or 'auto'.")
+
+        if isinstance(batch_size, int):
+            if batch_size <= 0:
+                raise ValueError("batch_size must be greater than zero.")
+        elif batch_size != "auto":
+            raise ValueError("batch_size must be a positive integer or 'auto'.")
+
+        if isinstance(pre_dispatch, bool):
+            raise TypeError("pre_dispatch must be a positive integer or a string.")
+
+        if isinstance(pre_dispatch, int):
+            if pre_dispatch <= 0:
+                raise ValueError("pre_dispatch must be greater than zero.")
+        elif not isinstance(pre_dispatch, str):
+            raise TypeError("pre_dispatch must be a positive integer or a string.")
+
         self._n_process = n_process
         self._joblib_backend = joblib_backend
+        self._batch_size = batch_size
+        self._pre_dispatch = pre_dispatch
+
+        self._return_as = (
+            "list" if joblib_backend == "multiprocessing" else "generator_unordered"
+        )
 
         self._cost_function_wrapper = JoblibCostFunctionWrapper
 
@@ -72,7 +119,9 @@ class Joblib(ProcessorBase):
             with Parallel(
                 n_jobs=self._n_process,
                 backend=self._joblib_backend,
-                return_as="generator_unordered",
+                return_as=self._return_as,
+                batch_size=cast(str, self._batch_size),
+                pre_dispatch=cast(str, self._pre_dispatch),
             ) as parallel:
                 for actual_iter in range(self._n_iter + 1):
                     self.migration_control(actual_iter)
