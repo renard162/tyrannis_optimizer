@@ -127,7 +127,10 @@ class Joblib(ProcessorBase):
                     new_particles_ids = self._algorithm.new_particles_id
 
                     if new_particles_ids:
-                        self._algorithm.create_random_cache(new_particles_ids)
+                        self._algorithm.create_random_cache(
+                            particle_ids=new_particles_ids,
+                            initialize=True,
+                        )
 
                         new_particles = parallel(
                             delayed(initialize_worker)(particle_id)
@@ -141,7 +144,10 @@ class Joblib(ProcessorBase):
                     if actual_iter > 0:
                         population = list(self._algorithm.population)
 
-                        self._algorithm.create_random_cache(population)
+                        self._algorithm.create_random_cache(
+                            particle_ids=population,
+                            initialize=False,
+                        )
 
                         processed_particles = parallel(
                             delayed(update_worker)(particle_id)

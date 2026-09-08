@@ -143,7 +143,7 @@ class PSO(AlgorithmBase):
     def pre_iteration(self, actual_iter: int) -> None:
         return
 
-    def create_random_cache(self, particle_ids: list[str]) -> None:
+    def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
         for particle_id in particle_ids:
             particle = self._population[particle_id]
 

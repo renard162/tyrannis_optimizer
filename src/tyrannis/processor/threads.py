@@ -61,7 +61,10 @@ class ThreadsPool(ProcessorBase):
 
                 new_particles_ids = self._algorithm.new_particles_id
                 if new_particles_ids:
-                    self._algorithm.create_random_cache(new_particles_ids)
+                    self._algorithm.create_random_cache(
+                        particle_ids=new_particles_ids,
+                        initialize=True,
+                    )
                     worker = partial(
                         evaluate_particle,
                         algorithm=self._algorithm,
@@ -77,7 +80,8 @@ class ThreadsPool(ProcessorBase):
 
                 if actual_iter > 0:
                     self._algorithm.create_random_cache(
-                        [idx for idx in self._algorithm.population]
+                        particle_ids=[idx for idx in self._algorithm.population],
+                        initialize=False,
                     )
                     worker = partial(
                         evaluate_particle,
