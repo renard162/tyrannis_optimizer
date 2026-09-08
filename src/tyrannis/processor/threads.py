@@ -16,13 +16,13 @@ class ThreadsPoolCostFunctionWrapper(CostFunctionWrapperBase):
 class ThreadsPool(ProcessorBase):
     def __init__(
         self,
-        n_process: int | None = None,
+        n_jobs: int | None = None,
         chunksize: int = 1,
     ) -> None:
         if chunksize <= 0:
             raise ValueError("chunksize must be greater than zero.")
 
-        self._n_process = n_process
+        self._n_process = n_jobs
         self._chunksize = chunksize
 
         self._cost_function_wrapper = ThreadsPoolCostFunctionWrapper

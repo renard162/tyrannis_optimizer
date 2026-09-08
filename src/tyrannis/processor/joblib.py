@@ -20,16 +20,16 @@ class JoblibCostFunctionWrapper(CostFunctionWrapperBase):
 class Joblib(ProcessorBase):
     def __init__(
         self,
-        n_process: int = -1,
+        n_jobs: int = -1,
         joblib_backend: str = "loky",
         batch_size: int | str = "auto",
         pre_dispatch: int | str = "2 * n_jobs",
     ) -> None:
-        if not isinstance(n_process, int) or isinstance(n_process, bool):
-            raise TypeError("n_process must be an integer.")
+        if not isinstance(n_jobs, int) or isinstance(n_jobs, bool):
+            raise TypeError("n_jobs must be an integer.")
 
-        if n_process == 0:
-            raise ValueError("n_process cannot be zero.")
+        if n_jobs == 0:
+            raise ValueError("n_jobs cannot be zero.")
 
         if not isinstance(joblib_backend, str):
             raise TypeError("joblib_backend must be a string.")
@@ -59,7 +59,7 @@ class Joblib(ProcessorBase):
         elif not isinstance(pre_dispatch, str):
             raise TypeError("pre_dispatch must be a positive integer or a string.")
 
-        self._n_process = n_process
+        self._n_process = n_jobs
         self._joblib_backend = joblib_backend
         self._batch_size = batch_size
         self._pre_dispatch = pre_dispatch

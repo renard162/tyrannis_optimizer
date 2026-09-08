@@ -88,7 +88,7 @@ class PoolSignal(LocalEvent):
 class ProcessPool(ProcessorBase):
     def __init__(
         self,
-        n_process: int | None = None,
+        n_jobs: int | None = None,
         multiprocessing_context: str | None = None,
         maxtasksperchild: int | None = None,
         chunksize: int | None = None,
@@ -110,7 +110,7 @@ class ProcessPool(ProcessorBase):
         if (chunksize is not None) and (chunksize <= 0):
             raise ValueError("chunksize must be greater than zero.")
 
-        self._n_process = n_process
+        self._n_process = n_jobs
         self._multiprocessing_context = "spawn"
         if multiprocessing_context is not None:
             self._multiprocessing_context = multiprocessing_context
