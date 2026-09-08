@@ -26,7 +26,6 @@ class IntSequence:
 class ProcessorBase(ABC, Generic[SignalType]):
     """Base class for processor agent."""
 
-    _stop_signal: SignalType
     _migration_signal: SignalType
     _cost_function_wrapper: type[CostFunctionWrapperBase]
     _processors_pool: dict[str, Self]
@@ -36,7 +35,6 @@ class ProcessorBase(ABC, Generic[SignalType]):
     _population: dict[str, float | None]
 
     _excluded_attributes: tuple[str, ...] = (
-        "_stop_signal",
         "_migration_signal",
         "_seed_sequence",
         "_processors_pool",
@@ -94,13 +92,6 @@ class ProcessorBase(ABC, Generic[SignalType]):
         other runtime-specific objects required by the processor's execution
         strategy.
 
-        In particular, `_stop_signal` must be initialized here using the
-        synchronization primitive appropriate for the processor's execution
-        strategy. For example, a processor based on multiprocessing may
-        initialize this attribute with a `multiprocessing.Event` object, which is
-        not serializable and therefore must only exist inside the execution
-        context of the worker.
-
         The resources created by this method must be local to the execution context
         in which the processor will run. They must not be created during
         initialization or replication of the processor, since the processor may
@@ -119,16 +110,10 @@ class ProcessorBase(ABC, Generic[SignalType]):
         variables, synchronization primitives, process or thread resources, and
         other runtime-specific objects that must not be retained after execution.
 
-        In particular, `_stop_signal` must be cleared by replacing it with a
-        `LocalEvent` instance. `LocalEvent` provides the local, serializable
-        representation of the signal required by the processor outside its
-        execution context, while execution-specific implementations such as
-        `multiprocessing.Event` must not remain attached to the processor.
-
         This method must leave the processor in a state that can safely be
         serialized, deep-copied, or returned from a worker to the driver without
-        carrying resources that are specific to the execution context in which it
-        was run.
+        carrying resources that are specific to the execution context in which
+        it was run.
 
         Every resource initialized by `initialize_execution_context` must be
         released or replaced here before the processor leaves its execution
@@ -264,9 +249,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
         if self._migration_processor is None:
             raise RuntimeError("Migration processor has not been initialized.")
 
-        self._migration_processor.start(
-            stop_signal=self._stop_signal,
-        )
+        self._migration_processor.start()
 
     def stop_migration(self) -> None:
         if self._migration_processor is None:
@@ -342,9 +325,6 @@ class ProcessorBase(ABC, Generic[SignalType]):
         signal when synchronization or migration processing requires the iteration
         loop to wait.
 
-        The `stop_signal` control variable must be checked to allow the execution
-        to be interrupted before subsequent iterations are performed.
-
         The algorithm iteration must then be executed according to the
         algorithm's defined iteration lifecycle.
         """
@@ -353,13 +333,9 @@ class ProcessorBase(ABC, Generic[SignalType]):
 def evaluate_particle(
     particle_id: str,
     algorithm: AlgorithmBase,
-    stop_signal: LocalEvent,
     fitness_failure_strategy: str,
     initialize_particle: bool = False,
 ) -> ParticleBase:
-    if stop_signal.is_set():
-        return algorithm.get_unmodified_particle(particle_id)
-
     try:
         if initialize_particle:
             return algorithm.initialize_particle(particle_id)
