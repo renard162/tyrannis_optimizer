@@ -3,16 +3,16 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from ..backend.distributed.communication.no_communication import (
+    NoCommunicationDriver,
+    NoCommunicationProcessor,
+)
 from ..core.backend_communication import CommunicationProcessorBase
 from ..core.backend_migration import (
     MigrationDriverBase,
     MigrationProcessorBase,
 )
 from ..core.signals import LocalEvent
-from ..backend.distributed.communication.no_communication import (
-    NoCommunicationDriver,
-    NoCommunicationProcessor,
-)
 
 
 class IslandIsolationProcessor(MigrationProcessorBase):
@@ -49,7 +49,7 @@ class IslandIsolationProcessor(MigrationProcessorBase):
         self,
         actual_iter: int,
         population: dict[str, float | None],
-        local_best: str | None,
+        iter_best: str | None,
         insert_arrival_particle: Callable[[dict[str, Any]], None],
         departure_particle: Callable[[str], None],
     ) -> None:
