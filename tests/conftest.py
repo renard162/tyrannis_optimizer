@@ -13,9 +13,9 @@ def spark() -> Generator[SparkSession, None, None]:
 
     if sys.platform == "win32":
         builder = (
-            builder.master("spark://172.22.76.60:7077")
+            builder.master("spark://127.0.0.1:7077")
             .config("spark.driver.bindAddress", "0.0.0.0")
-            .config("spark.driver.host", "172.22.64.1")
+            .config("spark.driver.host", "host.docker.internal")
             .config("spark.driver.port", "6060")
             .config("spark.blockManager.port", "6061")
         )
