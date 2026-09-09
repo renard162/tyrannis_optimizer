@@ -19,8 +19,8 @@ class GlobalAsynchronousProcessor(MigrationProcessorBase):
     """Migration processor for global asynchronous migration.
 
     Islands execute independently. At each ``check_interval`` point, starting
-    at ``initial_iter``, the island publishes its local best when that best is
-    newer than the best it has previously published. Incoming global-best
+    at ``initial_iter``, the island publishes its iteration best when that best
+    is better than the best it has previously published. Incoming global-best
     updates are consumed without blocking the optimization loop.
 
     When a global-best particle arrives, it replaces the worst particle in the
@@ -97,10 +97,19 @@ class GlobalAsynchronousProcessor(MigrationProcessorBase):
         self,
         actual_iter: int,
         population: dict[str, float | None],
-        local_best: str | None,
+        iter_best: str | None,
         insert_arrival_particle: Callable[[dict[str, Any]], None],
         departure_particle: Callable[[str], None],
     ) -> None:
+        """Execute asynchronous migration control for the current iteration.
+
+        The current iteration best is published at the configured
+        synchronization points when it improves the last iteration best
+        published by this island.
+
+        Incoming global-best messages are consumed without blocking the
+        optimization loop.
+        """
         if self._migration_signal is None:
             raise RuntimeError("Migration loop context has not been initialized.")
 
@@ -118,20 +127,20 @@ class GlobalAsynchronousProcessor(MigrationProcessorBase):
         if actual_iter < self._synchronization_iter:
             return
 
-        if local_best is not None:
-            self._publish_if_new_best(local_best)
+        if iter_best is not None:
+            self._publish_if_new_best(iter_best)
 
         while actual_iter >= self._synchronization_iter:
             self._synchronization_iter += self._check_interval
 
     def _publish_if_new_best(
         self,
-        local_best: str,
+        iter_best: str,
     ) -> None:
-        """Publish the local best when it improves the last published best."""
+        """Publish the iteration best when it improves the last published best."""
 
         try:
-            particle_data = json.loads(local_best)
+            particle_data = json.loads(iter_best)
         except (TypeError, json.JSONDecodeError):
             return
 
@@ -208,6 +217,8 @@ class GlobalAsynchronousProcessor(MigrationProcessorBase):
         insert_arrival_particle: Callable[[dict[str, Any]], None],
         departure_particle: Callable[[str], None],
     ) -> None:
+        """Replace the worst local particle with the arriving particle."""
+
         if not population:
             return
 
@@ -264,7 +275,7 @@ class GlobalAsynchronous(MigrationDriverBase):
 
         self._global_best_fitness: float | None = None
         self._running = Event()
-        self._thread = None
+        self._thread: Thread | None = None
 
     def initialize_context(
         self,
