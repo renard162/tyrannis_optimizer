@@ -24,9 +24,9 @@ class SparkDistributed(DistributedBackendBase):
     def __init__(
         self,
         spark: SparkSession,
-        n_executors: int | None = None,
-        code_archive: str | Path | None = None,
+        n_executors: int,
         communication_port: int = 6062,
+        code_archive: str | Path | None = None,
     ) -> None:
         if spark is None:
             raise ValueError("Spark session cannot be None.")
@@ -37,11 +37,7 @@ class SparkDistributed(DistributedBackendBase):
         self._spark = spark
         self._code_archive = Path(code_archive) if code_archive is not None else None
         self._communication_port = communication_port
-
-        if n_executors is None:
-            self._n_executors = self._get_n_executors()
-        else:
-            self._n_executors = n_executors
+        self._n_executors = n_executors
 
         self._identifier = "SparkDistributed"
         self._cost_function_wrapper = SparkDistributedCostFunctionWrapper
@@ -127,11 +123,6 @@ class SparkDistributed(DistributedBackendBase):
 
         finally:
             self._migration.stop()
-
-    def _get_n_executors(self) -> int:
-        jsc = cast(Any, self._spark.sparkContext._jsc)
-        n_executors = jsc.sc().getExecutorMemoryStatus().size() - 1
-        return n_executors
 
 
 def _run_processor(
