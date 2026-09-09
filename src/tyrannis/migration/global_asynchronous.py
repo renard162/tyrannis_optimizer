@@ -96,7 +96,7 @@ class GlobalAsynchronousProcessor(MigrationProcessorBase):
     def migration_control(
         self,
         actual_iter: int,
-        population: dict[str, float | None],
+        population: dict[str, float],
         iter_best: str | None,
         insert_arrival_particle: Callable[[dict[str, Any]], None],
         departure_particle: Callable[[str], None],
@@ -172,7 +172,7 @@ class GlobalAsynchronousProcessor(MigrationProcessorBase):
 
     def _consume_messages(
         self,
-        population: dict[str, float | None],
+        population: dict[str, float],
         insert_arrival_particle: Callable[[dict[str, Any]], None],
         departure_particle: Callable[[str], None],
     ) -> None:
@@ -212,7 +212,7 @@ class GlobalAsynchronousProcessor(MigrationProcessorBase):
 
     def _replace_worst_particle(
         self,
-        population: dict[str, float | None],
+        population: dict[str, float],
         particle_data: dict[str, Any],
         insert_arrival_particle: Callable[[dict[str, Any]], None],
         departure_particle: Callable[[str], None],
@@ -224,10 +224,7 @@ class GlobalAsynchronousProcessor(MigrationProcessorBase):
 
         worst_particle_id = max(
             population,
-            key=lambda particle_id: self._get_particle_fitness(
-                population,
-                particle_id,
-            ),
+            key=lambda particle_id: population[particle_id],
         )
 
         arriving_particle = particle_data.copy()

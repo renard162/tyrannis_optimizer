@@ -46,7 +46,7 @@ class ParticleBase(ABC):
         self,
         identifier: str,
         variables: dict[str, float],
-        fitness: float | None = None,
+        fitness: float = np.inf,
     ) -> None:
         self._identifier = identifier
         self._variables = variables
@@ -75,29 +75,6 @@ class ParticleBase(ABC):
             "fitness": self._fitness,
         }
 
-    def recreate(
-        self,
-        variables: dict[str, float],
-        fitness: float | None,
-    ) -> None:
-        """
-        Reset the particle state using the values provided to its constructor.
-
-        The provided arguments must correspond to the particle constructor
-        parameters that define its state, excluding the `identifier`. The internal
-        state of the existing particle is reset using the provided values, while
-        its `identifier` is preserved.
-
-        This method allows a particle to be treated as a new particle without
-        creating a new instance, reducing the complexity and overhead of replacing
-        an existing particle object.
-        """
-        self._variables = variables
-        self._fitness = fitness
-        self._new_particle = True
-        self._candidate_variables = None
-        self._candidate_fitness = None
-
     @property
     def identifier(self) -> str:
         return self._identifier
@@ -111,7 +88,7 @@ class ParticleBase(ABC):
         return self._variables
 
     @property
-    def fitness(self) -> float | None:
+    def fitness(self) -> float:
         return self._fitness
 
     @property
@@ -160,13 +137,13 @@ class ParticleBase(ABC):
         if (self._candidate_variables is None) or (self._candidate_fitness is None):
             raise RuntimeError("No candidate solution available for consolidation.")
 
-        if self._new_particle and self._fitness is not None:
+        if self._new_particle and (not np.isinf(self._fitness)):
             self._new_particle = False
             return
 
         self._new_particle = False
 
-        if consolidate_new or (self._fitness is None):
+        if consolidate_new or np.isinf(self._fitness):
             self._variables = self._candidate_variables
             self._fitness = self._candidate_fitness
 
@@ -633,25 +610,15 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
     def update_solution_state(self) -> None:
         iter_best = min(
             self._population.values(),
-            key=self.get_fitness,
+            key=lambda particle: particle.fitness,
         )
         iter_worst = max(
             self._population.values(),
-            key=self.get_fitness,
+            key=lambda particle: particle.fitness,
         )
 
         self._iter_best = iter_best.identifier
         self._iter_worst = iter_worst.identifier
 
-        if self._local_best is None or (
-            self.get_fitness(iter_best) < self.get_fitness(self._local_best)
-        ):
+        if self._local_best is None or (iter_best.fitness < self._local_best.fitness):
             self._local_best = deepcopy(iter_best)
-
-    @staticmethod
-    def get_fitness(particle: ParticleBase) -> float:
-        if particle.fitness is None:
-            raise RuntimeError(
-                f"Particle '{particle.identifier}' does not have a fitness."
-            )
-        return particle.fitness

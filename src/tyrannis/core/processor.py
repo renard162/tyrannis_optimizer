@@ -32,7 +32,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
     _processors_pool: dict[str, Self]
     _migration_driver: MigrationDriverBase | None
     _migration_processor: MigrationProcessorBase | None
-    _population: dict[str, float | None]
+    _population: dict[str, float]
     _result: ProcessorResult
 
     _excluded_attributes: tuple[str, ...] = (
@@ -229,7 +229,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
         return self._processors_pool
 
     @property
-    def population(self) -> dict[str, float | None]:
+    def population(self) -> dict[str, float]:
         return self._population
 
     @property
@@ -307,7 +307,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
                     (particle.identifier, particle.fitness)
                     for particle in self._algorithm.population.values()
                 ),
-                key=lambda item: np.inf if item[1] is None else item[1],
+                key=lambda item: item[1],
             )
         )
 

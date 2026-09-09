@@ -248,7 +248,7 @@ class MigrationProcessorBase(ABC):
     def migration_control(
         self,
         actual_iter: int,
-        population: dict[str, float | None],
+        population: dict[str, float],
         iter_best: str | None,
         insert_arrival_particle: Callable[[dict[str, Any]], None],
         departure_particle: Callable[[str], None],
@@ -360,19 +360,6 @@ class MigrationProcessorBase(ABC):
         processor, communication, and migration state.
         """
         raise NotImplementedError
-
-    @staticmethod
-    def _get_particle_fitness(
-        population: dict[str, float | None],
-        particle_id: str,
-    ) -> float:
-        """Return a particle fitness suitable for population ordering."""
-        fitness = population[particle_id]
-
-        if fitness is None:
-            return np.inf
-
-        return fitness
 
 
 class MigrationDriverBase(ABC):

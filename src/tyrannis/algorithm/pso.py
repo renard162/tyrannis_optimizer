@@ -16,10 +16,10 @@ class PSOParticle(ParticleBase):
         self,
         identifier: str,
         variables: dict[str, float],
-        fitness: float | None = None,
+        fitness: float = np.inf,
         velocity: dict[str, float] | None = None,
         personal_best_variables: dict[str, float] | None = None,
-        personal_best_fitness: float | None = None,
+        personal_best_fitness: float = np.inf,
     ) -> None:
         super().__init__(
             identifier=identifier,
@@ -41,23 +41,6 @@ class PSOParticle(ParticleBase):
             "personal_best_fitness": self._personal_best_fitness,
         }
 
-    def recreate(
-        self,
-        variables: dict[str, float],
-        fitness: float | None = None,
-        velocity: dict[str, float] | None = None,
-        personal_best_variables: dict[str, float] | None = None,
-        personal_best_fitness: float | None = None,
-    ) -> None:
-        self._new_particle = True
-        self._variables = variables
-        self._fitness = fitness
-        self._velocity = velocity
-        self._personal_best_variables = personal_best_variables
-        self._personal_best_fitness = personal_best_fitness
-        self._candidate_variables = None
-        self._candidate_fitness = None
-
     @property
     def velocity(self) -> dict[str, float] | None:
         return self._velocity
@@ -71,15 +54,12 @@ class PSOParticle(ParticleBase):
         return self._personal_best_variables
 
     @property
-    def personal_best_fitness(self) -> float | None:
+    def personal_best_fitness(self) -> float:
         return self._personal_best_fitness
 
     def update_personal_best(self) -> None:
-        if self.fitness is None:
-            raise RuntimeError(f"Particle '{self.identifier}' does not have a fitness.")
-
         if (
-            self._personal_best_fitness is None
+            np.isinf(self._personal_best_fitness)
             or self.fitness < self._personal_best_fitness
         ):
             self._personal_best_variables = deepcopy(self.variables)
@@ -103,10 +83,10 @@ class PSO(AlgorithmBase):
         self,
         identifier: str,
         variables: dict[str, float] | None = None,
-        fitness: float | None = None,
+        fitness: float = np.inf,
         velocity: dict[str, float] | None = None,
         personal_best_variables: dict[str, float] | None = None,
-        personal_best_fitness: float | None = None,
+        personal_best_fitness: float = np.inf,
     ) -> None:
         if identifier is None:
             raise ValueError("Particle identifier cannot be None.")
@@ -166,7 +146,7 @@ class PSO(AlgorithmBase):
                 f"Particle '{identifier}' must be an instance of PSOParticle."
             )
 
-        if particle.fitness is None:
+        if np.isinf(particle.fitness):
             particle.update(
                 variables=particle.variables,
                 fitness_function=self._fitness_function,
@@ -190,9 +170,6 @@ class PSO(AlgorithmBase):
 
         if self._local_best is None:
             raise RuntimeError("Local best particle has not been initialized.")
-
-        if particle.fitness is None:
-            raise RuntimeError(f"Particle '{identifier}' does not have a fitness.")
 
         if particle.velocity is None:
             raise RuntimeError(f"Particle '{identifier}' does not have a velocity.")
@@ -260,11 +237,6 @@ class PSO(AlgorithmBase):
             if particle.candidate_fitness is None:
                 raise RuntimeError(
                     f"Particle '{particle.identifier}' has no candidate fitness."
-                )
-
-            if particle.fitness is None:
-                raise RuntimeError(
-                    f"Particle '{particle.identifier}' has no current fitness."
                 )
 
             particle.consolidate(
