@@ -79,8 +79,9 @@ class MigrationProcessorBase(ABC):
 
     `migration_control` is the main extension point of a concrete migration
     strategy. It is called during the optimization loop and receives the
-    current population and local best, together with callbacks through which
-    it can request particle insertion and removal.
+    current population and the best particle found during the current
+    iteration (`iter_best`), together with callbacks through which it can
+    request particle insertion and removal.
 
     The migration strategy must remain independent of the implementation of
     the processor and the optimization algorithm. Interactions with the local
@@ -179,7 +180,7 @@ class MigrationProcessorBase(ABC):
 
             In synchronous strategies, it can be used to hold the optimization
             loop until the communication layer receives the command that allows
-            the processor to continue. For example, a driver may instruct a
+            the processor to continue. For example, a driver may instruct the
             processor to execute until iteration X and then wait for the next
             synchronization command.
 
@@ -248,7 +249,7 @@ class MigrationProcessorBase(ABC):
         self,
         actual_iter: int,
         population: dict[str, float | None],
-        local_best: str | None,
+        iter_best: str | None,
         insert_arrival_particle: Callable[[dict[str, Any]], None],
         departure_particle: Callable[[str], None],
     ) -> None:
@@ -298,9 +299,16 @@ class MigrationProcessorBase(ABC):
             A fitness value of `None` indicates that the particle has not yet
             received a valid fitness evaluation.
 
-        local_best:
-            JSON-serialized representation of the best solution found by the
-            processor so far. `None` indicates that no local best is currently
+        iter_best:
+            Best particle found during the current optimization iteration.
+
+            This value represents the best result of the current iteration and
+            must not be confused with the algorithm's historical `local_best`.
+            The latter represents the best solution accumulated over previous
+            iterations, whereas `iter_best` represents the current iteration
+            state used by migration control.
+
+            `None` indicates that no valid iteration-best particle is currently
             available.
 
         insert_arrival_particle:
