@@ -176,6 +176,11 @@ class ProcessPool(ProcessorBase):
                             new_particles_ids,
                             chunksize=self._chunksize,
                         )
+                        new_particles = pool.map(
+                            self._algorithm.consolidate_new_particles,
+                            new_particles,
+                            chunksize=self._chunksize,
+                        )
                         self._algorithm.update_population(new_particles)
 
                     if actual_iter > 0:

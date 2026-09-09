@@ -499,23 +499,23 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
 
     @staticmethod
     @abstractmethod
-    def consolidate_new_particles(
-        new_particles: Iterable[ParticleType],
-    ) -> Iterable[ParticleType]:
+    def consolidate_new_particles(particle: ParticleType) -> ParticleType:
         """
-        Consolidate newly initialized particles.
+        Consolidate a newly initialized particle.
 
-        This method performs the complete consolidation process for particles
-        initialized by ``initialize_particle``. Consolidation must be performed
-        using only the state contained in the particles themselves.
+        This method performs the complete consolidation process for a particle
+        initialized by ``initialize_particle``. The method is executed once for
+        each newly initialized particle, with individual particle consolidations
+        performed in parallel.
 
-        The method must not access the algorithm instance, the population,
-        algorithm configuration, the fitness function, or any other external
-        state. Any information required for consolidation that is not inherently
-        part of a particle must have been stored in that particle during
-        ``initialize_particle``.
+        Consolidation must be performed using only the state contained in the
+        particle itself. The method must not access the algorithm instance, the
+        population, algorithm configuration, the fitness function, or any other
+        external state. Any information required for consolidation that is not
+        inherently part of the particle must have been stored in the particle
+        during ``initialize_particle``.
 
-        After this method returns, every particle must represent its fully
+        After this method returns, the particle must represent its fully
         consolidated state and be ready to participate in the current iteration.
 
         This method must not perform particle initialization or evaluate the

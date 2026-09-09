@@ -71,9 +71,14 @@ class ThreadsPool(ProcessorBase):
                         fitness_failure_strategy=self._fitness_failure_strategy,
                         initialize_particle=True,
                     )
-                    new_particles = pool.imap_unordered(
+                    new_particles = pool.map(
                         worker,
                         new_particles_ids,
+                        chunksize=self._chunksize,
+                    )
+                    new_particles = pool.map(
+                        self._algorithm.consolidate_new_particles,
+                        new_particles,
                         chunksize=self._chunksize,
                     )
                     self._algorithm.update_population(new_particles)

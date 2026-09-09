@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from copy import deepcopy
 
 import numpy as np
@@ -174,14 +175,10 @@ class PSO(AlgorithmBase):
         return particle
 
     @staticmethod
-    def consolidate_new_particles(
-        new_particles: list[PSOParticle],
-    ) -> list[PSOParticle]:
-        for particle in new_particles:
-            particle.consolidate(consolidate_new=True)
-            particle.update_personal_best()
-
-        return new_particles
+    def consolidate_new_particles(particle: PSOParticle) -> PSOParticle:
+        particle.consolidate(consolidate_new=True)
+        particle.update_personal_best()
+        return particle
 
     def update_particle(self, identifier: str) -> PSOParticle:
         particle = self._population[identifier]

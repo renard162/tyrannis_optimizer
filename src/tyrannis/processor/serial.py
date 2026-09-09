@@ -63,6 +63,10 @@ class Serial(ProcessorBase):
                 new_particles = [
                     worker(particle_id) for particle_id in new_particles_ids
                 ]
+                new_particles = [
+                    self._algorithm.consolidate_new_particles(particle)
+                    for particle in new_particles
+                ]
                 self._algorithm.update_population(new_particles)
 
             if actual_iter > 0:

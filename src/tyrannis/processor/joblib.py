@@ -64,10 +64,6 @@ class Joblib(ProcessorBase):
         self._batch_size = batch_size
         self._pre_dispatch = pre_dispatch
 
-        self._return_as = (
-            "list" if joblib_backend == "multiprocessing" else "generator_unordered"
-        )
-
         self._cost_function_wrapper = JoblibCostFunctionWrapper
 
     def initialize_execution_context(self) -> None:
@@ -115,9 +111,9 @@ class Joblib(ProcessorBase):
             with Parallel(
                 n_jobs=self._n_process,
                 backend=self._joblib_backend,
-                return_as=self._return_as,
                 batch_size=cast(str, self._batch_size),
                 pre_dispatch=cast(str, self._pre_dispatch),
+                return_as="list",
             ) as parallel:
                 for actual_iter in range(self._n_iter + 1):
                     self.migration_control(actual_iter)
@@ -136,7 +132,10 @@ class Joblib(ProcessorBase):
                             delayed(initialize_worker)(particle_id)
                             for particle_id in new_particles_ids
                         )
-
+                        new_particles = parallel(
+                            delayed(self._algorithm.consolidate_new_particles)(particle)
+                            for particle in new_particles
+                        )
                         self._algorithm.update_population(
                             cast(Iterable[ParticleBase], new_particles)
                         )
