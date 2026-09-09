@@ -1,23 +1,19 @@
-import json
-
 from ..backend.distributed.communication.no_communication import (
     NoCommunicationDriver,
     NoCommunicationProcessor,
 )
 from ..core.algorithm import CostFunctionWrapperBase
 from ..core.backend import BackendBase
-from ..core.signals import LocalEvent
 
 
 class LocalCostFunctionWrapper(CostFunctionWrapperBase):
-    """Spark parallel cost-function wrapper."""
+    """Local cost-function wrapper."""
 
 
 class Local(BackendBase):
     def __init__(self) -> None:
         self._cost_function_wrapper = LocalCostFunctionWrapper
         self._identifier = "Local"
-        self._global_best_data: str | None = None
 
     def initialize_context(
         self,
@@ -51,22 +47,16 @@ class Local(BackendBase):
         if self._processor is None:
             raise RuntimeError("Processor cannot be None")
 
-        self._processor.create_processors_pool(1)
+        if len(self._processor.processors_pool) == 0:
+            self._processor.create_processors_pool(1)
         executor = next(iter(self._processor.processors_pool.values()))
 
         executor.initialize_execution_context()
 
         try:
             executor.run()
-            self._global_best_data = executor.local_best
             self._processor.update_processors_pool([executor])
-            self.update_result()
+            self._result = executor.result
 
         finally:
             executor.finalize_execution_context()
-
-    def update_result(self) -> None:
-        if self._global_best_data is None:
-            return
-
-        self._result = json.loads(self._global_best_data)

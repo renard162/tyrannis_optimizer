@@ -102,9 +102,10 @@ class SparkDistributed(DistributedBackendBase):
                 str(self._code_archive),
             )
 
-        self._processor.create_processors_pool(
-            self._n_executors,
-        )
+        if len(self._processor.processors_pool) == 0:
+            self._processor.create_processors_pool(
+                self._n_executors,
+            )
 
         self._migration.start()
 
