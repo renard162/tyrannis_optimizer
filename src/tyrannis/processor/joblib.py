@@ -119,6 +119,7 @@ class Joblib(ProcessorBase):
                     self.migration_control(actual_iter)
 
                     self._algorithm.pre_iteration(actual_iter)
+                    self.pre_iteration_log(actual_iter)
 
                     new_particles_ids = self._algorithm.new_particles_id
 
@@ -132,9 +133,19 @@ class Joblib(ProcessorBase):
                             delayed(initialize_worker)(particle_id)
                             for particle_id in new_particles_ids
                         )
+                        self.error_log(
+                            actual_iter=actual_iter,
+                            updated_particles=cast(
+                                Iterable[ParticleBase], new_particles
+                            ),
+                        )
                         new_particles = parallel(
                             delayed(self._algorithm.consolidate_new_particles)(particle)
                             for particle in new_particles
+                        )
+                        self.new_particle_log(
+                            actual_iter=actual_iter,
+                            new_particles=cast(Iterable[ParticleBase], new_particles),
                         )
                         self._algorithm.update_population(
                             cast(Iterable[ParticleBase], new_particles)
@@ -152,14 +163,21 @@ class Joblib(ProcessorBase):
                             delayed(update_worker)(particle_id)
                             for particle_id in population
                         )
-
+                        self.error_log(
+                            actual_iter=actual_iter,
+                            updated_particles=cast(
+                                Iterable[ParticleBase], processed_particles
+                            ),
+                        )
                         self._algorithm.update_population(
                             cast(Iterable[ParticleBase], processed_particles)
                         )
 
                     self._algorithm.post_iteration(actual_iter)
+                    self.iteration_log(actual_iter)
 
                     self.update_status()
+                    self.best_log(actual_iter)
 
         finally:
             self.finalize_loop_context()
