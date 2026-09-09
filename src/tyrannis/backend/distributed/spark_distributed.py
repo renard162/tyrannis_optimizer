@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import Any, cast
 
 from pyspark.sql import SparkSession
 
