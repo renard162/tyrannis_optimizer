@@ -128,12 +128,12 @@ class Optimizer:
     def best_solution(self) -> Any:
         """Return the best solution found by the optimization."""
 
-        if self._result is None:
+        if (self._result is None) or (self._result.result is None):
             raise AttributeError(
                 "best_solution is not available before fit() is called."
             )
 
-        variables = self._result["variables"]
+        variables = self._result.result["variables"]
 
         if not isinstance(variables, dict):
             raise TypeError("Optimization result variables must be a dictionary.")
@@ -144,12 +144,12 @@ class Optimizer:
     def best_fitness(self) -> float:
         """Return the fitness of the best solution found by the optimization."""
 
-        if self._result is None:
+        if (self._result is None) or (self._result.result is None):
             raise AttributeError(
                 "best_fitness is not available before fit() is called."
             )
 
-        fitness = self._result["fitness"]
+        fitness = self._result.result["fitness"]
 
         if not isinstance(fitness, float):
             raise TypeError("Optimization result fitness must be a float.")
@@ -160,18 +160,18 @@ class Optimizer:
     def result_(self) -> dict[str, Any] | None:
         """Return the best particle found by the optimization."""
 
-        if self._result is None:
+        if (self._result is None) or (self._result.result is None):
             return None
 
-        variables = self._result["variables"]
+        variables = self._result.result["variables"]
 
         if not isinstance(variables, dict):
             raise TypeError("Optimization result variables must be a dictionary.")
 
         return {
-            "identifier": self._result["identifier"],
+            "identifier": self._result.result["identifier"],
             "variables": self._space.decode(variables),
-            "fitness": self._result["fitness"],
+            "fitness": self._result.result["fitness"],
         }
 
     def fit(self) -> Optimizer:
@@ -185,19 +185,6 @@ class Optimizer:
             self._result = None
             return self
 
-        self._result = backend_result.result
-
-        if self._result is None:
-            return self
-
-        variables = self._result["variables"]
-
-        if not isinstance(variables, dict):
-            raise TypeError("Optimization result variables must be a dictionary.")
-
-        fitness = self._result["fitness"]
-
-        if not isinstance(fitness, float):
-            raise TypeError("Optimization result fitness must be a float.")
+        self._result = backend_result
 
         return self
