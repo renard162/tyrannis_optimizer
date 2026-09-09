@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 from typing import Any, cast
 
@@ -8,7 +7,7 @@ from ...core.algorithm import CostFunctionWrapperBase
 from ...core.backend_distributed import DistributedBackendBase
 from ...core.backend_migration import MigrationDriverBase
 from ...core.processor import ProcessorBase
-from ...core.signals import LocalEvent
+from ...core.results import ProcessorResult
 from .communication.spark_communication import (
     SparkCommunicationDriver,
     SparkCommunicationProcessor,
@@ -136,27 +135,25 @@ class SparkDistributed(DistributedBackendBase):
 
 def _run_processor(
     processor: ProcessorBase,
-) -> tuple[str, dict | None]:
+) -> tuple[str, ProcessorResult]:
     """
     Execute a processor inside a Spark executor.
 
     The processor enters its execution context only after Spark has
     deserialized it. Runtime resources are therefore created inside
     the executor and removed after execution.
+
+    The complete `ProcessorResult` produced by the processor is returned
+    to the driver. Result consolidation, including history transfer and
+    selection of the globally best result, is performed by the distributed
+    backend after all processors have completed.
     """
     processor.initialize_execution_context()
 
     try:
         processor.run()
 
-        local_best = processor.local_best
-
-        if local_best is None:
-            result = None
-        else:
-            result = json.loads(local_best)
-
-        return processor.identifier, result
+        return processor.identifier, processor.result
 
     finally:
         processor.finalize_execution_context()
