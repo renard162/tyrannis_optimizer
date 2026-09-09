@@ -38,21 +38,9 @@ class SparkParallel(ParallelBackendBase):
 
         self._spark = spark
         self._code_archive = Path(code_archive) if code_archive is not None else None
-        self._actual_iter = -1
 
         self._identifier = "SparkParallel"
         self._cost_function_wrapper = SparkParallelCostFunctionWrapper
-
-    @property
-    def actual_iter(self) -> int:
-        return self._actual_iter
-
-    @property
-    def local_best(self) -> str:
-        if self._algorithm.local_best is None:
-            return ""
-
-        return self._algorithm.local_best.dump()
 
     def execute(self) -> None:
         if self._code_archive is not None:
@@ -68,34 +56,53 @@ class SparkParallel(ParallelBackendBase):
         self.init_particles()
 
         for actual_iter in range(self._n_iter + 1):
-            self._actual_iter = actual_iter
-
             self._algorithm.pre_iteration(actual_iter)
+            self.pre_iteration_log(actual_iter)
 
             new_particles_ids = self._algorithm.new_particles_id
+
             if new_particles_ids:
                 self._algorithm.create_random_cache(
                     particle_ids=new_particles_ids,
                     initialize=True,
                 )
-                initialized_particles = self._parallel_initialize_particles(
-                    new_particles_ids
+                new_particles = self._parallel_initialize_particles(
+                    new_particles_ids,
                 )
-                self._algorithm.update_population(initialized_particles)
+                self.error_log(
+                    actual_iter=actual_iter,
+                    updated_particles=new_particles,
+                )
+                new_particles = [
+                    self._algorithm.consolidate_new_particles(particle)
+                    for particle in new_particles
+                ]
+                self.new_particle_log(
+                    actual_iter=actual_iter,
+                    new_particles=new_particles,
+                )
+                self._algorithm.update_population(new_particles)
 
             if actual_iter > 0:
                 self._algorithm.create_random_cache(
-                    particle_ids=[idx for idx in self._algorithm.population],
+                    particle_ids=list(self._algorithm.population),
                     initialize=False,
                 )
-                updated_particles = self._parallel_update_particles(
-                    self._algorithm.population
+                processed_particles = self._parallel_update_particles(
+                    self._algorithm.population,
                 )
-                self._algorithm.update_population(updated_particles)
+                self.error_log(
+                    actual_iter=actual_iter,
+                    updated_particles=processed_particles,
+                )
+
+                self._algorithm.update_population(processed_particles)
 
             self._algorithm.post_iteration(actual_iter)
+            self.iteration_log(actual_iter)
 
-        self.update_result()
+            self.update_result()
+            self.best_log(actual_iter)
 
     def _parallel_initialize_particles(
         self,
@@ -182,7 +189,8 @@ def _process_particle_batches(
                 if fitness_failure_strategy == "raise":
                     raise
 
-                particle = algorithm.get_unmodified_particle(particle_id)
+                particle = algorithm.population[particle_id]
+                particle.candidate_variables = particle.variables
                 particle.candidate_fitness = np.inf
 
             particles.append(particle)
