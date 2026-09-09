@@ -36,7 +36,7 @@ class SparkParallel(ParallelBackendBase):
         spark: SparkSession,
         spark_code_archive: str | Path | None = None,
         n_aux_jobs: int = -1,
-        aux_backend: str = "threading",
+        aux_backend: str = "sequential",
         aux_batch_size: int | str = "auto",
         aux_pre_dispatch: int | str = "2 * n_jobs",
     ) -> None:
