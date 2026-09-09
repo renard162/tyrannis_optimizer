@@ -206,7 +206,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
 
         new_processor._migration_processor = (
             self._migration_driver.create_processor_module(  # type: ignore
-                identification=processor_identifier,
+                identifier=processor_identifier,
             )
         )
 

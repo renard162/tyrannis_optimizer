@@ -525,7 +525,7 @@ class MigrationDriverBase(ABC):
 
         communication_processor_kargs:
             Serializable keyword arguments used to initialize each
-            communication processor. The processor-specific `identification`
+            communication processor. The processor-specific `identifier`
             is added by `create_processor_module`.
 
         Notes
@@ -553,7 +553,7 @@ class MigrationDriverBase(ABC):
 
     def create_processor_module(
         self,
-        identification: str,
+        identifier: str,
     ) -> MigrationProcessorBase:
         """
         Create the migration processor module for one optimization processor.
@@ -563,8 +563,8 @@ class MigrationDriverBase(ABC):
 
         Parameters
         ----------
-        identification:
-            Unique identification of the optimization processor. It is passed
+        identifier:
+            Unique identifier of the optimization processor. It is passed
             to the communication processor so that communication endpoints
             can be associated with the correct processor.
 
@@ -581,7 +581,7 @@ class MigrationDriverBase(ABC):
         runtime state with one another.
 
         The communication processor receives a copy of the communication
-        initialization arguments and the processor identification.
+        initialization arguments and the processor identifier.
 
         Migration-specific initialization arguments are kept separate from
         communication arguments. The communication configuration is removed
@@ -597,7 +597,7 @@ class MigrationDriverBase(ABC):
 
         communication_processor = self._communication_processor_class(
             **communication_kargs,
-            identification=identification,
+            identifier=identifier,
         )
 
         migration_processor_kargs = self._migration_processor_init_kargs.copy()

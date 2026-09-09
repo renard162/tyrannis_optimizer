@@ -23,11 +23,11 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
         self,
         driver_ip: str,
         port: int,
-        identification: str,
+        identifier: str,
     ) -> None:
         self._driver_ip = driver_ip
         self._port = port
-        self._identification = identification
+        self._identifier = identifier
 
         self._socket: socket.socket | None = None
         self._thread: Thread | None = None
@@ -88,7 +88,7 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
         self._running.set()
 
         self._send_message(
-            self._identification,
+            self._identifier,
         )
 
         self._thread = Thread(
@@ -261,7 +261,7 @@ class SparkCommunicationDriver(CommunicationDriverBase):
 
         self._connections: dict[str, socket.socket] = {}
 
-        self._connection_identifications: dict[
+        self._connection_identifiers: dict[
             socket.socket,
             str,
         ] = {}
@@ -352,7 +352,7 @@ class SparkCommunicationDriver(CommunicationDriverBase):
                 pass
 
         self._connections.clear()
-        self._connection_identifications.clear()
+        self._connection_identifiers.clear()
         self._receive_buffers.clear()
 
         if self._selector is not None:
@@ -488,7 +488,7 @@ class SparkCommunicationDriver(CommunicationDriverBase):
         connection: socket.socket,
         message: str,
     ) -> bool:
-        if connection in self._connection_identifications:
+        if connection in self._connection_identifiers:
             return False
 
         if message not in self._island_ids:
@@ -503,7 +503,7 @@ class SparkCommunicationDriver(CommunicationDriverBase):
             self._close_connection(connection)
             return True
 
-        self._connection_identifications[connection] = message
+        self._connection_identifiers[connection] = message
         self._connections[message] = connection
 
         return True
@@ -513,7 +513,7 @@ class SparkCommunicationDriver(CommunicationDriverBase):
         connection: socket.socket,
         message: str,
     ) -> None:
-        island_id = self._connection_identifications.get(
+        island_id = self._connection_identifiers.get(
             connection,
         )
 
@@ -541,7 +541,7 @@ class SparkCommunicationDriver(CommunicationDriverBase):
             ):
                 pass
 
-        island_id = self._connection_identifications.pop(
+        island_id = self._connection_identifiers.pop(
             connection,
             None,
         )

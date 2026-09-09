@@ -69,10 +69,4 @@ class Local(BackendBase):
         if self._global_best_data is None:
             return
 
-        particle_data = json.loads(self._global_best_data)
-
-        self._result = {
-            key: value
-            for key, value in particle_data.items()
-            if key in self._result_keys
-        }
+        self._result = json.loads(self._global_best_data)

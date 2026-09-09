@@ -121,7 +121,7 @@ class Optimizer:
             raise TypeError("Optimization result variables must be a dictionary.")
 
         return {
-            "identification": self._result["identification"],
+            "identifier": self._result["identifier"],
             "variables": self._space.decode(variables),
             "fitness": self._result["fitness"],
         }

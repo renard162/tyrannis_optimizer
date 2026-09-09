@@ -49,7 +49,7 @@ class CommunicationProcessorBase(ABC):
     @abstractmethod
     def __init__(
         self,
-        identification: str,
+        identifier: str,
         **kwargs: object,
     ) -> None:
         """
@@ -65,7 +65,7 @@ class CommunicationProcessorBase(ABC):
 
         Parameters
         ----------
-        identification:
+        identifier:
             Unique identifier assigned to this processor. The identifier is
             used by the communication backend to associate this processor with
             its corresponding driver-side endpoint.

@@ -14,10 +14,10 @@ class NoCommunicationProcessor(CommunicationProcessorBase):
 
     def __init__(
         self,
-        identification: str,
+        identifier: str,
         **kwargs: object,
     ) -> None:
-        self._identification = identification
+        self._identifier = identifier
 
         self._messages: Queue[str] | None = None
         self._outgoing_queue: Queue[str] | None = None
