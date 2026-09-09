@@ -190,7 +190,7 @@ def _process_particle_batches(
                     raise
 
                 particle = algorithm.population[particle_id]
-                particle.candidate_variables = particle.variables
+                # particle.candidate_variables = particle.variables
                 particle.candidate_fitness = np.inf
 
             particles.append(particle)
