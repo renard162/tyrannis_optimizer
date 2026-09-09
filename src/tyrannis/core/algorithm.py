@@ -500,8 +500,8 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
     @staticmethod
     @abstractmethod
     def consolidate_new_particles(
-        new_particles: list[ParticleType],
-    ) -> list[ParticleType]:
+        new_particles: Iterable[ParticleType],
+    ) -> Iterable[ParticleType]:
         """
         Consolidate newly initialized particles.
 
