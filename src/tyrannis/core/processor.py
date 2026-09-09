@@ -8,6 +8,7 @@ import numpy as np
 
 from .algorithm import AlgorithmBase, CostFunctionWrapperBase, ParticleBase
 from .backend_migration import MigrationDriverBase, MigrationProcessorBase
+from .results import HistoryConfig, ProcessorResult
 from .signals import LocalEvent
 
 SignalType = TypeVar("SignalType", bound=LocalEvent)
@@ -31,8 +32,8 @@ class ProcessorBase(ABC, Generic[SignalType]):
     _processors_pool: dict[str, Self]
     _migration_driver: MigrationDriverBase | None
     _migration_processor: MigrationProcessorBase | None
-    _local_best: str | None
     _population: dict[str, float | None]
+    _result: ProcessorResult
 
     _excluded_attributes: tuple[str, ...] = (
         "_migration_signal",
@@ -161,6 +162,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
         n_iter: int,
         n_particles: int,
         migration_driver: MigrationDriverBase,
+        history_config: HistoryConfig,
         fitness_failure_strategy: str = "invalidate",
         seed: int | None = None,
     ) -> None:
@@ -176,14 +178,15 @@ class ProcessorBase(ABC, Generic[SignalType]):
 
         self._fitness_failure_strategy = fitness_failure_strategy
         self._migration_driver = migration_driver
+        self._history_config = history_config
 
         self._migration_processor = None
         self._identifier = "MainProcessor"
-        self._local_best = None
         self._population = {}
 
         self._seed_sequence = np.random.SeedSequence(seed)
         self._pool_count_sequence = IntSequence()
+        self._result = ProcessorResult()
         self._processors_pool = {}
 
     def create_processors_pool(self, n_islands: int) -> None:
@@ -226,10 +229,6 @@ class ProcessorBase(ABC, Generic[SignalType]):
         return self._processors_pool
 
     @property
-    def local_best(self) -> str | None:
-        return self._local_best
-
-    @property
     def population(self) -> dict[str, float | None]:
         return self._population
 
@@ -261,10 +260,16 @@ class ProcessorBase(ABC, Generic[SignalType]):
         if self._migration_processor is None:
             raise RuntimeError("Migration processor has not been initialized.")
 
+        iter_best = (
+            None
+            if self._algorithm.iter_best is None
+            else self._algorithm.iter_best.dump()
+        )
+
         self._migration_processor.migration_control(
             actual_iter=actual_iter,
             population=self._population,
-            local_best=self._local_best,
+            local_best=iter_best,
             insert_arrival_particle=self._insert_arrival_particle,
             departure_particle=self._departure_particle,
         )
@@ -274,6 +279,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
 
     def _insert_arrival_particle(self, particle_data: dict[str, Any]) -> None:
         particle_id = particle_data.get("identifier")
+
         if particle_id is None:
             raise ValueError("Arrival particle data must contain an identifier.")
 
@@ -302,10 +308,118 @@ class ProcessorBase(ABC, Generic[SignalType]):
         )
 
     def _update_partial_result(self) -> None:
-        if self._algorithm.local_best is None:
+        self._result.result = (
+            None if self._algorithm.local_best is None else self._algorithm.local_best()
+        )
+
+    def pre_iteration_log(self, actual_iter: int) -> None:
+        if not self._history_config.pre_iteration:
             return
 
-        self._local_best = self._algorithm.local_best.dump()
+        event = self._history_config.get_event("pre_iteration")
+
+        for particle in self._algorithm.population.values():
+            self._result.history.append(
+                {
+                    "iteration": actual_iter,
+                    "event": event,
+                    "particle": particle(),
+                }
+            )
+
+    def new_particle_log(
+        self,
+        actual_iter: int,
+        new_particles: Iterable[ParticleBase],
+    ) -> None:
+        if not self._history_config.new_particle:
+            return
+
+        event = self._history_config.get_event("new_particle")
+
+        for particle in new_particles:
+            self._result.history.append(
+                {
+                    "iteration": actual_iter,
+                    "event": event,
+                    "particle": particle(),
+                }
+            )
+
+    def error_log(
+        self,
+        actual_iter: int,
+        updated_particles: Iterable[ParticleBase],
+        initialize_particle: bool,
+    ) -> None:
+        if not self._history_config.error:
+            return
+
+        event = self._history_config.get_event("error")
+
+        for particle in updated_particles:
+            fitness_is_inf = particle.fitness is not None and np.isinf(particle.fitness)
+
+            candidate_fitness_is_inf = (
+                particle.candidate_fitness is not None
+                and np.isinf(particle.candidate_fitness)
+            )
+
+            if (
+                initialize_particle
+                and not fitness_is_inf
+                and not candidate_fitness_is_inf
+            ) or (not initialize_particle and not candidate_fitness_is_inf):
+                continue
+
+            particle_data = particle()
+            particle_data["variables"] = particle_data.pop("candidate_variables")
+            particle_data["fitness"] = particle_data.pop("candidate_fitness")
+
+            self._result.history.append(
+                {
+                    "iteration": actual_iter,
+                    "event": event,
+                    "particle": particle_data,
+                }
+            )
+
+    def iteration_log(self, actual_iter: int) -> None:
+        if not self._history_config.iteration:
+            return
+
+        event = self._history_config.get_event("iteration")
+
+        for particle in self._algorithm.population.values():
+            self._result.history.append(
+                {
+                    "iteration": actual_iter,
+                    "event": event,
+                    "particle": particle(),
+                }
+            )
+
+    def best_log(self, actual_iter: int) -> None:
+        if not self._history_config.best:
+            return
+
+        bests = [
+            (self._algorithm.local_best, "local_best"),
+            (self._algorithm.iter_best, "iter_best"),
+            (self._algorithm.iter_worst, "iter_worst"),
+        ]
+
+        for particle, event_name in bests:
+            if particle is None:
+                continue
+
+            self._result.history.append(
+                {
+                    "iteration": actual_iter,
+                    "event": self._history_config.get_event(event_name),
+                    "particle": particle(),
+                }
+            )
 
     @abstractmethod
     def run(self) -> None:

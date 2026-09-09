@@ -17,7 +17,9 @@ class HistoryConfig:
         "new_particle": "2 - new_particle",
         "error": "3 - error",
         "iteration": "4 - iteration",
-        "best": "5 - best",
+        "local_best": "5 - local_best",
+        "iter_best": "5 - iter_best",
+        "iter_worst": "5 - iter_worst",
     }
 
     @classmethod

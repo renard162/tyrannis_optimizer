@@ -7,6 +7,7 @@ from .core.algorithm import AlgorithmBase
 from .core.backend import BackendBase
 from .core.backend_migration import MigrationDriverBase
 from .core.processor import ProcessorBase
+from .core.results import HistoryConfig
 from .core.space import SpaceBase
 from .migration.island_isolation import IslandIsolation
 from .processor.serial import Serial
@@ -26,7 +27,7 @@ class Optimizer:
         migration: MigrationDriverBase | None = None,
         seed: int | None = None,
         fitness_failure_strategy: str = "invalidate",
-        history: list[str] | None = None,
+        history: str | list[str] | None = None,
     ) -> None:
         if not isinstance(n_iterations, int) or n_iterations < 1:
             raise ValueError(
@@ -47,8 +48,8 @@ class Optimizer:
         self._migration = migration if migration is not None else IslandIsolation()
         self._seed = seed
         self._fitness_failure_strategy = fitness_failure_strategy
-        self._history = [] if history is None else history
         self._result = None
+        self._history_config = self._configure_particle_history(history)
 
         self._space.initialize_context(seed=self._seed)
 
@@ -64,6 +65,7 @@ class Optimizer:
             migration_driver=self._migration,
             seed=self._seed,
             fitness_failure_strategy=self._fitness_failure_strategy,
+            history_config=self._history_config,
         )
 
         self._backend.initialize_context(
@@ -74,7 +76,49 @@ class Optimizer:
             processor=self._processor,
             seed=self._seed,
             fitness_failure_strategy=self._fitness_failure_strategy,
+            # history_config=self._history_config,
         )
+
+    @staticmethod
+    def _configure_particle_history(history: str | list[str] | None) -> HistoryConfig:
+        history_config = {
+            "migration": False,
+            "pre_iteration": False,
+            "new_particle": False,
+            "error": False,
+            "iteration": False,
+            "best": False,
+        }
+
+        if history is None:
+            return HistoryConfig(**history_config)
+
+        elif isinstance(history, str):
+            if history == "all":
+                history_config = dict.fromkeys(history_config, True)
+            elif history in history_config:
+                history_config[history] = True
+            else:
+                raise ValueError(f"Invalid history event: {history!r}.")
+
+            return HistoryConfig(**history_config)
+
+        elif isinstance(history, list):
+            if "all" in history:
+                raise ValueError(
+                    "'all' cannot be used inside a history list. "
+                    "Use history='all' instead."
+                )
+
+            for event in history:
+                if event not in history_config:
+                    raise ValueError(f"Invalid history event: {event!r}.")
+
+                history_config[event] = True
+        else:
+            raise TypeError("history must be None, a string, or a list of strings.")
+
+        return HistoryConfig(**history_config)
 
     @property
     def best_solution(self) -> Any:
