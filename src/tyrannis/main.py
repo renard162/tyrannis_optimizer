@@ -26,6 +26,7 @@ class Optimizer:
         migration: MigrationDriverBase | None = None,
         seed: int | None = None,
         fitness_failure_strategy: str = "invalidate",
+        history: list[str] | None = None,
     ) -> None:
         if not isinstance(n_iterations, int) or n_iterations < 1:
             raise ValueError(
@@ -46,6 +47,7 @@ class Optimizer:
         self._migration = migration if migration is not None else IslandIsolation()
         self._seed = seed
         self._fitness_failure_strategy = fitness_failure_strategy
+        self._history = [] if history is None else history
         self._result = None
 
         self._space.initialize_context(seed=self._seed)
@@ -74,8 +76,58 @@ class Optimizer:
             fitness_failure_strategy=self._fitness_failure_strategy,
         )
 
-    def fit(self) -> tuple[float, Any] | None:
-        """Execute the optimization and return the fitness and decoded result."""
+    @property
+    def best_solution(self) -> Any:
+        """Return the best solution found by the optimization."""
+
+        if self._result is None:
+            raise AttributeError(
+                "best_solution is not available before fit() is called."
+            )
+
+        variables = self._result["variables"]
+
+        if not isinstance(variables, dict):
+            raise TypeError("Optimization result variables must be a dictionary.")
+
+        return self._space.decode(variables)
+
+    @property
+    def best_fitness(self) -> float:
+        """Return the fitness of the best solution found by the optimization."""
+
+        if self._result is None:
+            raise AttributeError(
+                "best_fitness is not available before fit() is called."
+            )
+
+        fitness = self._result["fitness"]
+
+        if not isinstance(fitness, float):
+            raise TypeError("Optimization result fitness must be a float.")
+
+        return fitness
+
+    @property
+    def result_(self) -> dict[str, Any] | None:
+        """Return the best particle found by the optimization."""
+
+        if self._result is None:
+            return None
+
+        variables = self._result["variables"]
+
+        if not isinstance(variables, dict):
+            raise TypeError("Optimization result variables must be a dictionary.")
+
+        return {
+            "identification": self._result["identification"],
+            "variables": self._space.decode(variables),
+            "fitness": self._result["fitness"],
+        }
+
+    def fit(self) -> Optimizer:
+        """Execute the optimization and return the optimizer instance."""
 
         self._backend.execute()
 
@@ -83,12 +135,13 @@ class Optimizer:
 
         if backend_result is None:
             self._result = None
-            return None
+            return self
 
         if not isinstance(backend_result, dict):
             raise TypeError("Backend result must be a dictionary.")
 
         self._result = backend_result
+
         variables = self._result["variables"]
 
         if not isinstance(variables, dict):
@@ -99,6 +152,4 @@ class Optimizer:
         if not isinstance(fitness, float):
             raise TypeError("Optimization result fitness must be a float.")
 
-        result_output = self._space.decode(variables)
-
-        return result_output, fitness
+        return self
