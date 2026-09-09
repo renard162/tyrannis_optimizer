@@ -134,4 +134,4 @@ class ParallelBackendBase(BackendBase):
         if self._algorithm.local_best is None:
             return
 
-        self._result = json.loads(self._algorithm.local_best.dump())
+        self._result = self._algorithm.local_best()
