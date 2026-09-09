@@ -232,6 +232,10 @@ class ProcessorBase(ABC, Generic[SignalType]):
     def population(self) -> dict[str, float | None]:
         return self._population
 
+    @property
+    def result(self) -> ProcessorResult:
+        return self._result
+
     def set_identifier(self, identifier: str) -> None:
         self._identifier = identifier
 
@@ -350,7 +354,6 @@ class ProcessorBase(ABC, Generic[SignalType]):
         self,
         actual_iter: int,
         updated_particles: Iterable[ParticleBase],
-        initialize_particle: bool,
     ) -> None:
         if not self._history_config.error:
             return
@@ -358,18 +361,12 @@ class ProcessorBase(ABC, Generic[SignalType]):
         event = self._history_config.get_event("error")
 
         for particle in updated_particles:
-            fitness_is_inf = particle.fitness is not None and np.isinf(particle.fitness)
-
             candidate_fitness_is_inf = (
                 particle.candidate_fitness is not None
                 and np.isinf(particle.candidate_fitness)
             )
 
-            if (
-                initialize_particle
-                and not fitness_is_inf
-                and not candidate_fitness_is_inf
-            ) or (not initialize_particle and not candidate_fitness_is_inf):
+            if not candidate_fitness_is_inf:
                 continue
 
             particle_data = particle()
