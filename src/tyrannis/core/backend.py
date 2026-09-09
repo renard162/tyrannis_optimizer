@@ -4,7 +4,7 @@ from typing import Any
 from .algorithm import AlgorithmBase, CostFunctionWrapperBase
 from .backend_migration import MigrationDriverBase
 from .processor import ProcessorBase
-from .results import ProcessorResult
+from .results import HistoryConfig, ProcessorResult
 
 
 class BackendBase(ABC):
@@ -55,7 +55,7 @@ class BackendBase(ABC):
 
     _identifier: str
     _cost_function_wrapper: type[CostFunctionWrapperBase]
-    _result: ProcessorResult | None
+    _result: ProcessorResult
 
     @abstractmethod
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -119,9 +119,10 @@ class BackendBase(ABC):
         n_iter: int,
         n_particles: int,
         migration: MigrationDriverBase,
-        processor: ProcessorBase | None = None,
-        fitness_failure_strategy: str = "invalidate",
-        seed: int | None = None,
+        processor: ProcessorBase | None,
+        fitness_failure_strategy: str,
+        history_config: HistoryConfig,
+        seed: int | None,
     ) -> None:
         """
         Configure the optimization execution context.
@@ -184,8 +185,9 @@ class BackendBase(ABC):
         self._migration = migration
         self._fitness_failure_strategy = fitness_failure_strategy
         self._seed = seed
+        self._history_config = history_config
 
-        self._result = None
+        self._result = ProcessorResult()
 
         self._algorithm.configure(
             identifier=f"{self._identifier}|algorithm",

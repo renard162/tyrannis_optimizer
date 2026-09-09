@@ -273,7 +273,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
         self._migration_processor.migration_control(
             actual_iter=actual_iter,
             population=self._population,
-            local_best=iter_best,
+            iter_best=iter_best,
             insert_arrival_particle=self._insert_arrival_particle,
             departure_particle=self._departure_particle,
         )

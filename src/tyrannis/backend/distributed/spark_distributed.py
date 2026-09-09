@@ -6,7 +6,7 @@ from ...core.algorithm import CostFunctionWrapperBase
 from ...core.backend_distributed import DistributedBackendBase
 from ...core.backend_migration import MigrationDriverBase
 from ...core.processor import ProcessorBase
-from ...core.results import ProcessorResult
+from ...core.results import HistoryConfig, ProcessorResult
 from .communication.spark_communication import (
     SparkCommunicationDriver,
     SparkCommunicationProcessor,
@@ -49,8 +49,9 @@ class SparkDistributed(DistributedBackendBase):
         n_iter: int,
         n_particles: int,
         migration: MigrationDriverBase,
-        processor: ProcessorBase | None = None,
-        fitness_failure_strategy: str = "invalidate",
+        processor: ProcessorBase | None,
+        fitness_failure_strategy: str,
+        history_config: HistoryConfig,
         seed: int | None = None,
     ) -> None:
         super().initialize_context(
@@ -61,6 +62,7 @@ class SparkDistributed(DistributedBackendBase):
             processor=processor,
             fitness_failure_strategy=fitness_failure_strategy,
             seed=seed,
+            history_config=history_config,
         )
 
         island_ids = [f"island:{idx}" for idx in range(self._n_executors)]
@@ -124,9 +126,7 @@ class SparkDistributed(DistributedBackendBase):
             self._migration.stop()
 
 
-def _run_processor(
-    processor: ProcessorBase,
-) -> tuple[str, ProcessorResult]:
+def _run_processor(processor: ProcessorBase) -> tuple[str, ProcessorResult]:
     """
     Execute a processor inside a Spark executor.
 

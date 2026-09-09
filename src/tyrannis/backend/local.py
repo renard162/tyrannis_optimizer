@@ -2,8 +2,11 @@ from ..backend.distributed.communication.no_communication import (
     NoCommunicationDriver,
     NoCommunicationProcessor,
 )
-from ..core.algorithm import CostFunctionWrapperBase
+from ..core.algorithm import AlgorithmBase, CostFunctionWrapperBase
 from ..core.backend import BackendBase
+from ..core.backend_migration import MigrationDriverBase
+from ..core.processor import ProcessorBase
+from ..core.results import HistoryConfig
 
 
 class LocalCostFunctionWrapper(CostFunctionWrapperBase):
@@ -17,13 +20,14 @@ class Local(BackendBase):
 
     def initialize_context(
         self,
-        algorithm,
+        algorithm: AlgorithmBase,
         n_iter: int,
         n_particles: int,
-        migration,
-        processor=None,
-        fitness_failure_strategy: str = "invalidate",
-        seed: int | None = None,
+        migration: MigrationDriverBase,
+        processor: ProcessorBase | None,
+        fitness_failure_strategy: str,
+        history_config: HistoryConfig,
+        seed: int | None,
     ) -> None:
         super().initialize_context(
             algorithm=algorithm,
@@ -33,6 +37,7 @@ class Local(BackendBase):
             processor=processor,
             fitness_failure_strategy=fitness_failure_strategy,
             seed=seed,
+            history_config=history_config,
         )
 
         migration.initialize_context(

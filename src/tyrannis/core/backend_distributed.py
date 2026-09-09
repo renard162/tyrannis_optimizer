@@ -6,7 +6,7 @@ from .algorithm import AlgorithmBase
 from .backend import BackendBase
 from .backend_migration import MigrationDriverBase
 from .processor import ProcessorBase
-from .results import ProcessorResult
+from .results import HistoryConfig, ProcessorResult
 
 
 class DistributedBackendBase(BackendBase):
@@ -99,9 +99,10 @@ class DistributedBackendBase(BackendBase):
         n_iter: int,
         n_particles: int,
         migration: MigrationDriverBase,
-        processor: ProcessorBase | None = None,
-        fitness_failure_strategy: str = "invalidate",
-        seed: int | None = None,
+        processor: ProcessorBase | None,
+        fitness_failure_strategy: str,
+        history_config: HistoryConfig,
+        seed: int | None,
     ) -> None:
         """
         Initialize the distributed optimization context.
@@ -173,6 +174,7 @@ class DistributedBackendBase(BackendBase):
             migration=migration,
             fitness_failure_strategy=fitness_failure_strategy,
             seed=seed,
+            history_config=history_config,
         )
 
         """
