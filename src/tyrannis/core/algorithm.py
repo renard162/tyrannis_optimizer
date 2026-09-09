@@ -2,7 +2,7 @@ import json
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable
 from copy import deepcopy
-from typing import Any
+from typing import Any, Generic, TypeVar
 
 import numpy as np
 from numpy.random import SeedSequence
@@ -158,11 +158,11 @@ class ParticleBase(ABC):
 
     def consolidate(self, consolidate_new: bool) -> None:
         if (self._candidate_variables is None) or (self._candidate_fitness is None):
-            if self._new_particle and self._fitness is not None:
-                self._new_particle = False
-                return
-
             raise RuntimeError("No candidate solution available for consolidation.")
+
+        if self._new_particle and self._fitness is not None:
+            self._new_particle = False
+            return
 
         self._new_particle = False
 
@@ -174,7 +174,10 @@ class ParticleBase(ABC):
         self._candidate_fitness = None
 
 
-class AlgorithmBase(ABC):
+ParticleType = TypeVar("ParticleType", bound=ParticleBase)
+
+
+class AlgorithmBase(ABC, Generic[ParticleType]):
     """
     Base class for optimization algorithms.
 
@@ -454,18 +457,27 @@ class AlgorithmBase(ABC):
     @abstractmethod
     def initialize_particle(self, identifier: str) -> ParticleBase:
         """
-        Initialize the fitness of a newly created particle.
+        Fully initialize a newly created particle.
 
-        This method is intended exclusively for evaluating particles that are
-        newly added to the population. Unlike the initial population setup,
-        newly created particles must have their fitness initialized immediately
-        so that they can participate in the current iteration without requiring
-        an additional iteration solely for their first fitness evaluation.
+        This method is intended exclusively for particles that have been newly
+        added to the population. It must perform all algorithm-specific operations
+        required to initialize the particle before it participates in the current
+        iteration, including the evaluation of its initial fitness when necessary.
 
-        The particle's initial fitness must be consolidated with
-        ``consolidate(consolidate_new=True)`` before this method returns, ensuring that the
-        newly evaluated fitness becomes the particle's current fitness before it
-        participates in subsequent iterations.
+        Newly created particles must have their fitness evaluated during this
+        process so that they can participate in the current iteration without
+        requiring an additional iteration solely for their first fitness
+        evaluation.
+
+        This method must not consolidate the particle. Consolidation is performed
+        subsequently by ``consolidate_new_particles``.
+
+        Any information required to consolidate the particle that is not already
+        part of the particle's state must be stored in the particle before this
+        method returns. ``consolidate_new_particles`` has no access to the
+        algorithm instance or any other algorithm state and must therefore be able
+        to complete the consolidation using only the state contained in the
+        particle.
 
         This method does not alter the iteration semantics of the algorithm.
         Iteration 0 remains the initialization iteration of the algorithm and is
@@ -479,8 +491,36 @@ class AlgorithmBase(ABC):
         this method. Any changes made to other algorithm state are considered
         volatile and will be discarded after the particle initialization process.
 
-        The returned particle represents the initialized state of the particle
-        and may be used to replace its corresponding entry in the population.
+        The returned particle represents the fully initialized, but not yet
+        consolidated, state of the particle and may be used to replace its
+        corresponding entry in the population.
+        """
+        raise NotImplementedError
+
+    @staticmethod
+    @abstractmethod
+    def consolidate_new_particles(
+        new_particles: list[ParticleType],
+    ) -> list[ParticleType]:
+        """
+        Consolidate newly initialized particles.
+
+        This method performs the complete consolidation process for particles
+        initialized by ``initialize_particle``. Consolidation must be performed
+        using only the state contained in the particles themselves.
+
+        The method must not access the algorithm instance, the population,
+        algorithm configuration, the fitness function, or any other external
+        state. Any information required for consolidation that is not inherently
+        part of a particle must have been stored in that particle during
+        ``initialize_particle``.
+
+        After this method returns, every particle must represent its fully
+        consolidated state and be ready to participate in the current iteration.
+
+        This method must not perform particle initialization or evaluate the
+        fitness function. Those operations are the responsibility of
+        ``initialize_particle``.
         """
         raise NotImplementedError
 

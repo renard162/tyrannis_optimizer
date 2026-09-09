@@ -157,7 +157,7 @@ class PSO(AlgorithmBase):
 
                 particle.random_cache.extend((cognitive_random, social_random))
 
-    def initialize_particle(self, identifier: str) -> ParticleBase:
+    def initialize_particle(self, identifier: str) -> PSOParticle:
         particle = self._population[identifier]
 
         if not isinstance(particle, PSOParticle):
@@ -171,12 +171,19 @@ class PSO(AlgorithmBase):
                 fitness_function=self._fitness_function,
             )
 
-        particle.consolidate(consolidate_new=True)
-        particle.update_personal_best()
-
         return particle
 
-    def update_particle(self, identifier: str) -> ParticleBase:
+    @staticmethod
+    def consolidate_new_particles(
+        new_particles: list[PSOParticle],
+    ) -> list[PSOParticle]:
+        for particle in new_particles:
+            particle.consolidate(consolidate_new=True)
+            particle.update_personal_best()
+
+        return new_particles
+
+    def update_particle(self, identifier: str) -> PSOParticle:
         particle = self._population[identifier]
 
         if not isinstance(particle, PSOParticle):
