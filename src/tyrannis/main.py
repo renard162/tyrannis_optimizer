@@ -51,7 +51,9 @@ class Optimizer:
         self._result = None
         self._history_config = self._configure_particle_history(history)
 
-        self._space.initialize_context(seed=self._seed)
+        self._space.initialize_context(
+            seed=self._seed,
+        )
 
         self._algorithm.initialize_context(
             fitness_function=self._space,
@@ -76,7 +78,7 @@ class Optimizer:
             processor=self._processor,
             seed=self._seed,
             fitness_failure_strategy=self._fitness_failure_strategy,
-            # history_config=self._history_config,
+            history_config=self._history_config,
         )
 
     @staticmethod
@@ -93,17 +95,19 @@ class Optimizer:
         if history is None:
             return HistoryConfig(**history_config)
 
-        elif isinstance(history, str):
+        if isinstance(history, str):
             if history == "all":
                 history_config = dict.fromkeys(history_config, True)
+
             elif history in history_config:
                 history_config[history] = True
+
             else:
                 raise ValueError(f"Invalid history event: {history!r}.")
 
             return HistoryConfig(**history_config)
 
-        elif isinstance(history, list):
+        if isinstance(history, list):
             if "all" in history:
                 raise ValueError(
                     "'all' cannot be used inside a history list. "
@@ -115,10 +119,10 @@ class Optimizer:
                     raise ValueError(f"Invalid history event: {event!r}.")
 
                 history_config[event] = True
-        else:
-            raise TypeError("history must be None, a string, or a list of strings.")
 
-        return HistoryConfig(**history_config)
+            return HistoryConfig(**history_config)
+
+        raise TypeError("history must be None, a string, or a list of strings.")
 
     @property
     def best_solution(self) -> Any:
@@ -181,10 +185,10 @@ class Optimizer:
             self._result = None
             return self
 
-        if not isinstance(backend_result, dict):
-            raise TypeError("Backend result must be a dictionary.")
+        self._result = backend_result.result
 
-        self._result = backend_result
+        if self._result is None:
+            return self
 
         variables = self._result["variables"]
 
