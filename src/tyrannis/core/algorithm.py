@@ -561,12 +561,6 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         """
         raise NotImplementedError
 
-    def get_unmodified_particle(self, identifier: str) -> ParticleBase:
-        particle = self._population[identifier]
-        particle.candidate_variables = particle.variables
-        particle.candidate_fitness = particle.fitness
-        return particle
-
     def update_population(self, new_population: Iterable[ParticleBase]) -> None:
         self._population.update(
             {particle.identifier: particle for particle in new_population}
