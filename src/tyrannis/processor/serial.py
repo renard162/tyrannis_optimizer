@@ -46,6 +46,7 @@ class Serial(ProcessorBase):
             self.migration_control(actual_iter)
 
             self._algorithm.pre_iteration(actual_iter)
+            self.pre_iteration_log(actual_iter)
 
             new_particles_ids = self._algorithm.new_particles_id
             if new_particles_ids:
@@ -63,10 +64,18 @@ class Serial(ProcessorBase):
                 new_particles = [
                     worker(particle_id) for particle_id in new_particles_ids
                 ]
+                self.error_log(
+                    actual_iter=actual_iter,
+                    updated_particles=new_particles,
+                )
                 new_particles = [
                     self._algorithm.consolidate_new_particles(particle)
                     for particle in new_particles
                 ]
+                self.new_particle_log(
+                    actual_iter=actual_iter,
+                    new_particles=new_particles,
+                )
                 self._algorithm.update_population(new_particles)
 
             if actual_iter > 0:
@@ -84,10 +93,16 @@ class Serial(ProcessorBase):
                 processed_particles = [
                     worker(particle_id) for particle_id in self._algorithm.population
                 ]
+                self.error_log(
+                    actual_iter=actual_iter,
+                    updated_particles=processed_particles,
+                )
                 self._algorithm.update_population(processed_particles)
 
             self._algorithm.post_iteration(actual_iter)
+            self.iteration_log(actual_iter)
 
             self.update_status()
+            self.best_log(actual_iter)
 
         self.finalize_loop_context()
