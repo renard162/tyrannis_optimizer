@@ -4,6 +4,7 @@ from typing import Any
 from .algorithm import AlgorithmBase, CostFunctionWrapperBase
 from .backend_migration import MigrationDriverBase
 from .processor import ProcessorBase
+from .results import ProcessorResult
 
 
 class BackendBase(ABC):
@@ -31,9 +32,9 @@ class BackendBase(ABC):
     generic optimization context into its own execution model while
     preserving the contracts established by the core abstractions.
 
-    The backend constructor defines the resources and configuration intrinsic
-    to the execution environment. Optimization-specific configuration is
-    provided later through `initialize_context`.
+    The backend owns the complete execution result. This result is represented
+    by a `ProcessorResult` object, which contains both the optimization result
+    and the history accumulated during execution.
 
     The general lifecycle is:
 
@@ -47,12 +48,14 @@ class BackendBase(ABC):
     directly execute particles, whereas a distributed backend may coordinate
     processors, communication, and migration.
 
-    The backend owns the final execution result, which becomes available
-    through the `result` property after the optimization has completed.
+    After execution has completed, the complete result is available through
+    the `result` property. The optimization result itself is contained in
+    `result.result`, while execution history is contained in `result.history`.
     """
 
     _identifier: str
     _cost_function_wrapper: type[CostFunctionWrapperBase]
+    _result: ProcessorResult | None
 
     @abstractmethod
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -65,9 +68,10 @@ class BackendBase(ABC):
         particular optimization execution must be provided later through
         `initialize_context`.
 
-        A backend may require resources such as a Spark session, an MPI communicator,
-        a Ray context, a Dask client, or other execution-environment-specific objects.
-        The exact requirements are defined by the concrete backend.
+        A backend may require resources such as a Spark session, an MPI
+        communicator, a Ray context, a Dask client, or other
+        execution-environment-specific objects. The exact requirements are
+        defined by the concrete backend.
 
         The constructor must also establish the backend identifier and the cost
         function wrapper class. The identifier must uniquely represent the
@@ -105,7 +109,7 @@ class BackendBase(ABC):
         its own model. In particular, migration and processor-based execution are
         not requirements of this interface.
 
-        After execution has completed, the backend must make the final
+        After execution has completed, the backend must make the complete
         optimization result available through the `result` property.
         """
 
@@ -194,5 +198,15 @@ class BackendBase(ABC):
         return self._identifier
 
     @property
-    def result(self) -> dict[str, str | float | dict[str, float]] | None:
+    def result(self) -> ProcessorResult | None:
+        """
+        Return the complete result produced by the backend.
+
+        Returns
+        -------
+        ProcessorResult | None
+            The complete optimization result, including the best solution and
+            the execution history accumulated by the backend. `None` is
+            returned when execution has not yet produced a result.
+        """
         return self._result
