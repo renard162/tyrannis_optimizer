@@ -158,6 +158,7 @@ class ProcessPool(ProcessorBase):
                     self.migration_control(actual_iter)
 
                     self._algorithm.pre_iteration(actual_iter)
+                    self.pre_iteration_log(actual_iter)
 
                     new_particles_ids = self._algorithm.new_particles_id
                     if new_particles_ids:
@@ -176,10 +177,18 @@ class ProcessPool(ProcessorBase):
                             new_particles_ids,
                             chunksize=self._chunksize,
                         )
+                        self.error_log(
+                            actual_iter=actual_iter,
+                            updated_particles=new_particles,
+                        )
                         new_particles = pool.map(
                             self._algorithm.consolidate_new_particles,
                             new_particles,
                             chunksize=self._chunksize,
+                        )
+                        self.new_particle_log(
+                            actual_iter=actual_iter,
+                            new_particles=new_particles,
                         )
                         self._algorithm.update_population(new_particles)
 
@@ -199,10 +208,15 @@ class ProcessPool(ProcessorBase):
                             self._algorithm.population,
                             chunksize=self._chunksize,
                         )
+                        self.error_log(
+                            actual_iter=actual_iter,
+                            updated_particles=processed_particles,
+                        )
                         self._algorithm.update_population(processed_particles)
 
                     self._algorithm.post_iteration(actual_iter)
+                    self.iteration_log(actual_iter)
 
                     self.update_status()
-
+                    self.best_log(actual_iter)
             self.finalize_loop_context()
