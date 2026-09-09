@@ -370,8 +370,8 @@ class ProcessorBase(ABC, Generic[SignalType]):
                 continue
 
             particle_data = particle()
-            particle_data["variables"] = particle_data.pop("candidate_variables")
-            particle_data["fitness"] = particle_data.pop("candidate_fitness")
+            particle_data["variables"] = particle.candidate_variables
+            particle_data["fitness"] = particle.candidate_fitness
 
             self._result.history.append(
                 {
