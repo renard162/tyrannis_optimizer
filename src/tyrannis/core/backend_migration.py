@@ -494,6 +494,7 @@ class MigrationDriverBase(ABC):
         communication_processor_class: type[CommunicationProcessorBase],
         communication_processor_kargs: dict[str, Any],
         history_config: HistoryConfig,
+        seed: int | None,
     ) -> None:
         """
         Configure the communication context used by the migration strategy.
@@ -540,6 +541,7 @@ class MigrationDriverBase(ABC):
             communication_processor_kargs.copy()
         )
         self._history_buffer = []
+        self._seed = seed
 
     def create_processor_module(self, identifier: str) -> MigrationProcessorBase:
         """

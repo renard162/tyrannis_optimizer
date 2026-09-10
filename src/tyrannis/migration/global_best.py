@@ -383,12 +383,14 @@ class GlobalBest(MigrationDriverBase):
         communication_processor_class,
         communication_processor_kargs: dict[str, Any],
         history_config: HistoryConfig,
+        seed: int | None,
     ) -> None:
         super().initialize_context(
             communication_driver=communication_driver,
             communication_processor_class=communication_processor_class,
             communication_processor_kargs=communication_processor_kargs,
             history_config=history_config,
+            seed=seed,
         )
 
     def start(self) -> None:

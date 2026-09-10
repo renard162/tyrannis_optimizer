@@ -100,6 +100,7 @@ class SparkDistributed(DistributedBackendBase):
                 "port": self._communication_port,
             },
             history_config=self._history_config,
+            seed=self._seed,
         )
 
         if self._history_config.history_enabled:
