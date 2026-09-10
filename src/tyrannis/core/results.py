@@ -38,6 +38,10 @@ class HistoryConfig:
             or self.best
         )
 
+    @property
+    def registered_events(self) -> list[str]:
+        return list(self.EVENT.values())
+
 
 @dataclass
 class ProcessorResult:
