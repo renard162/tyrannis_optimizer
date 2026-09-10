@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 
 from pyspark.sql import SparkSession
@@ -24,19 +25,34 @@ class SparkDistributed(DistributedBackendBase):
         self,
         spark: SparkSession,
         n_executors: int,
-        communication_port: int = 6062,
+        communication_port: int | None = None,
         code_archive: str | Path | None = None,
     ) -> None:
         if spark is None:
             raise ValueError("Spark session cannot be None.")
 
-        if not 1 <= communication_port <= 65535:
+        if (communication_port is not None) and (not 1 <= communication_port <= 65535):
             raise ValueError("communication_port must be between 1 and 65535.")
 
         self._spark = spark
         self._code_archive = Path(code_archive) if code_archive is not None else None
-        self._communication_port = communication_port
         self._n_executors = n_executors
+
+        if communication_port is None:
+            self._communication_port = 18081
+            warnings.warn(
+                (
+                    f"WARNING: The default communication port ({self._communication_port}) is being used. "
+                    "This port may conflict with another service or process running on the "
+                    "cluster, which can prevent SparkDistributed from establishing the required "
+                    "communication channel. Specify communication_port explicitly if this port "
+                    "is already in use."
+                ),
+                UserWarning,
+                stacklevel=2,
+            )
+        else:
+            self._communication_port = communication_port
 
         self._identifier = "SparkDistributed"
         self._cost_function_wrapper = SparkDistributedCostFunctionWrapper
@@ -85,6 +101,29 @@ class SparkDistributed(DistributedBackendBase):
             },
         )
 
+        if self._history_config.history_enabled:
+            warnings.warn(
+                (
+                    "\n"
+                    "============================================================\n"
+                    "CRITICAL WARNING — SPARK HISTORY ENABLED\n"
+                    "============================================================\n"
+                    "Enabling optimization history with SparkDistributed may "
+                    "cause the Spark task to FAIL.\n\n"
+                    "Large histories can cause the result returned by a Spark "
+                    "task to exceed the maximum response/message size "
+                    "configured for Spark. If this limit is exceeded, the "
+                    "Spark task may fail and the optimization run will not "
+                    "complete successfully.\n\n"
+                    "DO NOT ENABLE HISTORY FOR LARGE OPTIMIZATION RUNS "
+                    "WITHOUT VERIFYING THAT THE EXPECTED RESULT SIZE IS "
+                    "WITHIN THE LIMITS OF YOUR SPARK CONFIGURATION.\n"
+                    "============================================================"
+                ),
+                UserWarning,
+                stacklevel=3,
+            )
+
     def execute(self) -> None:
         if self._processor is None:
             raise RuntimeError("Processor cannot be None.")
@@ -118,7 +157,7 @@ class SparkDistributed(DistributedBackendBase):
                 _run_processor,
             ).collect()
 
-            self._local_bests = {island: data.decompress() for island, data in results}
+            self._local_bests = dict(results)
 
             self.update_result()
 
@@ -144,7 +183,7 @@ def _run_processor(processor: ProcessorBase) -> tuple[str, ProcessorResult]:
     try:
         processor.run()
 
-        return processor.identifier, processor.result.compress()
+        return processor.identifier, processor.result
 
     finally:
         processor.finalize_execution_context()

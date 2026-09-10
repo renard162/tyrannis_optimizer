@@ -1,3 +1,4 @@
+import json
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from copy import deepcopy
@@ -233,10 +234,6 @@ class ProcessorBase(ABC, Generic[SignalType]):
         return self._population
 
     @property
-    def result_compressed(self) -> ProcessorResult:
-        return self._result.compress()
-
-    @property
     def result(self) -> ProcessorResult:
         return self._result
 
@@ -328,11 +325,13 @@ class ProcessorBase(ABC, Generic[SignalType]):
 
         for particle in self._algorithm.population.values():
             self._result.history.append(
-                {
-                    "iteration": actual_iter,
-                    "event": event,
-                    "particle": particle(),
-                }
+                json.dumps(
+                    {
+                        "iteration": actual_iter,
+                        "event": event,
+                        "particle": particle(),
+                    }
+                )
             )
 
     def new_particle_log(
@@ -347,11 +346,13 @@ class ProcessorBase(ABC, Generic[SignalType]):
 
         for particle in new_particles:
             self._result.history.append(
-                {
-                    "iteration": actual_iter,
-                    "event": event,
-                    "particle": particle(),
-                }
+                json.dumps(
+                    {
+                        "iteration": actual_iter,
+                        "event": event,
+                        "particle": particle(),
+                    }
+                )
             )
 
     def error_log(
@@ -378,11 +379,13 @@ class ProcessorBase(ABC, Generic[SignalType]):
             particle_data["fitness"] = particle.candidate_fitness
 
             self._result.history.append(
-                {
-                    "iteration": actual_iter,
-                    "event": event,
-                    "particle": particle_data,
-                }
+                json.dumps(
+                    {
+                        "iteration": actual_iter,
+                        "event": event,
+                        "particle": particle_data,
+                    }
+                )
             )
 
     def iteration_log(self, actual_iter: int) -> None:
@@ -393,11 +396,13 @@ class ProcessorBase(ABC, Generic[SignalType]):
 
         for particle in self._algorithm.population.values():
             self._result.history.append(
-                {
-                    "iteration": actual_iter,
-                    "event": event,
-                    "particle": particle(),
-                }
+                json.dumps(
+                    {
+                        "iteration": actual_iter,
+                        "event": event,
+                        "particle": particle(),
+                    }
+                )
             )
 
     def best_log(self, actual_iter: int) -> None:
@@ -415,11 +420,13 @@ class ProcessorBase(ABC, Generic[SignalType]):
                 continue
 
             self._result.history.append(
-                {
-                    "iteration": actual_iter,
-                    "event": self._history_config.get_event(event_name),
-                    "particle": particle(),
-                }
+                json.dumps(
+                    {
+                        "iteration": actual_iter,
+                        "event": self._history_config.get_event(event_name),
+                        "particle": particle(),
+                    }
+                )
             )
 
     @abstractmethod

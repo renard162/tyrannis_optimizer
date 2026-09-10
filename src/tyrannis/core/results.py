@@ -27,22 +27,19 @@ class HistoryConfig:
     def get_event(cls, event_type: str) -> str:
         return cls.EVENT[event_type]
 
+    @property
+    def history_enabled(self) -> bool:
+        return (
+            self.migration
+            or self.pre_iteration
+            or self.new_particle
+            or self.error
+            or self.iteration
+            or self.best
+        )
+
 
 @dataclass
 class ProcessorResult:
     result: dict[str, Any] | None = None
-    history: list[dict[str, Any]] = field(default_factory=list)
-
-    def compress(self) -> Self:
-        self.result_compressed = json.dumps(self.result)
-        self.history_compressed = json.dumps(self.history)
-        self.result = None
-        self.history = []
-        return self
-
-    def decompress(self) -> Self:
-        self.result = json.loads(self.result_compressed)
-        self.history = json.loads(self.history_compressed)
-        self.result_compressed = ""
-        self.history_compressed = ""
-        return self
+    history: list[str] = field(default_factory=list)

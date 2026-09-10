@@ -1,3 +1,4 @@
+import json
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 
@@ -148,11 +149,13 @@ class ParallelBackendBase(BackendBase, ABC):
 
         for particle in self._algorithm.population.values():
             self._result.history.append(
-                {
-                    "iteration": actual_iter,
-                    "event": event,
-                    "particle": particle(),
-                }
+                json.dumps(
+                    {
+                        "iteration": actual_iter,
+                        "event": event,
+                        "particle": particle(),
+                    }
+                )
             )
 
     def new_particle_log(
@@ -170,11 +173,13 @@ class ParallelBackendBase(BackendBase, ABC):
 
         for particle in new_particles:
             self._result.history.append(
-                {
-                    "iteration": actual_iter,
-                    "event": event,
-                    "particle": particle(),
-                }
+                json.dumps(
+                    {
+                        "iteration": actual_iter,
+                        "event": event,
+                        "particle": particle(),
+                    }
+                )
             )
 
     def error_log(
@@ -207,11 +212,13 @@ class ParallelBackendBase(BackendBase, ABC):
             particle_data["fitness"] = particle.candidate_fitness
 
             self._result.history.append(
-                {
-                    "iteration": actual_iter,
-                    "event": event,
-                    "particle": particle_data,
-                }
+                json.dumps(
+                    {
+                        "iteration": actual_iter,
+                        "event": event,
+                        "particle": particle_data,
+                    }
+                )
             )
 
     def iteration_log(self, actual_iter: int) -> None:
@@ -225,11 +232,13 @@ class ParallelBackendBase(BackendBase, ABC):
 
         for particle in self._algorithm.population.values():
             self._result.history.append(
-                {
-                    "iteration": actual_iter,
-                    "event": event,
-                    "particle": particle(),
-                }
+                json.dumps(
+                    {
+                        "iteration": actual_iter,
+                        "event": event,
+                        "particle": particle(),
+                    }
+                )
             )
 
     def best_log(self, actual_iter: int) -> None:
@@ -256,11 +265,13 @@ class ParallelBackendBase(BackendBase, ABC):
                 continue
 
             self._result.history.append(
-                {
-                    "iteration": actual_iter,
-                    "event": self._history_config.get_event(event_name),
-                    "particle": particle(),
-                }
+                json.dumps(
+                    {
+                        "iteration": actual_iter,
+                        "event": self._history_config.get_event(event_name),
+                        "particle": particle(),
+                    }
+                )
             )
 
     def update_result(self) -> None:
