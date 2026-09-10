@@ -78,6 +78,7 @@ class IslandIsolation(MigrationDriverBase):
         communication_processor_class,
         communication_processor_kargs: dict[str, Any],
         history_config: HistoryConfig,
+        seed: int | None,
     ) -> None:
         """Configure inactive communication for isolated islands."""
 
@@ -94,6 +95,7 @@ class IslandIsolation(MigrationDriverBase):
             communication_processor_class=NoCommunicationProcessor,
             communication_processor_kargs={},
             history_config=history_config,
+            seed=seed,
         )
 
     def start(self) -> None:
