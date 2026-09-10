@@ -3,7 +3,7 @@ from __future__ import annotations
 import selectors
 import socket
 from queue import Empty, Queue
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 from typing import Final, cast
 
 from ....core.backend_communication import (
@@ -11,6 +11,23 @@ from ....core.backend_communication import (
     CommunicationProcessorBase,
 )
 from ....core.signals import LocalEvent
+
+
+class _OutgoingQueue(Queue[str]):
+    """Queue that asks its transport to flush as soon as a message arrives."""
+
+    def __init__(self, on_put) -> None:
+        super().__init__()
+        self._on_put = on_put
+
+    def put(
+        self,
+        item: str,
+        block: bool = True,
+        timeout: float | None = None,
+    ) -> None:
+        super().put(item, block=block, timeout=timeout)
+        self._on_put()
 
 
 class SparkCommunicationProcessor(CommunicationProcessorBase):
@@ -32,6 +49,7 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
         self._socket: socket.socket | None = None
         self._thread: Thread | None = None
         self._running: Event | None = None
+        self._send_lock = None
 
         self._message_signal: LocalEvent | None = None
 
@@ -74,7 +92,11 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
 
         self._running = Event()
         self._messages = Queue()
-        self._outgoing_queue = Queue()
+        # A socket read can remain blocked until its timeout expires.  Do not
+        # make outbound migration depend on that polling interval: short
+        # serial optimizations can otherwise finish before the first message
+        # is ever sent.
+        self._outgoing_queue = _OutgoingQueue(self._send_pending_messages)
 
         self._socket = socket.socket(
             socket.AF_INET,
@@ -86,6 +108,7 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
         )
 
         self._running.set()
+        self._send_lock = Lock()
 
         self._send_message(
             self._identifier,
@@ -120,6 +143,7 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
             self._thread = None
 
         self._running = None
+        self._send_lock = None
         self._messages = None
         self._outgoing_queue = None
 
@@ -206,20 +230,28 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
         if outgoing_queue is None:
             return
 
-        while True:
-            try:
-                message = outgoing_queue.get_nowait()
-            except Empty:
-                return
+        send_lock = self._send_lock
 
-            try:
-                data = (f"{self.STX}{message}{self.ETX}").encode()
+        if send_lock is None:
+            return
 
-                communication_socket.sendall(data)
+        with send_lock:
+            while True:
+                try:
+                    message = outgoing_queue.get_nowait()
+                except Empty:
+                    return
 
-            except OSError:
-                outgoing_queue.put(message)
-                return
+                try:
+                    data = (f"{self.STX}{message}{self.ETX}").encode()
+
+                    communication_socket.sendall(data)
+
+                except OSError:
+                    # Bypass _OutgoingQueue.put(): retrying through its
+                    # callback would recurse immediately after a send error.
+                    Queue.put(outgoing_queue, message)
+                    return
 
     def _send_message(
         self,
@@ -232,9 +264,17 @@ class SparkCommunicationProcessor(CommunicationProcessorBase):
                 "Communication socket is not initialized.",
             )
 
-        data = (f"{self.STX}{message}{self.ETX}").encode()
+        send_lock = self._send_lock
 
-        communication_socket.sendall(data)
+        if send_lock is None:
+            raise RuntimeError(
+                "Communication send lock is not initialized.",
+            )
+
+        with send_lock:
+            data = (f"{self.STX}{message}{self.ETX}").encode()
+
+            communication_socket.sendall(data)
 
 
 class SparkCommunicationDriver(CommunicationDriverBase):
@@ -256,7 +296,8 @@ class SparkCommunicationDriver(CommunicationDriverBase):
         }
 
         self._outgoing_queues: dict[str, Queue[str]] = {
-            island_id: Queue() for island_id in self._island_ids
+            island_id: _OutgoingQueue(self._send_pending_messages)
+            for island_id in self._island_ids
         }
 
         self._connections: dict[str, socket.socket] = {}
@@ -276,6 +317,7 @@ class SparkCommunicationDriver(CommunicationDriverBase):
 
         self._thread: Thread | None = None
         self._running = Event()
+        self._send_lock = None
 
     @property
     def incoming_queues(self) -> dict[str, Queue[str]]:
@@ -320,6 +362,7 @@ class SparkCommunicationDriver(CommunicationDriverBase):
         )
 
         self._running.set()
+        self._send_lock = Lock()
 
         self._thread = Thread(
             target=self._communication_loop,
@@ -358,6 +401,8 @@ class SparkCommunicationDriver(CommunicationDriverBase):
         if self._selector is not None:
             self._selector.close()
             self._selector = None
+
+        self._send_lock = None
 
     def _communication_loop(self) -> None:
         selector = self._selector
@@ -505,6 +550,10 @@ class SparkCommunicationDriver(CommunicationDriverBase):
 
         self._connection_identifiers[connection] = message
         self._connections[message] = connection
+        # A broadcast can be queued before this island has completed its TCP
+        # handshake. Flush it as soon as the connection becomes routable
+        # instead of waiting for the selector polling interval.
+        self._send_pending_messages()
 
         return True
 
@@ -565,26 +614,33 @@ class SparkCommunicationDriver(CommunicationDriverBase):
             pass
 
     def _send_pending_messages(self) -> None:
-        for island_id, outgoing_queue in self._outgoing_queues.items():
-            connection = self._connections.get(
-                island_id,
-            )
+        send_lock = self._send_lock
 
-            if connection is None:
-                continue
+        if send_lock is None:
+            return
 
-            while True:
-                try:
-                    message = outgoing_queue.get_nowait()
-                except Empty:
-                    break
+        with send_lock:
+            for island_id, outgoing_queue in self._outgoing_queues.items():
+                connection = self._connections.get(
+                    island_id,
+                )
 
-                try:
-                    data = (f"{self.STX}{message}{self.ETX}").encode()
+                if connection is None:
+                    continue
 
-                    connection.sendall(data)
+                while True:
+                    try:
+                        message = outgoing_queue.get_nowait()
+                    except Empty:
+                        break
 
-                except OSError:
-                    outgoing_queue.put(message)
-                    self._close_connection(connection)
-                    break
+                    try:
+                        data = (f"{self.STX}{message}{self.ETX}").encode()
+
+                        connection.sendall(data)
+
+                    except OSError:
+                        # See the analogous processor-side path above.
+                        Queue.put(outgoing_queue, message)
+                        self._close_connection(connection)
+                        break
