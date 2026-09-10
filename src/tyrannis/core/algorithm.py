@@ -57,6 +57,10 @@ class ParticleBase(ABC):
         self._candidate_fitness = None
         self._random_values_cache = []
 
+        if not np.isinf(fitness):
+            self._candidate_variables = self._variables
+            self._candidate_fitness = self._fitness
+
     def __call__(self) -> dict[str, str | dict[str, float] | float | None]:
         """
         Return the particle state as a dictionary.
