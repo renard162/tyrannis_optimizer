@@ -12,6 +12,7 @@ from ..core.backend_migration import (
     MigrationDriverBase,
     MigrationProcessorBase,
 )
+from ..core.results import HistoryConfig
 from ..core.signals import LocalEvent
 
 
@@ -28,9 +29,9 @@ class GlobalAsynchronousProcessor(MigrationProcessorBase):
     preserved, while the state of the arriving particle is copied into that
     identifier.
 
-    The communication protocol is intentionally transport-independent. The
-    communication backend exposes only strings through its queues; this class
-    uses JSON messages with the following application-level format::
+    The communication protocol is transport-independent. The communication
+    backend exposes only strings through its queues; this class uses JSON
+    messages with the following application-level format::
 
         {
             "type": "global_best_update",
@@ -128,7 +129,10 @@ class GlobalAsynchronousProcessor(MigrationProcessorBase):
             return
 
         if iter_best is not None:
-            self._publish_if_new_best(iter_best)
+            self._publish_if_new_best(
+                iter_best=iter_best,
+                actual_iter=actual_iter,
+            )
 
         while actual_iter >= self._synchronization_iter:
             self._synchronization_iter += self._check_interval
@@ -136,6 +140,7 @@ class GlobalAsynchronousProcessor(MigrationProcessorBase):
     def _publish_if_new_best(
         self,
         iter_best: str,
+        actual_iter: int,
     ) -> None:
         """Publish the iteration best when it improves the last published best."""
 
@@ -164,6 +169,7 @@ class GlobalAsynchronousProcessor(MigrationProcessorBase):
             {
                 "type": self.MESSAGE_TYPE,
                 "particle": particle_data,
+                "actual_iter": actual_iter,
             }
         )
 
@@ -279,11 +285,13 @@ class GlobalAsynchronous(MigrationDriverBase):
         communication_driver,
         communication_processor_class,
         communication_processor_kargs: dict[str, Any],
+        history_config: HistoryConfig,
     ) -> None:
         super().initialize_context(
             communication_driver=communication_driver,
             communication_processor_class=communication_processor_class,
             communication_processor_kargs=communication_processor_kargs,
+            history_config=history_config,
         )
 
     def start(self) -> None:
@@ -345,6 +353,11 @@ class GlobalAsynchronous(MigrationDriverBase):
         if not isinstance(particle_data, dict):
             return
 
+        actual_iter = payload.get("actual_iter")
+
+        if not isinstance(actual_iter, int):
+            return
+
         fitness = particle_data.get("fitness")
 
         if not isinstance(fitness, (int, float)):
@@ -359,6 +372,13 @@ class GlobalAsynchronous(MigrationDriverBase):
             return
 
         self._global_best_fitness = fitness
+
+        self.migration_log(
+            particle=particle_data,
+            origin=source_id,
+            destination="all",
+            iteration=actual_iter,
+        )
 
         message = json.dumps(
             {

@@ -12,6 +12,7 @@ from ..core.backend_migration import (
     MigrationDriverBase,
     MigrationProcessorBase,
 )
+from ..core.results import HistoryConfig
 from ..core.signals import LocalEvent
 
 
@@ -76,6 +77,7 @@ class IslandIsolation(MigrationDriverBase):
         communication_driver,
         communication_processor_class,
         communication_processor_kargs: dict[str, Any],
+        history_config: HistoryConfig,
     ) -> None:
         """Configure inactive communication for isolated islands."""
 
@@ -91,6 +93,7 @@ class IslandIsolation(MigrationDriverBase):
             communication_driver=no_communication_driver,
             communication_processor_class=NoCommunicationProcessor,
             communication_processor_kargs={},
+            history_config=history_config,
         )
 
     def start(self) -> None:

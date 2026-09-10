@@ -278,3 +278,6 @@ class DistributedBackendBase(BackendBase):
                 best_result = candidate
 
         self._result.result = best_result
+
+        migration_history = self._migration.consume_migration_history()
+        self._result.history.extend(migration_history)

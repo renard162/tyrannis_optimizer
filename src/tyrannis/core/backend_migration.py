@@ -1,9 +1,9 @@
+import json
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
 
-import numpy as np
-
+from ..core.results import HistoryConfig
 from .backend_communication import (
     CommunicationDriverBase,
     CommunicationProcessorBase,
@@ -149,10 +149,7 @@ class MigrationProcessorBase(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def initialize_loop_context(
-        self,
-        migration_signal: LocalEvent,
-    ) -> None:
+    def initialize_loop_context(self, migration_signal: LocalEvent) -> None:
         """
         Initialize resources associated with the optimization loop and establish
         migration synchronization.
@@ -437,14 +434,10 @@ class MigrationDriverBase(ABC):
     _communication_driver: CommunicationDriverBase
     _communication_processor_class: type[CommunicationProcessorBase]
     _migration_processor_init_kargs: dict[str, Any]
+    _history_buffer: list[str]
 
     @abstractmethod
-    def __init__(
-        self,
-        initial_iter: int = 1,
-        *args: Any,
-        **kargs: Any,
-    ) -> None:
+    def __init__(self, initial_iter: int = 1, *args: Any, **kargs: Any) -> None:
         """
         Initialize the user-defined configuration of the migration strategy.
 
@@ -500,6 +493,7 @@ class MigrationDriverBase(ABC):
         communication_driver: CommunicationDriverBase,
         communication_processor_class: type[CommunicationProcessorBase],
         communication_processor_kargs: dict[str, Any],
+        history_config: HistoryConfig,
     ) -> None:
         """
         Configure the communication context used by the migration strategy.
@@ -541,15 +535,13 @@ class MigrationDriverBase(ABC):
         """
         self._communication_driver = communication_driver
         self._communication_processor_class = communication_processor_class
-
+        self._history_config = history_config
         self._migration_processor_init_kargs["communication"] = (
             communication_processor_kargs.copy()
         )
+        self._history_buffer = []
 
-    def create_processor_module(
-        self,
-        identifier: str,
-    ) -> MigrationProcessorBase:
+    def create_processor_module(self, identifier: str) -> MigrationProcessorBase:
         """
         Create the migration processor module for one optimization processor.
 
@@ -647,3 +639,27 @@ class MigrationDriverBase(ABC):
         `MigrationProcessorBase` implementation.
         """
         raise NotImplementedError
+
+    def migration_log(
+        self, particle: dict[str, Any], origin: str, destination: str, iteration: int
+    ) -> None:
+        if not self._history_config.migration:
+            return
+
+        self._history_buffer.append(
+            json.dumps(
+                {
+                    "iteration": iteration,
+                    "event": self._history_config.get_event("migration"),
+                    "origin": origin,
+                    "destination": destination,
+                    "particle": particle,
+                }
+            )
+        )
+
+    def consume_migration_history(self) -> list[str]:
+        try:
+            return self._history_buffer
+        finally:
+            self._history_buffer = []

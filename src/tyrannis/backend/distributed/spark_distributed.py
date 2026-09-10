@@ -99,6 +99,7 @@ class SparkDistributed(DistributedBackendBase):
                 "driver_ip": driver_ip,
                 "port": self._communication_port,
             },
+            history_config=self._history_config,
         )
 
         if self._history_config.history_enabled:
