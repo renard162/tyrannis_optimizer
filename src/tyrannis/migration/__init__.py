@@ -1,4 +1,4 @@
-from .global_asynchronous import GlobalAsynchronous
+from .global_best import GlobalBest
 
 __all__ = [
     "GlobalAsynchronous",
