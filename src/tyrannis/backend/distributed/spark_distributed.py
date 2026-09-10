@@ -118,7 +118,7 @@ class SparkDistributed(DistributedBackendBase):
                 _run_processor,
             ).collect()
 
-            self._local_bests = dict(results)
+            self._local_bests = {island: data.decompress() for island, data in results}
 
             self.update_result()
 
@@ -144,7 +144,7 @@ def _run_processor(processor: ProcessorBase) -> tuple[str, ProcessorResult]:
     try:
         processor.run()
 
-        return processor.identifier, processor.result
+        return processor.identifier, processor.result.compress()
 
     finally:
         processor.finalize_execution_context()

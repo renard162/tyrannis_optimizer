@@ -233,6 +233,10 @@ class ProcessorBase(ABC, Generic[SignalType]):
         return self._population
 
     @property
+    def result_compressed(self) -> ProcessorResult:
+        return self._result.compress()
+
+    @property
     def result(self) -> ProcessorResult:
         return self._result
 

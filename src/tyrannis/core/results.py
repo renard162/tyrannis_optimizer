@@ -1,5 +1,6 @@
+import json
 from dataclasses import dataclass, field
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Self
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,3 +32,17 @@ class HistoryConfig:
 class ProcessorResult:
     result: dict[str, Any] | None = None
     history: list[dict[str, Any]] = field(default_factory=list)
+
+    def compress(self) -> Self:
+        self.result_compressed = json.dumps(self.result)
+        self.history_compressed = json.dumps(self.history)
+        self.result = None
+        self.history = []
+        return self
+
+    def decompress(self) -> Self:
+        self.result = json.loads(self.result_compressed)
+        self.history = json.loads(self.history_compressed)
+        self.result_compressed = ""
+        self.history_compressed = ""
+        return self
