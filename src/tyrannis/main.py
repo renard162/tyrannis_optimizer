@@ -282,15 +282,6 @@ class Optimizer:
             csv_writer.writerow(self.history_columns)
             csv_writer.writerows(self.history_generator)
 
-    def _history_dict_generator(self) -> Iterator[dict[str, Any]]:
-        """Generate history entries converted from JSON strings to dictionaries."""
-
-        if self._result is None:
-            return
-
-        for history_entry in self._result.history:
-            yield json.loads(history_entry)
-
     def save_history_json(self, file_location: str | Path) -> None:
         """Save the optimization history to a JSON file."""
 
@@ -309,10 +300,16 @@ class Optimizer:
                 f"Parent directory does not exist: {file_location.parent}"
             )
 
+        if self._result is None:
+            raise RuntimeError("Execute fit to get result")
+
         with file_location.open("w", encoding="utf-8") as file:
-            json.dump(
-                self._history_dict_generator(),
-                file,
-                ensure_ascii=False,
-                indent=4,
-            )
+            file.write("[")
+
+            for index, history_entry in enumerate(self._result.history):
+                if index:
+                    file.write(",")
+
+                file.write(history_entry)
+
+            file.write("]")
