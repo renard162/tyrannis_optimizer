@@ -46,6 +46,7 @@ class Local(BackendBase):
             ),
             communication_processor_class=NoCommunicationProcessor,
             communication_processor_kargs={},
+            history_config=history_config,
         )
 
     def execute(self) -> None:
