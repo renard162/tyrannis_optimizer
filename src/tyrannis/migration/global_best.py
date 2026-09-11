@@ -8,10 +8,7 @@ from time import sleep
 from typing import Any
 
 from ..core.backend_communication import CommunicationProcessorBase
-from ..core.backend_migration import (
-    MigrationDriverBase,
-    MigrationProcessorBase,
-)
+from ..core.backend_migration import MigrationDriverBase, MigrationProcessorBase
 from ..core.results import HistoryConfig
 from ..core.signals import LocalEvent
 
@@ -26,8 +23,8 @@ class GlobalBestProcessor(MigrationProcessorBase):
 
     When ``synchronous`` is true, all islands stop at each synchronization point
     and wait until the driver has received the synchronization message from all
-    islands. The driver then broadcasts the global best and releases all
-    islands to continue until the next synchronization point.
+    islands. The driver then broadcasts the global best and releases all islands
+    to continue until the next synchronization point.
 
     When a global-best particle arrives, it replaces the worst particle in the
     receiving island. The identifier of the local particle being replaced is
@@ -67,17 +64,12 @@ class GlobalBestProcessor(MigrationProcessorBase):
         self._migration_signal: LocalEvent | None = None
         self._synchronization_released = False
 
-    def initialize_loop_context(
-        self,
-        migration_signal: LocalEvent,
-    ) -> None:
+    def initialize_loop_context(self, migration_signal: LocalEvent) -> None:
         """Initialize resources required by the processor iteration loop."""
 
         self._migration_signal = migration_signal
 
-        self._communication_processor.set_message_signal(
-            migration_signal,
-        )
+        self._communication_processor.set_message_signal(migration_signal)
 
     def finalize_loop_context(self) -> None:
         """Finalize resources associated with the processor iteration loop."""
@@ -116,9 +108,6 @@ class GlobalBestProcessor(MigrationProcessorBase):
 
         self._migration_signal.clear()
 
-        if self._synchronization_iter is None:
-            return
-
         if actual_iter < self._synchronization_iter:
             return
 
@@ -133,10 +122,7 @@ class GlobalBestProcessor(MigrationProcessorBase):
             return
 
         if iter_best is not None:
-            self._publish_if_new_best(
-                iter_best=iter_best,
-                actual_iter=actual_iter,
-            )
+            self._publish_if_new_best(iter_best=iter_best, actual_iter=actual_iter)
 
         while actual_iter >= self._synchronization_iter:
             self._synchronization_iter += self._check_interval
@@ -193,10 +179,7 @@ class GlobalBestProcessor(MigrationProcessorBase):
 
         self._synchronization_released = False
 
-    def _send_sync_ready(
-        self,
-        actual_iter: int,
-    ) -> None:
+    def _send_sync_ready(self, actual_iter: int) -> None:
         """Notify the driver that the synchronization point was reached."""
 
         self._communication_processor.outgoing_queue.put(
@@ -209,11 +192,7 @@ class GlobalBestProcessor(MigrationProcessorBase):
             )
         )
 
-    def _publish_if_new_best(
-        self,
-        iter_best: str,
-        actual_iter: int,
-    ) -> None:
+    def _publish_if_new_best(self, iter_best: str, actual_iter: int) -> None:
         """Publish the iteration best when it improves the last published best."""
 
         try:
@@ -273,12 +252,7 @@ class GlobalBestProcessor(MigrationProcessorBase):
             message_type = payload.get("type")
 
             if message_type == self.SYNC_RELEASE_MESSAGE_TYPE:
-                next_iter = payload.get("next_iter")
-
-                if isinstance(next_iter, int):
-                    self._synchronization_iter = next_iter
-                    self._synchronization_released = True
-
+                self._process_sync_release(payload=payload)
                 continue
 
             if message_type != self.MESSAGE_TYPE:
@@ -299,6 +273,20 @@ class GlobalBestProcessor(MigrationProcessorBase):
                 departure_particle=departure_particle,
             )
 
+    def _process_sync_release(self, payload: dict[str, Any]) -> None:
+        """Process a synchronization release for the current barrier."""
+
+        next_iter = payload.get("next_iter")
+
+        if not isinstance(next_iter, int):
+            return
+
+        if next_iter <= self._synchronization_iter:
+            return
+
+        self._synchronization_iter = next_iter
+        self._synchronization_released = True
+
     def _replace_worst_particle(
         self,
         population: dict[str, float],
@@ -311,16 +299,24 @@ class GlobalBestProcessor(MigrationProcessorBase):
         if not population:
             return
 
-        worst_particle_id = max(
-            population,
-            key=lambda particle_id: population[particle_id],
-        )
+        valid_population = {
+            particle_id: fitness
+            for particle_id, fitness in population.items()
+            if isinstance(fitness, (int, float))
+        }
+
+        if not valid_population:
+            return
+
+        worst_particle_id = max(valid_population, key=valid_population.get)
 
         arriving_particle = particle_data.copy()
         arriving_particle["identifier"] = worst_particle_id
 
         departure_particle(worst_particle_id)
         insert_arrival_particle(arriving_particle)
+
+        population[worst_particle_id] = arriving_particle["fitness"]
 
 
 class GlobalBest(MigrationDriverBase):
@@ -347,10 +343,7 @@ class GlobalBest(MigrationDriverBase):
     _processor_class = GlobalBestProcessor
 
     def __init__(
-        self,
-        initial_iter: int = 1,
-        check_interval: int = 1,
-        synchronous: bool = False,
+        self, initial_iter: int = 1, check_interval: int = 1, synchronous: bool = False
     ) -> None:
         if initial_iter < 1:
             raise ValueError("initial_iter must be greater than or equal to 1.")
@@ -369,10 +362,9 @@ class GlobalBest(MigrationDriverBase):
         self._global_best_particle: dict[str, Any] | None = None
 
         self._synchronization_ready: dict[int, set[str]] = {}
-        self._synchronization_particles: dict[
-            int,
-            dict[str, dict[str, Any]],
-        ] = {}
+        self._synchronization_particles: dict[int, dict[str, dict[str, Any]]] = {}
+
+        self._last_completed_synchronization: int | None = None
 
         self._running = Event()
         self._thread: Thread | None = None
@@ -403,15 +395,14 @@ class GlobalBest(MigrationDriverBase):
         self._global_best_particle = None
         self._synchronization_ready.clear()
         self._synchronization_particles.clear()
+        self._last_completed_synchronization = None
 
         self._running.set()
 
         self._communication_driver.start()
 
         self._thread = Thread(
-            target=self._routing_loop,
-            name="global-best-migration",
-            daemon=True,
+            target=self._routing_loop, name="global-best-migration", daemon=True
         )
         self._thread.start()
 
@@ -433,11 +424,7 @@ class GlobalBest(MigrationDriverBase):
 
         self._process_incoming()
 
-    def _route_message(
-        self,
-        source_id: str,
-        message: str,
-    ) -> None:
+    def _route_message(self, source_id: str, message: str) -> None:
         """Process a message received from an island."""
 
         try:
@@ -451,25 +438,15 @@ class GlobalBest(MigrationDriverBase):
         message_type = payload.get("type")
 
         if message_type == GlobalBestProcessor.SYNC_READY_MESSAGE_TYPE:
-            self._route_sync_ready(
-                source_id=source_id,
-                payload=payload,
-            )
+            self._route_sync_ready(source_id=source_id, payload=payload)
             return
 
         if message_type != GlobalBestProcessor.MESSAGE_TYPE:
             return
 
-        self._route_global_best(
-            source_id=source_id,
-            payload=payload,
-        )
+        self._route_global_best(source_id=source_id, payload=payload)
 
-    def _route_global_best(
-        self,
-        source_id: str,
-        payload: dict[str, Any],
-    ) -> None:
+    def _route_global_best(self, source_id: str, payload: dict[str, Any]) -> None:
         """Process an asynchronous global-best update."""
 
         particle_data = payload.get("particle")
@@ -505,16 +482,9 @@ class GlobalBest(MigrationDriverBase):
             iteration=actual_iter,
         )
 
-        self._broadcast_global_best(
-            particle_data=particle_data,
-            source_id=source_id,
-        )
+        self._broadcast_global_best(particle_data=particle_data, source_id=source_id)
 
-    def _route_sync_ready(
-        self,
-        source_id: str,
-        payload: dict[str, Any],
-    ) -> None:
+    def _route_sync_ready(self, source_id: str, payload: dict[str, Any]) -> None:
         """Register an island at a synchronous migration point."""
 
         actual_iter = payload.get("actual_iter")
@@ -522,47 +492,65 @@ class GlobalBest(MigrationDriverBase):
         if not isinstance(actual_iter, int):
             return
 
+        if (
+            self._last_completed_synchronization is not None
+            and actual_iter <= self._last_completed_synchronization
+        ):
+            return
+
         particle_data = payload.get("particle")
 
         if not isinstance(particle_data, dict):
             particle_data = None
 
-        ready_islands = self._synchronization_ready.setdefault(
-            actual_iter,
-            set(),
-        )
+        ready_islands = self._synchronization_ready.setdefault(actual_iter, set())
         ready_islands.add(source_id)
 
         if particle_data is not None:
             fitness = particle_data.get("fitness")
 
             if isinstance(fitness, (int, float)):
-                self._synchronization_particles.setdefault(
-                    actual_iter,
-                    {},
-                )[source_id] = particle_data
+                self._synchronization_particles.setdefault(actual_iter, {})[
+                    source_id
+                ] = particle_data
 
         island_ids = set(self._communication_driver.outgoing_queues.keys())
 
         if not island_ids.issubset(ready_islands):
             return
 
-        self._complete_synchronization(actual_iter)
+        self._complete_synchronization(actual_iter=actual_iter)
 
-    def _complete_synchronization(
-        self,
-        actual_iter: int,
-    ) -> None:
+    def _complete_synchronization(self, actual_iter: int) -> None:
         """Complete a synchronous migration barrier."""
 
-        particles = self._synchronization_particles.pop(
-            actual_iter,
-            {},
-        )
+        if (
+            self._last_completed_synchronization is not None
+            and actual_iter <= self._last_completed_synchronization
+        ):
+            return
+
+        self._last_completed_synchronization = actual_iter
+
+        particles = self._synchronization_particles.pop(actual_iter, {})
+
+        self._synchronization_ready.pop(actual_iter, None)
 
         best_particle = self._global_best_particle
+        best_source: str | None = None
 
-        for particle_data in particles.values():
+        if best_particle is not None:
+            best_fitness = best_particle.get("fitness")
+
+            if isinstance(best_fitness, (int, float)):
+                best_fitness = float(best_fitness)
+            else:
+                best_particle = None
+
+        else:
+            best_fitness = None
+
+        for source_id, particle_data in particles.items():
             fitness = particle_data.get("fitness")
 
             if not isinstance(fitness, (int, float)):
@@ -570,10 +558,15 @@ class GlobalBest(MigrationDriverBase):
 
             fitness = float(fitness)
 
-            if best_particle is None or fitness < float(best_particle["fitness"]):
+            if best_fitness is None or fitness < best_fitness:
                 best_particle = particle_data
+                best_fitness = fitness
+                best_source = source_id
 
-        new_global_best = best_particle is not self._global_best_particle
+        new_global_best = best_particle is not None and (
+            self._global_best_fitness is None
+            or best_fitness < self._global_best_fitness
+        )
 
         if best_particle is not None:
             best_particle = best_particle.copy()
@@ -581,23 +574,14 @@ class GlobalBest(MigrationDriverBase):
             self._global_best_particle = best_particle
             self._global_best_fitness = float(best_particle["fitness"])
 
-        source_id = None
-
-        if best_particle is not None:
-            for island_id, particle_data in particles.items():
-                if particle_data.get("identifier") == best_particle.get("identifier"):
-                    source_id = island_id
-                    break
-
             self._broadcast_global_best(
-                particle_data=best_particle,
-                source_id=source_id,
+                particle_data=best_particle, source_id=best_source
             )
 
-            if new_global_best and source_id is not None:
+            if new_global_best and best_source is not None:
                 self.migration_log(
                     particle=best_particle,
-                    origin=source_id,
+                    origin=best_source,
                     destination="all",
                     iteration=actual_iter,
                 )
@@ -614,20 +598,13 @@ class GlobalBest(MigrationDriverBase):
         for outgoing_queue in self._communication_driver.outgoing_queues.values():
             outgoing_queue.put(release_message)
 
-        self._synchronization_ready.pop(actual_iter, None)
-
     def _broadcast_global_best(
-        self,
-        particle_data: dict[str, Any],
-        source_id: str | None,
+        self, particle_data: dict[str, Any], source_id: str | None
     ) -> None:
         """Broadcast a global-best particle to all other islands."""
 
         message = json.dumps(
-            {
-                "type": GlobalBestProcessor.MESSAGE_TYPE,
-                "particle": particle_data,
-            }
+            {"type": GlobalBestProcessor.MESSAGE_TYPE, "particle": particle_data}
         )
 
         for (
@@ -657,7 +634,4 @@ class GlobalBest(MigrationDriverBase):
                 except Empty:
                     break
 
-                self._route_message(
-                    source_id=island_id,
-                    message=message,
-                )
+                self._route_message(source_id=island_id, message=message)
