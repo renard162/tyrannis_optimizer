@@ -86,8 +86,6 @@ class IslandMigrationProcessor(MigrationProcessorBase):
 
         self._send_state(actual_iter=actual_iter, population=population)
 
-        # Only ring is synchronous. All other movement strategies are
-        # asynchronous and must return immediately.
         if self._movement_strategy != "ring":
             self._migration_signal.clear()
             return
@@ -257,7 +255,6 @@ class IslandMigration(MigrationDriverBase):
         }
 
         selections = {"random", "best", "worst"}
-
         triggers = {"n_iter", "random"}
 
         if initial_iter < 1:
@@ -405,6 +402,13 @@ class IslandMigration(MigrationDriverBase):
             if not isinstance(population, dict):
                 return
 
+            state = self._states.get(island_id)
+
+            # Messages can arrive out of order. An older snapshot must never
+            # replace a newer snapshot already known by the driver.
+            if state is not None and actual_iter < state["actual_iter"]:
+                return
+
             self._states[island_id] = {
                 "actual_iter": actual_iter,
                 "population": population,
@@ -420,8 +424,24 @@ class IslandMigration(MigrationDriverBase):
         if message_type == IslandMigrationProcessor.PARTICLE:
             self._receive_particle(payload=payload)
 
+    def _all_states_current(self, actual_iter: int) -> bool:
+        return all(
+            self._states.get(island_id, {}).get("actual_iter") == actual_iter
+            for island_id in self._island_ids
+        )
+
     def _maybe_activate(self, actual_iter: int) -> None:
         if actual_iter < self._next_migration_iter:
+            return
+
+        # A migration decision is only valid when the driver has received
+        # the same iteration state from every island.
+        if not self._all_states_current(actual_iter=actual_iter):
+            return
+
+        # The migration scheduled for _next_migration_iter remains due.
+        # Do not advance it while the previous activation is still pending.
+        if self._pending_requests:
             return
 
         if self._trigger == "random":
@@ -435,6 +455,8 @@ class IslandMigration(MigrationDriverBase):
 
         self._activate_migration(actual_iter=actual_iter)
 
+        # Advance the schedule only after the activation was actually
+        # attempted. A pending migration cannot consume this trigger.
         self._next_migration_iter = actual_iter + self._min_interval
 
     def _activate_migration(self, actual_iter: int) -> None:
@@ -458,7 +480,7 @@ class IslandMigration(MigrationDriverBase):
         self._communication_driver.outgoing_queues[donor].put(
             json.dumps(
                 {
-                    "type": (IslandMigrationProcessor.MIGRATION_REQUEST),
+                    "type": IslandMigrationProcessor.MIGRATION_REQUEST,
                     "request_id": request_id,
                     "actual_iter": actual_iter,
                 }
@@ -592,6 +614,7 @@ class IslandMigration(MigrationDriverBase):
 
         minimum = np.min(fitness)
         choices = np.flatnonzero(fitness == minimum)
+
         return candidates[int(self._rng.choice(choices))]
 
     def _island_fitness(self, island_id: str) -> float:
@@ -601,7 +624,7 @@ class IslandMigration(MigrationDriverBase):
             return np.inf
 
         fitness = np.asarray(
-            [(np.inf if value is None else value) for value in population.values()],
+            [np.inf if value is None else value for value in population.values()],
             dtype=float,
         )
 
@@ -622,7 +645,6 @@ class IslandMigration(MigrationDriverBase):
 
     def _receive_particle(self, payload: dict[str, Any]) -> None:
         request_id = payload.get("request_id")
-
         particle = payload.get("particle")
 
         if not isinstance(request_id, str):
@@ -639,16 +661,29 @@ class IslandMigration(MigrationDriverBase):
             self._finish_ring_request(actual_iter=actual_iter)
             return
 
-        self._states[donor]["population"].pop(particle["identifier"], None)
+        identifier = particle.get("identifier")
 
-        self._states[receiver]["population"][particle["identifier"]] = particle[
-            "fitness"
-        ]
+        if not isinstance(identifier, str):
+            self._finish_ring_request(actual_iter=actual_iter)
+            return
+
+        donor_state = self._states.get(donor)
+        receiver_state = self._states.get(receiver)
+
+        # The request may have become invalid because the corresponding
+        # island state was replaced before the particle arrived.
+        if donor_state is None or receiver_state is None:
+            self._finish_ring_request(actual_iter=actual_iter)
+            return
+
+        donor_state["population"].pop(identifier, None)
+
+        receiver_state["population"][identifier] = particle.get("fitness")
 
         self._communication_driver.outgoing_queues[receiver].put(
             json.dumps(
                 {
-                    "type": (IslandMigrationProcessor.PARTICLE),
+                    "type": IslandMigrationProcessor.PARTICLE,
                     "particle": particle,
                     "actual_iter": actual_iter,
                 }
@@ -673,10 +708,10 @@ class IslandMigration(MigrationDriverBase):
         if actual_iter != self._next_migration_iter:
             return
 
-        if not all(
-            self._states.get(island_id, {}).get("actual_iter") == actual_iter
-            for island_id in self._island_ids
-        ):
+        if not self._all_states_current(actual_iter=actual_iter):
+            return
+
+        if self._pending_requests:
             return
 
         if actual_iter in self._ring_pending:
@@ -690,7 +725,6 @@ class IslandMigration(MigrationDriverBase):
         donors = self._donor_candidates()
 
         self._ring_pending[actual_iter] = len(donors)
-
         self._ring_received[actual_iter] = 0
 
         for donor in donors:
@@ -715,11 +749,10 @@ class IslandMigration(MigrationDriverBase):
         if self._ring_received[actual_iter] < expected:
             return
 
-        release = json.dumps({"type": (IslandMigrationProcessor.RING_RELEASE)})
+        release = json.dumps({"type": IslandMigrationProcessor.RING_RELEASE})
 
         for queue in self._communication_driver.outgoing_queues.values():
             queue.put(release)
 
         del self._ring_pending[actual_iter]
-
         del self._ring_received[actual_iter]
