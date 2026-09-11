@@ -213,6 +213,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
             )
         )
 
+        new_processor._migration_processor._algorithm = new_processor._algorithm
         return new_processor
 
     def update_processors_pool(self, new_processors: Iterable[Self]) -> None:

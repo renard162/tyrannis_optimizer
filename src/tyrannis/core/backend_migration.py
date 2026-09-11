@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 
 from ..core.results import HistoryConfig
+from .algorithm import AlgorithmBase
 from .backend_communication import (
     CommunicationDriverBase,
     CommunicationProcessorBase,
@@ -90,6 +91,8 @@ class MigrationProcessorBase(ABC):
     population and synchronization with the communication layer must occur
     through the contract provided by this class.
     """
+
+    _algorithm: AlgorithmBase | None = None
 
     @abstractmethod
     def __init__(
