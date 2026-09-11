@@ -40,13 +40,14 @@ class Local(BackendBase):
             history_config=history_config,
         )
 
-        migration.initialize_context(
+        self._migration.initialize_context(
             communication_driver=NoCommunicationDriver(
                 island_ids=["island:0"],
             ),
             communication_processor_class=NoCommunicationProcessor,
             communication_processor_kargs={},
             history_config=history_config,
+            seed=seed,
         )
 
     def execute(self) -> None:

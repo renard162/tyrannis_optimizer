@@ -92,7 +92,7 @@ class SparkDistributed(DistributedBackendBase):
             "spark.driver.host",
         )
 
-        migration.initialize_context(
+        self._migration.initialize_context(
             communication_driver=communication_driver,
             communication_processor_class=SparkCommunicationProcessor,
             communication_processor_kargs={

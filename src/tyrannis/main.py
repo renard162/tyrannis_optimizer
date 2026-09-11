@@ -49,7 +49,10 @@ class Optimizer:
         self._n_particles = n_particles
         self._backend = backend if backend is not None else Local()
         self._processor = processor if processor is not None else Serial()
-        self._migration = migration if migration is not None else IslandIsolation()
+        if backend is not None:
+            self._migration = migration if migration is not None else IslandIsolation()
+        else:
+            self._migration = IslandIsolation()
         self._seed = seed
         self._fitness_failure_strategy = fitness_failure_strategy
         self._result = None
