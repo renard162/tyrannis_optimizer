@@ -12,7 +12,7 @@ from pyspark import cloudpickle
 from pyspark.sql import SparkSession
 from pyspark.sql.types import BinaryType, StructField, StructType
 
-from ...core.algorithm import CostFunctionWrapperBase, ParticleBase
+from ...core.algorithm import FITNESS_UNDEFINED, CostFunctionWrapperBase, ParticleBase
 from ...core.backend_parallel import ParallelBackendBase
 
 
@@ -243,7 +243,8 @@ def _process_particle_batches(
 
                 candidate_fitness = particle.candidate_fitness
 
-                if candidate_fitness is not None and np.isnan(candidate_fitness):
+                if (candidate_fitness is not None) and np.isnan(candidate_fitness):
+                    algorithm.population[particle_id].error_fitness = candidate_fitness
                     raise ValueError(
                         f"Cost function returned NaN for particle '{particle_id}'. "
                         "NaN is an invalid cost function result."
@@ -255,6 +256,8 @@ def _process_particle_batches(
 
                 particle = algorithm.population[particle_id]
                 particle.candidate_fitness = np.inf
+                if particle.error_fitness is None:
+                    particle.error_fitness = FITNESS_UNDEFINED
 
             particles.append(particle)
 

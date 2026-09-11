@@ -69,6 +69,7 @@ class ParticleBase(ABC):
         self._candidate_variables = None
         self._candidate_fitness = None
         self._random_values_cache = []
+        self._error_fitness = None
 
         if not np.isinf(fitness):
             self._candidate_variables = self._variables
@@ -134,6 +135,14 @@ class ParticleBase(ABC):
     def random_cache(self, new_cache: list[Any]) -> None:
         self._random_values_cache = new_cache
 
+    @property
+    def error_fitness(self) -> np.float64 | None:
+        return self._error_fitness
+
+    @error_fitness.setter
+    def error_fitness(self, new_value: np.float64) -> None:
+        self._error_fitness = new_value
+
     def dump(self) -> str:
         return json.dumps(self())
 
@@ -153,6 +162,8 @@ class ParticleBase(ABC):
     def consolidate(self, consolidate_new: bool) -> None:
         if (self._candidate_variables is None) or (self._candidate_fitness is None):
             raise RuntimeError("No candidate solution available for consolidation.")
+
+        self._error_fitness = None
 
         if self._new_particle and (not np.isinf(self._fitness)):
             self._new_particle = False

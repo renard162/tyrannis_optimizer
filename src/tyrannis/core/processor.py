@@ -2,7 +2,7 @@ import json
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from copy import deepcopy
-from typing import Any, Generic, Self, TypeVar
+from typing import Any, Generic, Self, TypeVar, cast
 
 import numpy as np
 
@@ -344,9 +344,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
             )
 
     def new_particle_log(
-        self,
-        actual_iter: int,
-        new_particles: Iterable[ParticleBase],
+        self, actual_iter: int, new_particles: Iterable[ParticleBase]
     ) -> None:
         if not self._history_config.new_particle:
             return
@@ -366,9 +364,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
             )
 
     def error_log(
-        self,
-        actual_iter: int,
-        updated_particles: Iterable[ParticleBase],
+        self, actual_iter: int, updated_particles: Iterable[ParticleBase]
     ) -> None:
         if not self._history_config.error:
             return
@@ -376,17 +372,12 @@ class ProcessorBase(ABC, Generic[SignalType]):
         event = self._history_config.get_event("error")
 
         for particle in updated_particles:
-            candidate_fitness_is_inf = (
-                particle.candidate_fitness is not None
-                and np.isinf(particle.candidate_fitness)
-            )
-
-            if not candidate_fitness_is_inf:
+            if particle.error_fitness is None:
                 continue
 
             particle_data = particle()
             particle_data["variables"] = particle.candidate_variables
-            particle_data["fitness"] = particle.candidate_fitness
+            particle_data["fitness"] = particle.error_fitness
 
             self._result.history.append(
                 json.dumps(
@@ -485,7 +476,8 @@ def evaluate_particle(
 
         candidate_fitness = particle.candidate_fitness
 
-        if candidate_fitness is not None and np.isnan(candidate_fitness):
+        if (candidate_fitness is not None) and np.isnan(candidate_fitness):
+            algorithm.population[particle_id].error_fitness = candidate_fitness
             raise ValueError(
                 f"Cost function returned NaN for particle '{particle_id}'. "
                 "NaN is an invalid cost function result."
@@ -497,6 +489,8 @@ def evaluate_particle(
         if fitness_failure_strategy == "invalidate":
             particle = algorithm.population[particle_id]
             particle.candidate_fitness = FITNESS_UNDEFINED
+            if particle.error_fitness is None:
+                particle.error_fitness = FITNESS_UNDEFINED
             return particle
 
         raise

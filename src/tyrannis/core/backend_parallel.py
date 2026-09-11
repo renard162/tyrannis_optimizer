@@ -185,17 +185,12 @@ class ParallelBackendBase(BackendBase, ABC):
         event = self._history_config.get_event("error")
 
         for particle in updated_particles:
-            candidate_fitness_is_inf = (
-                particle.candidate_fitness is not None
-                and np.isinf(particle.candidate_fitness)
-            )
-
-            if not candidate_fitness_is_inf:
+            if particle.error_fitness is None:
                 continue
 
             particle_data = particle()
             particle_data["variables"] = particle.candidate_variables
-            particle_data["fitness"] = particle.candidate_fitness
+            particle_data["fitness"] = particle.error_fitness
 
             self._result.history.append(
                 json.dumps(
