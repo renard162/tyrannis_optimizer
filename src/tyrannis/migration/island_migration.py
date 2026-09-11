@@ -779,7 +779,7 @@ class IslandMigration(MigrationDriverBase):
 
             return candidates[int(self._rng.choice(choices))]
 
-        if strategy == "ring_sequential":
+        if strategy in {"ring", "ring_sequential"}:
             return self._next_ring_island(donor)
 
         raise RuntimeError(f"Unsupported movement strategy: {strategy!r}")
