@@ -135,17 +135,16 @@ class IslandMigrationProcessor(MigrationProcessorBase):
 
         if self._synchronization_paused_iter != checkpoint:
             self._synchronization_paused_iter = checkpoint
+
             self._communication_processor.outgoing_queue.put(
                 json.dumps(
-                    {
-                        "type": self.SYNCHRONIZATION_PAUSE,
-                        "actual_iter": checkpoint,
-                    }
+                    {"type": self.SYNCHRONIZATION_PAUSE, "actual_iter": checkpoint}
                 )
             )
 
         while actual_iter >= self._next_synchronization_iter:
             message = self._communication_processor.messages.get()
+
             self._consume_message(
                 message=message,
                 insert_arrival_particle=insert_arrival_particle,
@@ -209,6 +208,7 @@ class IslandMigrationProcessor(MigrationProcessorBase):
 
             if isinstance(particle, dict):
                 insert_arrival_particle(particle)
+
             return
 
         if message_type == self.RING_RELEASE:
@@ -216,6 +216,7 @@ class IslandMigrationProcessor(MigrationProcessorBase):
 
             if actual_iter == self._ring_iter:
                 self._ring_released = True
+
             return
 
         if message_type == self.SYNCHRONIZATION_RELEASE:
@@ -323,7 +324,6 @@ class IslandMigration(MigrationDriverBase):
         }
 
         selections = {"random", "best", "worst"}
-
         triggers = {"n_iter", "random", "synchronous"}
 
         if initial_iter < 1:
@@ -372,7 +372,6 @@ class IslandMigration(MigrationDriverBase):
         }
 
         self._island_ids: list[str] = []
-
         self._states: dict[str, dict[str, Any]] = {}
 
         # Confirmed departures that have not yet appeared in a processor
@@ -387,7 +386,6 @@ class IslandMigration(MigrationDriverBase):
         self._last_trigger_check_iter: int | None = None
 
         self._pending_requests: dict[str, tuple[str, str, int]] = {}
-
         self._reserved_departures: dict[str, int] = {}
 
         self._ring_pending: dict[int, int] = {}
@@ -432,7 +430,6 @@ class IslandMigration(MigrationDriverBase):
         self._last_trigger_check_iter = None
 
         self._running.set()
-
         self._communication_driver.start()
 
         self._thread = Thread(
@@ -510,10 +507,21 @@ class IslandMigration(MigrationDriverBase):
 
         paused.add(island_id)
 
+        self._maybe_activate_synchronization(actual_iter=actual_iter)
+
+    def _maybe_activate_synchronization(self, actual_iter: int) -> None:
+        paused = self._synchronization_paused.get(actual_iter)
+
+        if paused is None:
+            return
+
         if len(paused) != len(self._island_ids):
             return
 
         if not self._all_states_current(actual_iter):
+            return
+
+        if actual_iter in self._synchronization_pending:
             return
 
         if self._pending_requests:
@@ -523,8 +531,7 @@ class IslandMigration(MigrationDriverBase):
         self._synchronization_pending[actual_iter] = pending_requests
 
         self._activate_migration(
-            actual_iter=actual_iter,
-            pending_requests=pending_requests,
+            actual_iter=actual_iter, pending_requests=pending_requests
         )
 
         self._finish_synchronization(actual_iter=actual_iter)
@@ -546,6 +553,7 @@ class IslandMigration(MigrationDriverBase):
             queue.put(release)
 
         self._next_migration_iter = actual_iter + self._min_interval
+
         self._synchronization_pending.pop(actual_iter, None)
         self._synchronization_paused.pop(actual_iter, None)
 
@@ -602,7 +610,9 @@ class IslandMigration(MigrationDriverBase):
 
         if self._movement_strategy == "ring":
             self._maybe_activate_ring(actual_iter=actual_iter)
-        elif self._trigger != "synchronous":
+        elif self._trigger == "synchronous":
+            self._maybe_activate_synchronization(actual_iter=actual_iter)
+        else:
             self._maybe_activate(actual_iter=actual_iter)
 
     def _migration_watermark(self) -> int | None:
@@ -745,15 +755,12 @@ class IslandMigration(MigrationDriverBase):
             total_population = populations.sum()
 
             x = populations / (total_population + 1)
-
             y = x / (x - 1)
 
             penalty = 2 * sp.special.expit(y) - 1
-
             scores = random_values * penalty
 
         minimum = np.min(scores)
-
         choices = np.flatnonzero(scores == minimum)
 
         return candidates[int(self._rng.choice(choices))]
@@ -805,11 +812,9 @@ class IslandMigration(MigrationDriverBase):
             random_values = self._rng.random(len(candidates))
 
             greedy = 2 * sp.special.expit(fitness) - 1
-
             scores = random_values * greedy
 
             minimum = np.min(scores)
-
             choices = np.flatnonzero(scores == minimum)
 
             return candidates[int(self._rng.choice(choices))]
@@ -823,7 +828,6 @@ class IslandMigration(MigrationDriverBase):
         random_values = self._rng.random(len(candidates))
 
         minimum = np.min(random_values)
-
         choices = np.flatnonzero(random_values == minimum)
 
         return candidates[int(self._rng.choice(choices))]
@@ -840,7 +844,6 @@ class IslandMigration(MigrationDriverBase):
             return self._random_island(candidates)
 
         minimum = np.min(fitness)
-
         choices = np.flatnonzero(fitness == minimum)
 
         return candidates[int(self._rng.choice(choices))]
@@ -873,7 +876,6 @@ class IslandMigration(MigrationDriverBase):
 
     def _receive_particle(self, payload: dict[str, Any]) -> None:
         request_id = payload.get("request_id")
-
         particle = payload.get("particle")
 
         if not isinstance(request_id, str):
@@ -937,6 +939,7 @@ class IslandMigration(MigrationDriverBase):
         )
 
         self._finish_ring_request(actual_iter=actual_iter)
+
         self._finish_synchronization(actual_iter=actual_iter)
 
     def _finish_ring_request(self, actual_iter: int) -> None:
@@ -978,9 +981,6 @@ class IslandMigration(MigrationDriverBase):
             request_id = f"ring:{actual_iter}:{donor}"
 
             self._pending_requests[request_id] = (donor, receiver, actual_iter)
-
-            if pending_requests is not None:
-                pending_requests.add(request_id)
 
             self._reserve_departure(donor=donor)
 
