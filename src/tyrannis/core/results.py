@@ -11,6 +11,7 @@ class HistoryConfig:
     error: bool = False
     iteration: bool = False
     best: bool = False
+    status: bool = False
 
     EVENT: ClassVar[dict[str, str]] = {
         "migration": "0 - migration",

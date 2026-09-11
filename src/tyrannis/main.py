@@ -96,6 +96,7 @@ class Optimizer:
             "new_particle": False,
             "error": False,
             "iteration": False,
+            "status": False,
             "best": False,
         }
 

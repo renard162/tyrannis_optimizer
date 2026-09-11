@@ -407,14 +407,20 @@ class ProcessorBase(ABC, Generic[SignalType]):
             )
 
     def best_log(self, actual_iter: int) -> None:
-        if not self._history_config.best:
+        if not (self._history_config.best or self._history_config.status):
             return
 
         bests = [
             (self._algorithm.local_best, "local_best"),
-            (self._algorithm.iter_best, "iter_best"),
-            (self._algorithm.iter_worst, "iter_worst"),
         ]
+
+        if self._history_config.status:
+            bests.extend(
+                [
+                    (self._algorithm.iter_best, "iter_best"),
+                    (self._algorithm.iter_worst, "iter_worst"),
+                ]
+            )
 
         for particle, event_name in bests:
             if particle is None:

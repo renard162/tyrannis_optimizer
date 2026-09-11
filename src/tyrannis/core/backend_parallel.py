@@ -139,9 +139,6 @@ class ParallelBackendBase(BackendBase, ABC):
             )
 
     def pre_iteration_log(self, actual_iter: int) -> None:
-        """
-        Record the population before an iteration.
-        """
         if not self._history_config.pre_iteration:
             return
 
@@ -160,13 +157,8 @@ class ParallelBackendBase(BackendBase, ABC):
             )
 
     def new_particle_log(
-        self,
-        actual_iter: int,
-        new_particles: Iterable[ParticleBase],
+        self, actual_iter: int, new_particles: Iterable[ParticleBase]
     ) -> None:
-        """
-        Record newly initialized and consolidated particles.
-        """
         if not self._history_config.new_particle:
             return
 
@@ -185,16 +177,8 @@ class ParallelBackendBase(BackendBase, ABC):
             )
 
     def error_log(
-        self,
-        actual_iter: int,
-        updated_particles: Iterable[ParticleBase],
+        self, actual_iter: int, updated_particles: Iterable[ParticleBase]
     ) -> None:
-        """
-        Record particle fitness evaluation errors.
-
-        A particle is recorded when its candidate fitness is infinite,
-        indicating that its evaluation failed and was invalidated.
-        """
         if not self._history_config.error:
             return
 
@@ -225,9 +209,6 @@ class ParallelBackendBase(BackendBase, ABC):
             )
 
     def iteration_log(self, actual_iter: int) -> None:
-        """
-        Record the population after an optimization iteration.
-        """
         if not self._history_config.iteration:
             return
 
@@ -246,23 +227,20 @@ class ParallelBackendBase(BackendBase, ABC):
             )
 
     def best_log(self, actual_iter: int) -> None:
-        """
-        Record the best and worst particles for the current execution state.
-
-        The recorded states are:
-
-        - `local_best`: historical best particle of the algorithm;
-        - `iter_best`: best particle of the current iteration;
-        - `iter_worst`: worst particle of the current iteration.
-        """
-        if not self._history_config.best:
+        if not (self._history_config.best or self._history_config.status):
             return
 
         bests = [
             (self._algorithm.local_best, "local_best"),
-            (self._algorithm.iter_best, "iter_best"),
-            (self._algorithm.iter_worst, "iter_worst"),
         ]
+
+        if self._history_config.status:
+            bests.extend(
+                [
+                    (self._algorithm.iter_best, "iter_best"),
+                    (self._algorithm.iter_worst, "iter_worst"),
+                ]
+            )
 
         for particle, event_name in bests:
             if particle is None:
