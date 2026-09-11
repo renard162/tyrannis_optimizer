@@ -56,21 +56,22 @@ class IslandIsolationProcessor(MigrationProcessorBase):
     ) -> None:
         """Do nothing."""
 
+    def synchronization_control(
+        self,
+        actual_iter: int,
+        insert_arrival_particle: Callable[[dict[str, Any]], None],
+        departure_particle: Callable[[str], None],
+    ) -> None:
+        """Do nothing because isolated islands do not synchronize."""
+
 
 class IslandIsolation(MigrationDriverBase):
     """Migration strategy that keeps all islands isolated."""
 
     _processor_class = IslandIsolationProcessor
 
-    def __init__(
-        self,
-        initial_iter: int = 1,
-        *args: Any,
-        **kwargs: Any,
-    ) -> None:
-        self._migration_processor_init_kargs = {
-            "initial_iter": initial_iter,
-        }
+    def __init__(self, initial_iter: int = 1, *args: Any, **kwargs: Any) -> None:
+        self._migration_processor_init_kargs = {"initial_iter": initial_iter}
 
     def initialize_context(
         self,
@@ -82,13 +83,9 @@ class IslandIsolation(MigrationDriverBase):
     ) -> None:
         """Configure inactive communication for isolated islands."""
 
-        island_ids = list(
-            communication_driver.incoming_queues.keys(),
-        )
+        island_ids = list(communication_driver.incoming_queues.keys())
 
-        no_communication_driver = NoCommunicationDriver(
-            island_ids=island_ids,
-        )
+        no_communication_driver = NoCommunicationDriver(island_ids=island_ids)
 
         super().initialize_context(
             communication_driver=no_communication_driver,
