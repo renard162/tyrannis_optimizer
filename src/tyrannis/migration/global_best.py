@@ -93,16 +93,20 @@ class GlobalBestProcessor(MigrationProcessorBase):
         )
         self._migration_signal.clear()
 
-        if actual_iter < self._synchronization_iter:
+        if iter_best is None:
             return
 
         if self._synchronous:
-            if iter_best is not None:
-                self._publish_if_new_best(iter_best=iter_best, actual_iter=actual_iter)
+            if actual_iter != self._synchronization_iter:
+                return
+
+            self._publish_if_new_best(iter_best=iter_best, actual_iter=actual_iter)
             return
 
-        if iter_best is not None:
-            self._publish_if_new_best(iter_best=iter_best, actual_iter=actual_iter)
+        if actual_iter < self._synchronization_iter:
+            return
+
+        self._publish_if_new_best(iter_best=iter_best, actual_iter=actual_iter)
 
         while actual_iter >= self._synchronization_iter:
             self._synchronization_iter += self._check_interval
@@ -418,7 +422,7 @@ class GlobalBest(MigrationDriverBase):
         fitness = float(fitness)
 
         if self._synchronous:
-            if actual_iter < self._next_synchronization_iter:
+            if actual_iter != self._next_synchronization_iter:
                 return
 
             self._synchronization_particles.setdefault(actual_iter, {})[source_id] = (
@@ -458,11 +462,22 @@ class GlobalBest(MigrationDriverBase):
             return
 
         paused = self._synchronization_paused.setdefault(actual_iter, set())
+
+        if source_id in paused:
+            return
+
         paused.add(source_id)
+        self._maybe_complete_synchronization(actual_iter=actual_iter)
+
+    def _maybe_complete_synchronization(self, actual_iter: int) -> None:
+        paused = self._synchronization_paused.get(actual_iter)
+
+        if paused is None:
+            return
 
         island_ids = set(self._communication_driver.outgoing_queues)
 
-        if not island_ids.issubset(paused):
+        if paused != island_ids:
             return
 
         if actual_iter in self._synchronization_pending:
@@ -472,7 +487,7 @@ class GlobalBest(MigrationDriverBase):
         self._complete_synchronization(actual_iter=actual_iter)
 
     def _complete_synchronization(self, actual_iter: int) -> None:
-        """Complete a synchronous migration checkpoint."""
+        """Complete a synchronous global-best checkpoint."""
 
         particles = self._synchronization_particles.pop(actual_iter, {})
 
@@ -493,12 +508,12 @@ class GlobalBest(MigrationDriverBase):
                 best_fitness = fitness
                 best_source = source_id
 
-        if best_particle is not None and best_fitness is not None:
-            new_global_best = (
-                self._global_best_fitness is None
-                or best_fitness < self._global_best_fitness
-            )
+        new_global_best = best_fitness is not None and (
+            self._global_best_fitness is None
+            or best_fitness < self._global_best_fitness
+        )
 
+        if best_particle is not None and best_fitness is not None:
             self._global_best_particle = best_particle.copy()
             self._global_best_fitness = best_fitness
 
