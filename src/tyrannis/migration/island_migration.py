@@ -229,12 +229,12 @@ class IslandMigration(MigrationDriverBase):
     def __init__(
         self,
         initial_iter: int = 1,
+        min_interval: int = 1,
+        min_population: int = 0,
+        migration_size: int = 1,
+        trigger: str = "n_iter",
         movement_strategy: str = "random",
         selection: str = "random",
-        trigger: str = "n_iter",
-        migration_size: int = 1,
-        min_population: int = 0,
-        min_interval: int = 1,
         balance_population: bool = True,
         migration_probability: float = 0.5,
     ) -> None:
