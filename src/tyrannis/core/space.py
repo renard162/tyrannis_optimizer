@@ -3,6 +3,8 @@ from collections.abc import Callable
 from importlib.util import find_spec
 from typing import Any, ClassVar
 
+import numpy as np
+
 
 class SpaceBase(ABC):
     """
@@ -310,7 +312,7 @@ class SpaceBase(ABC):
     def encoded_boundaries(self) -> dict[str, tuple[float, float]]:
         return self._encoded_boundaries.copy()
 
-    def __call__(self, float_inputs: dict[str, float]) -> float:
+    def __call__(self, float_inputs: dict[str, float]) -> np.float64:
         """
         Evaluate the cost function using the supplied encoded variables.
 
@@ -326,12 +328,12 @@ class SpaceBase(ABC):
         inputs = self.decode(float_inputs)
 
         if not self._use_cache:
-            return self._evaluate(inputs)
+            return np.float64(self._evaluate(inputs))
 
         cache_key = self.encode_cache(inputs)
         cached_cost_function = self._get_cached_cost_function()
 
-        return cached_cost_function(cache_key)
+        return np.float64(cached_cost_function(cache_key))
 
     def _evaluate(self, inputs: Any) -> float:
         """

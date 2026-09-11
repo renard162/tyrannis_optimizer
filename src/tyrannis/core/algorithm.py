@@ -1,11 +1,21 @@
 import json
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from copy import deepcopy
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, TypeAlias, TypeVar
 
 import numpy as np
 from numpy.random import SeedSequence
+
+Serializable: TypeAlias = (
+    str
+    | int
+    | float
+    | np.float64
+    | bool
+    | list["Serializable"]
+    | Mapping[str, "Serializable"]
+)
 
 
 class CostFunctionWrapperBase(ABC):
@@ -61,7 +71,7 @@ class ParticleBase(ABC):
             self._candidate_variables = self._variables
             self._candidate_fitness = self._fitness
 
-    def __call__(self) -> dict[str, str | dict[str, float] | float | None]:
+    def __call__(self) -> dict[str, Serializable]:
         """
         Return the particle state as a dictionary.
 
@@ -273,7 +283,7 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         self,
         identifier: str,
         variables: dict[str, float] | None = None,
-        fitness: float | None = None,
+        fitness: float = np.inf,
         *args: Any,
         **kwargs: Any,
     ) -> None:
