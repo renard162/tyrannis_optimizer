@@ -306,7 +306,14 @@ class IslandMigration(MigrationDriverBase):
         }
 
         self._island_ids: list[str] = []
+
+        # Logical state used by the migration driver.
         self._states: dict[str, dict[str, Any]] = {}
+
+        # Latest snapshots received from processors while migrations are
+        # pending. They are not discarded; they are reconciled once the
+        # current migration activation has completed.
+        self._pending_states: dict[str, dict[str, Any]] = {}
 
         self._next_migration_iter = initial_iter
         self._last_trigger_check_iter: int | None = None
@@ -341,6 +348,7 @@ class IslandMigration(MigrationDriverBase):
 
     def start(self) -> None:
         self._states.clear()
+        self._pending_states.clear()
         self._pending_requests.clear()
         self._reserved_departures.clear()
         self._ring_pending.clear()
@@ -416,28 +424,60 @@ class IslandMigration(MigrationDriverBase):
         if not isinstance(population, dict):
             return
 
-        state = self._states.get(island_id)
+        current_state = self._states.get(island_id)
 
-        if state is not None and actual_iter < state["actual_iter"]:
+        pending_state = self._pending_states.get(island_id)
+
+        current_iter = (
+            current_state["actual_iter"] if current_state is not None else None
+        )
+
+        pending_iter = (
+            pending_state["actual_iter"] if pending_state is not None else None
+        )
+
+        newest_iter = max(
+            value
+            for value in (current_iter, pending_iter, actual_iter)
+            if value is not None
+        )
+
+        if actual_iter < newest_iter:
             return
 
-        # A migration is represented in _states after the PARTICLE
-        # response is received. While requests are still pending, a
-        # newer STATE is only a snapshot from the processor and may
-        # not yet contain the migration effects known by the driver.
-        #
-        # Keep the driver's logical state until all requests have
-        # completed. The next STATE received afterwards becomes the
-        # authoritative snapshot again.
+        state = {"actual_iter": actual_iter, "population": population}
+
         if self._pending_requests:
+            self._pending_states[island_id] = state
             return
 
-        self._states[island_id] = {"actual_iter": actual_iter, "population": population}
+        self._states[island_id] = state
 
         if self._movement_strategy == "ring":
             self._maybe_activate_ring(actual_iter=actual_iter)
         else:
             self._maybe_activate(actual_iter=actual_iter)
+
+    def _reconcile_pending_states(self) -> None:
+        if self._pending_requests:
+            return
+
+        if not self._pending_states:
+            return
+
+        pending_states = self._pending_states
+        self._pending_states = {}
+
+        for island_id, pending_state in pending_states.items():
+            current_state = self._states.get(island_id)
+
+            if (
+                current_state is not None
+                and pending_state["actual_iter"] < current_state["actual_iter"]
+            ):
+                continue
+
+            self._states[island_id] = pending_state
 
     def _all_states_current(self, actual_iter: int) -> bool:
         return all(
@@ -707,12 +747,18 @@ class IslandMigration(MigrationDriverBase):
 
         if not isinstance(particle, dict):
             self._finish_ring_request(actual_iter=actual_iter)
+
+            self._reconcile_pending_states()
+
             return
 
         identifier = particle.get("identifier")
 
         if not isinstance(identifier, str):
             self._finish_ring_request(actual_iter=actual_iter)
+
+            self._reconcile_pending_states()
+
             return
 
         donor_state = self._states.get(donor)
@@ -721,6 +767,9 @@ class IslandMigration(MigrationDriverBase):
 
         if donor_state is None or receiver_state is None:
             self._finish_ring_request(actual_iter=actual_iter)
+
+            self._reconcile_pending_states()
+
             return
 
         donor_state["population"].pop(identifier, None)
@@ -742,6 +791,8 @@ class IslandMigration(MigrationDriverBase):
         )
 
         self._finish_ring_request(actual_iter=actual_iter)
+
+        self._reconcile_pending_states()
 
     def _finish_ring_request(self, actual_iter: int) -> None:
         if actual_iter not in self._ring_pending:
@@ -812,3 +863,5 @@ class IslandMigration(MigrationDriverBase):
         del self._ring_pending[actual_iter]
 
         del self._ring_received[actual_iter]
+
+        self._reconcile_pending_states()
