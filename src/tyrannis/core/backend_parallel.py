@@ -153,6 +153,7 @@ class ParallelBackendBase(BackendBase, ABC):
                     {
                         "iteration": actual_iter,
                         "event": event,
+                        "origin": self._identifier,
                         "particle": particle(),
                     }
                 )
@@ -177,6 +178,7 @@ class ParallelBackendBase(BackendBase, ABC):
                     {
                         "iteration": actual_iter,
                         "event": event,
+                        "origin": self._identifier,
                         "particle": particle(),
                     }
                 )
@@ -216,6 +218,7 @@ class ParallelBackendBase(BackendBase, ABC):
                     {
                         "iteration": actual_iter,
                         "event": event,
+                        "origin": self._identifier,
                         "particle": particle_data,
                     }
                 )
@@ -236,6 +239,7 @@ class ParallelBackendBase(BackendBase, ABC):
                     {
                         "iteration": actual_iter,
                         "event": event,
+                        "origin": self._identifier,
                         "particle": particle(),
                     }
                 )
@@ -269,6 +273,7 @@ class ParallelBackendBase(BackendBase, ABC):
                     {
                         "iteration": actual_iter,
                         "event": self._history_config.get_event(event_name),
+                        "origin": self._identifier,
                         "particle": particle(),
                     }
                 )

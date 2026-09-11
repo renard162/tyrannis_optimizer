@@ -278,7 +278,6 @@ class ProcessorBase(ABC, Generic[SignalType]):
             departure_particle=self._departure_particle,
         )
 
-
     def _insert_arrival_particle(self, particle_data: dict[str, Any]) -> None:
         particle_id = particle_data.get("identifier")
 
@@ -326,6 +325,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
                     {
                         "iteration": actual_iter,
                         "event": event,
+                        "origin": self._identifier,
                         "particle": particle(),
                     }
                 )
@@ -347,6 +347,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
                     {
                         "iteration": actual_iter,
                         "event": event,
+                        "origin": self._identifier,
                         "particle": particle(),
                     }
                 )
@@ -380,6 +381,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
                     {
                         "iteration": actual_iter,
                         "event": event,
+                        "origin": self._identifier,
                         "particle": particle_data,
                     }
                 )
@@ -397,6 +399,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
                     {
                         "iteration": actual_iter,
                         "event": event,
+                        "origin": self._identifier,
                         "particle": particle(),
                     }
                 )
@@ -421,6 +424,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
                     {
                         "iteration": actual_iter,
                         "event": self._history_config.get_event(event_name),
+                        "origin": self._identifier,
                         "particle": particle(),
                     }
                 )
