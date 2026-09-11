@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
+
 from ..backend.distributed.communication.no_communication import (
     NoCommunicationDriver,
     NoCommunicationProcessor,
@@ -49,7 +51,7 @@ class IslandIsolationProcessor(MigrationProcessorBase):
     def migration_control(
         self,
         actual_iter: int,
-        population: dict[str, float],
+        population: dict[str, np.float64],
         iter_best: str | None,
         insert_arrival_particle: Callable[[dict[str, Any]], None],
         departure_particle: Callable[[str], None],

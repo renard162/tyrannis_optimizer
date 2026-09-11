@@ -7,6 +7,8 @@ from threading import Event, Thread
 from time import sleep
 from typing import Any
 
+import numpy as np
+
 from ..core.backend_communication import CommunicationProcessorBase
 from ..core.backend_migration import MigrationDriverBase, MigrationProcessorBase
 from ..core.results import HistoryConfig
@@ -43,7 +45,7 @@ class GlobalBestProcessor(MigrationProcessorBase):
 
         self._last_published_fitness: float | None = None
         self._migration_signal: LocalEvent | None = None
-        self._population: dict[str, float] | None = None
+        self._population: dict[str, np.float64] | None = None
 
     def initialize_loop_context(self, migration_signal: LocalEvent) -> None:
         """Initialize resources required by the processor iteration loop."""
@@ -74,7 +76,7 @@ class GlobalBestProcessor(MigrationProcessorBase):
     def migration_control(
         self,
         actual_iter: int,
-        population: dict[str, float],
+        population: dict[str, np.float64],
         iter_best: str | None,
         insert_arrival_particle: Callable[[dict[str, Any]], None],
         departure_particle: Callable[[str], None],
@@ -181,7 +183,7 @@ class GlobalBestProcessor(MigrationProcessorBase):
 
     def _consume_messages(
         self,
-        population: dict[str, float],
+        population: dict[str, np.float64],
         insert_arrival_particle: Callable[[dict[str, Any]], None],
         departure_particle: Callable[[str], None],
     ) -> None:
@@ -203,7 +205,7 @@ class GlobalBestProcessor(MigrationProcessorBase):
     def _consume_message(
         self,
         message: str,
-        population: dict[str, float],
+        population: dict[str, np.float64],
         insert_arrival_particle: Callable[[dict[str, Any]], None],
         departure_particle: Callable[[str], None],
     ) -> None:
@@ -219,6 +221,8 @@ class GlobalBestProcessor(MigrationProcessorBase):
 
         if message_type == self.SYNCHRONIZATION_RELEASE:
             actual_iter = payload.get("actual_iter")
+            if actual_iter is None:
+                raise RuntimeError("actual_iter cannot be None!")
 
             if actual_iter == self._synchronization_iter:
                 self._synchronization_iter = actual_iter + self._check_interval
@@ -245,7 +249,7 @@ class GlobalBestProcessor(MigrationProcessorBase):
 
     def _replace_worst_particle(
         self,
-        population: dict[str, float],
+        population: dict[str, np.float64],
         particle_data: dict[str, Any],
         insert_arrival_particle: Callable[[dict[str, Any]], None],
         departure_particle: Callable[[str], None],
@@ -264,7 +268,10 @@ class GlobalBestProcessor(MigrationProcessorBase):
         if not valid_population:
             return
 
-        worst_particle_id = max(valid_population, key=valid_population.get)
+        worst_particle_id = max(
+            valid_population,
+            key=lambda particle_id: valid_population[particle_id],
+        )
 
         arriving_particle = particle_data.copy()
         arriving_particle["identifier"] = worst_particle_id

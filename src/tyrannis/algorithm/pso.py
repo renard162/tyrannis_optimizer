@@ -3,8 +3,10 @@ from copy import deepcopy
 import numpy as np
 
 from ..core.algorithm import (
+    FITNESS_UNDEFINED,
     AlgorithmBase,
     ParticleBase,
+    Serializable,
 )
 
 
@@ -15,10 +17,10 @@ class PSOParticle(ParticleBase):
         self,
         identifier: str,
         variables: dict[str, float],
-        fitness: float = np.inf,
+        fitness: np.float64 = FITNESS_UNDEFINED,
         velocity: dict[str, float] | None = None,
         personal_best_variables: dict[str, float] | None = None,
-        personal_best_fitness: float = np.inf,
+        personal_best_fitness: np.float64 = FITNESS_UNDEFINED,
     ) -> None:
         super().__init__(
             identifier=identifier,
@@ -30,7 +32,7 @@ class PSOParticle(ParticleBase):
         self._personal_best_variables = personal_best_variables
         self._personal_best_fitness = personal_best_fitness
 
-    def __call__(self) -> dict[str, str | dict[str, float] | float | None]:
+    def __call__(self) -> dict[str, Serializable]:
         return {
             "identifier": self._identifier,
             "variables": self._variables,
@@ -53,7 +55,7 @@ class PSOParticle(ParticleBase):
         return self._personal_best_variables
 
     @property
-    def personal_best_fitness(self) -> float:
+    def personal_best_fitness(self) -> np.float64:
         return self._personal_best_fitness
 
     def update_personal_best(self) -> None:
@@ -82,10 +84,10 @@ class PSO(AlgorithmBase):
         self,
         identifier: str,
         variables: dict[str, float] | None = None,
-        fitness: float = np.inf,
+        fitness: np.float64 = FITNESS_UNDEFINED,
         velocity: dict[str, float] | None = None,
         personal_best_variables: dict[str, float] | None = None,
-        personal_best_fitness: float = np.inf,
+        personal_best_fitness: np.float64 = FITNESS_UNDEFINED,
     ) -> None:
         if identifier is None:
             raise ValueError("Particle identifier cannot be None.")
@@ -239,7 +241,7 @@ class PSO(AlgorithmBase):
                 )
 
             particle.consolidate(
-                consolidate_new=particle.candidate_fitness < particle.fitness,
+                consolidate_new=bool(particle.candidate_fitness < particle.fitness),
             )
             particle.update_personal_best()
 

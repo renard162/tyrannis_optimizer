@@ -1,6 +1,5 @@
-import json
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar
 
 
 @dataclass(frozen=True, slots=True)

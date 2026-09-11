@@ -73,7 +73,7 @@ class IslandMigrationProcessor(MigrationProcessorBase):
     def migration_control(
         self,
         actual_iter: int,
-        population: dict[str, float],
+        population: dict[str, np.float64],
         iter_best: str | None,
         insert_arrival_particle: Callable[[dict[str, Any]], None],
         departure_particle: Callable[[str], None],
@@ -126,7 +126,7 @@ class IslandMigrationProcessor(MigrationProcessorBase):
                 departure_particle=departure_particle,
             )
 
-    def _send_state(self, actual_iter: int, population: dict[str, float]) -> None:
+    def _send_state(self, actual_iter: int, population: dict[str, np.float64]) -> None:
         self._communication_processor.outgoing_queue.put(
             json.dumps(
                 {
@@ -188,6 +188,8 @@ class IslandMigrationProcessor(MigrationProcessorBase):
 
         if message_type == self.SYNCHRONIZATION_RELEASE:
             actual_iter = payload.get("actual_iter")
+            if actual_iter is None:
+                raise RuntimeError("actual_iter cannot be None.")
 
             if actual_iter == self._next_synchronization_iter:
                 self._next_synchronization_iter = actual_iter + self._min_interval

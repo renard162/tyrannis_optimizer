@@ -6,7 +6,12 @@ from typing import Any, Generic, Self, TypeVar
 
 import numpy as np
 
-from .algorithm import AlgorithmBase, CostFunctionWrapperBase, ParticleBase
+from .algorithm import (
+    FITNESS_UNDEFINED,
+    AlgorithmBase,
+    CostFunctionWrapperBase,
+    ParticleBase,
+)
 from .backend_migration import MigrationDriverBase, MigrationProcessorBase
 from .results import HistoryConfig, ProcessorResult
 from .signals import LocalEvent
@@ -32,7 +37,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
     _processors_pool: dict[str, Self]
     _migration_driver: MigrationDriverBase | None
     _migration_processor: MigrationProcessorBase | None
-    _population: dict[str, float]
+    _population: dict[str, np.float64]
     _result: ProcessorResult
 
     _excluded_attributes: tuple[str, ...] = (
@@ -230,7 +235,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
         return self._processors_pool
 
     @property
-    def population(self) -> dict[str, float]:
+    def population(self) -> dict[str, np.float64]:
         return self._population
 
     @property
@@ -481,7 +486,7 @@ def evaluate_particle(
     except Exception:
         if fitness_failure_strategy == "invalidate":
             particle = algorithm.population[particle_id]
-            particle.candidate_fitness = np.inf
+            particle.candidate_fitness = FITNESS_UNDEFINED
             return particle
 
         raise

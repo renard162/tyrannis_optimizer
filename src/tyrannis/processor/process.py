@@ -7,6 +7,7 @@ from multiprocessing.synchronize import Event as EventProtocol
 from typing import Any
 
 import cloudpickle
+import numpy as np
 
 from ..core.algorithm import CostFunctionWrapperBase
 from ..core.processor import (
@@ -23,7 +24,7 @@ class ProcessPoolCostFunctionWrapper(CostFunctionWrapperBase):
         self._serialized_function = cloudpickle.dumps(function)
         self._function: Callable[..., float] | None = None
 
-    def __call__(self, *args: Any, **kwargs: Any) -> float:
+    def __call__(self, *args: Any, **kwargs: Any) -> np.float64:
         if self._function is None:
             self._function = cloudpickle.loads(self._serialized_function)
 

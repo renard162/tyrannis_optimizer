@@ -13,18 +13,21 @@ Serializable: TypeAlias = (
     | float
     | np.float64
     | bool
+    | None
     | list["Serializable"]
     | Mapping[str, "Serializable"]
 )
+
+FITNESS_UNDEFINED: np.float64 = np.float64(np.inf)
 
 
 class CostFunctionWrapperBase(ABC):
     """Neutral wrapper for a cost function."""
 
-    def __init__(self, function: Callable[..., float]) -> None:
+    def __init__(self, function: Callable[..., np.float64]) -> None:
         self._function = function
 
-    def __call__(self, *args: Any, **kwargs: Any) -> float:
+    def __call__(self, *args: Any, **kwargs: Any) -> np.float64:
         function = self._function
         return function(*args, **kwargs)
 
@@ -56,7 +59,7 @@ class ParticleBase(ABC):
         self,
         identifier: str,
         variables: dict[str, float],
-        fitness: float = np.inf,
+        fitness: np.float64 = FITNESS_UNDEFINED,
     ) -> None:
         self._identifier = identifier
         self._variables = variables
@@ -102,7 +105,7 @@ class ParticleBase(ABC):
         return self._variables
 
     @property
-    def fitness(self) -> float:
+    def fitness(self) -> np.float64:
         return self._fitness
 
     @property
@@ -116,11 +119,11 @@ class ParticleBase(ABC):
         self._candidate_variables = new_variables
 
     @property
-    def candidate_fitness(self) -> float | None:
+    def candidate_fitness(self) -> np.float64 | None:
         return self._candidate_fitness
 
     @candidate_fitness.setter
-    def candidate_fitness(self, new_value: float | None) -> None:
+    def candidate_fitness(self, new_value: np.float64 | None) -> None:
         self._candidate_fitness = new_value
 
     @property
@@ -137,7 +140,7 @@ class ParticleBase(ABC):
     def update(
         self,
         variables: dict[str, float],
-        fitness_function: Callable[[dict[str, float]], float],
+        fitness_function: Callable[[dict[str, float]], np.float64],
     ) -> None:
         if variables is None:
             raise ValueError("Variables cannot be None.")
@@ -226,7 +229,7 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
 
     def initialize_context(
         self,
-        fitness_function: Callable[[dict[str, float]], float],
+        fitness_function: Callable[[dict[str, float]], np.float64],
         boundaries: dict[str, tuple[float, float]],
     ) -> None:
         self._fitness_function = fitness_function
@@ -283,7 +286,7 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         self,
         identifier: str,
         variables: dict[str, float] | None = None,
-        fitness: float = np.inf,
+        fitness: np.float64 = FITNESS_UNDEFINED,
         *args: Any,
         **kwargs: Any,
     ) -> None:

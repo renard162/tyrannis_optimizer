@@ -250,7 +250,7 @@ class MigrationProcessorBase(ABC):
     def migration_control(
         self,
         actual_iter: int,
-        population: dict[str, float],
+        population: dict[str, np.float64],
         iter_best: str | None,
         insert_arrival_particle: Callable[[dict[str, Any]], None],
         departure_particle: Callable[[str], None],
