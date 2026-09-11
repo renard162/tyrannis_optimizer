@@ -3,6 +3,8 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
 
+import numpy as np
+
 from ..core.results import HistoryConfig
 from .backend_communication import (
     CommunicationDriverBase,
@@ -542,6 +544,7 @@ class MigrationDriverBase(ABC):
         )
         self._history_buffer = []
         self._seed = seed
+        self._rng = np.random.default_rng(seed)
 
     def create_processor_module(self, identifier: str) -> MigrationProcessorBase:
         """
