@@ -241,6 +241,14 @@ def _process_particle_batches(
                 else:
                     particle = algorithm.update_particle(particle_id)
 
+                candidate_fitness = particle.candidate_fitness
+
+                if candidate_fitness is not None and np.isnan(candidate_fitness):
+                    raise ValueError(
+                        f"Cost function returned NaN for particle '{particle_id}'. "
+                        "NaN is an invalid cost function result."
+                    )
+
             except Exception:
                 if fitness_failure_strategy == "raise":
                     raise

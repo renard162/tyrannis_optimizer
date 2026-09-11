@@ -479,9 +479,19 @@ def evaluate_particle(
 ) -> ParticleBase:
     try:
         if initialize_particle:
-            return algorithm.initialize_particle(particle_id)
+            particle = algorithm.initialize_particle(particle_id)
+        else:
+            particle = algorithm.update_particle(particle_id)
 
-        return algorithm.update_particle(particle_id)
+        candidate_fitness = particle.candidate_fitness
+
+        if candidate_fitness is not None and np.isnan(candidate_fitness):
+            raise ValueError(
+                f"Cost function returned NaN for particle '{particle_id}'. "
+                "NaN is an invalid cost function result."
+            )
+
+        return particle
 
     except Exception:
         if fitness_failure_strategy == "invalidate":
