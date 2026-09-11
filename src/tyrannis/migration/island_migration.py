@@ -30,6 +30,7 @@ class IslandMigrationProcessor(MigrationProcessorBase):
         selection: str,
         migration_size: int,
         min_interval: int,
+        movement_strategy: str,
         communication_processor: CommunicationProcessorBase,
         *args: Any,
         **kwargs: Any,
@@ -38,11 +39,15 @@ class IslandMigrationProcessor(MigrationProcessorBase):
         self._selection = selection
         self._migration_size = migration_size
         self._min_interval = min_interval
+        self._movement_strategy = movement_strategy
         self._communication_processor = communication_processor
+
         self._migration_signal: LocalEvent | None = None
         self._algorithm = None
+
         self._ring_iter = initial_iter
         self._ring_released = False
+
         self._rng = np.random.default_rng()
 
     def start(self) -> None:
@@ -79,10 +84,13 @@ class IslandMigrationProcessor(MigrationProcessorBase):
             self._migration_signal.clear()
             return
 
-        self._send_state(
-            actual_iter=actual_iter,
-            population=population,
-        )
+        self._send_state(actual_iter=actual_iter, population=population)
+
+        # Only ring is synchronous. All other movement strategies are
+        # asynchronous and must return immediately.
+        if self._movement_strategy != "ring":
+            self._migration_signal.clear()
+            return
 
         if actual_iter != self._ring_iter:
             self._migration_signal.clear()
@@ -170,11 +178,8 @@ class IslandMigrationProcessor(MigrationProcessorBase):
 
         if not particle_ids:
             particle = None
-
         else:
-            particle_id = self._select_particle(
-                particle_ids=particle_ids,
-            )
+            particle_id = self._select_particle(particle_ids=particle_ids)
 
             particle = self._algorithm.population[particle_id]()
             departure_particle(particle_id)
@@ -198,6 +203,7 @@ class IslandMigrationProcessor(MigrationProcessorBase):
 
         if self._selection == "random":
             random_values = self._rng.random(len(particle_ids))
+
             return particle_ids[int(np.argmin(random_values))]
 
         fitness = np.asarray(
@@ -218,6 +224,7 @@ class IslandMigrationProcessor(MigrationProcessorBase):
             target = np.max(fitness)
 
         candidates = np.flatnonzero(fitness == target)
+
         return particle_ids[int(self._rng.choice(candidates))]
 
 
@@ -249,16 +256,9 @@ class IslandMigration(MigrationDriverBase):
             "ring_sequential",
         }
 
-        selections = {
-            "random",
-            "best",
-            "worst",
-        }
+        selections = {"random", "best", "worst"}
 
-        triggers = {
-            "n_iter",
-            "random",
-        }
+        triggers = {"n_iter", "random"}
 
         if initial_iter < 1:
             raise ValueError("initial_iter must be greater than 0.")
@@ -301,15 +301,20 @@ class IslandMigration(MigrationDriverBase):
             "selection": particle_selection,
             "migration_size": migration_size,
             "min_interval": min_interval,
+            "movement_strategy": movement_strategy,
         }
 
         self._island_ids: list[str] = []
         self._states: dict[str, dict[str, Any]] = {}
+
         self._next_migration_iter = initial_iter
         self._last_trigger_check_iter: int | None = None
+
         self._pending_requests: dict[str, tuple[str, str, int]] = {}
+
         self._ring_pending: dict[int, int] = {}
         self._ring_received: dict[int, int] = {}
+
         self._running = Event()
         self._thread: Thread | None = None
 
@@ -329,9 +334,7 @@ class IslandMigration(MigrationDriverBase):
             seed=seed,
         )
 
-        self._island_ids = sorted(
-            communication_driver.incoming_queues,
-        )
+        self._island_ids = sorted(communication_driver.incoming_queues)
 
     def start(self) -> None:
         self._states.clear()
@@ -347,9 +350,7 @@ class IslandMigration(MigrationDriverBase):
         self._communication_driver.start()
 
         self._thread = Thread(
-            target=self._routing_loop,
-            name="island-migration",
-            daemon=True,
+            target=self._routing_loop, name="island-migration", daemon=True
         )
 
         self._thread.start()
@@ -381,10 +382,7 @@ class IslandMigration(MigrationDriverBase):
                 except Empty:
                     break
 
-                self._route_message(
-                    island_id=island_id,
-                    message=message,
-                )
+                self._route_message(island_id=island_id, message=message)
 
     def _route_message(self, island_id: str, message: str) -> None:
         try:
@@ -413,21 +411,14 @@ class IslandMigration(MigrationDriverBase):
             }
 
             if self._movement_strategy == "ring":
-                self._maybe_activate_ring(
-                    actual_iter=actual_iter,
-                )
-
+                self._maybe_activate_ring(actual_iter=actual_iter)
             else:
-                self._maybe_activate(
-                    actual_iter=actual_iter,
-                )
+                self._maybe_activate(actual_iter=actual_iter)
 
             return
 
         if message_type == IslandMigrationProcessor.PARTICLE:
-            self._receive_particle(
-                payload=payload,
-            )
+            self._receive_particle(payload=payload)
 
     def _maybe_activate(self, actual_iter: int) -> None:
         if actual_iter < self._next_migration_iter:
@@ -442,9 +433,7 @@ class IslandMigration(MigrationDriverBase):
             if self._rng.random() >= self._migration_probability:
                 return
 
-        self._activate_migration(
-            actual_iter=actual_iter,
-        )
+        self._activate_migration(actual_iter=actual_iter)
 
         self._next_migration_iter = actual_iter + self._min_interval
 
@@ -459,16 +448,10 @@ class IslandMigration(MigrationDriverBase):
 
             request_id = f"migration:{actual_iter}:{len(self._pending_requests)}"
 
-            self._pending_requests[request_id] = (
-                donor,
-                receiver,
-                actual_iter,
-            )
+            self._pending_requests[request_id] = (donor, receiver, actual_iter)
 
             self._request_particle(
-                donor=donor,
-                request_id=request_id,
-                actual_iter=actual_iter,
+                donor=donor, request_id=request_id, actual_iter=actual_iter
             )
 
     def _request_particle(self, donor: str, request_id: str, actual_iter: int) -> None:
@@ -488,19 +471,14 @@ class IslandMigration(MigrationDriverBase):
         if not donors:
             return None
 
-        donor = self._choose_donor(
-            candidates=donors,
-        )
+        donor = self._choose_donor(candidates=donors)
 
         receivers = [island_id for island_id in self._island_ids if island_id != donor]
 
         if not receivers:
             return None
 
-        receiver = self._choose_receiver(
-            donor=donor,
-            candidates=receivers,
-        )
+        receiver = self._choose_receiver(donor=donor, candidates=receivers)
 
         return donor, receiver
 
@@ -508,26 +486,15 @@ class IslandMigration(MigrationDriverBase):
         return [
             island_id
             for island_id in self._island_ids
-            if len(
-                self._states.get(
-                    island_id,
-                    {},
-                ).get(
-                    "population",
-                    {},
-                )
-            )
+            if len(self._states.get(island_id, {}).get("population", {}))
             > self._min_population
         ]
 
     def _choose_donor(self, candidates: list[str]) -> str:
-        random_values = self._rng.random(
-            len(candidates),
-        )
+        random_values = self._rng.random(len(candidates))
 
         if not self._balance_population:
             scores = random_values
-
         else:
             populations = np.asarray(
                 [
@@ -538,18 +505,13 @@ class IslandMigration(MigrationDriverBase):
             )
 
             total_population = populations.sum()
-
             x = populations / (total_population + 1)
             y = x / (x - 1)
             penalty = 2 * sp.special.expit(y) - 1
-
             scores = random_values + penalty
 
         minimum = np.min(scores)
-
-        choices = np.flatnonzero(
-            scores == minimum,
-        )
+        choices = np.flatnonzero(scores == minimum)
 
         return candidates[int(self._rng.choice(choices))]
 
@@ -577,9 +539,7 @@ class IslandMigration(MigrationDriverBase):
             return self._random_island(candidates)
 
         if strategy == "greedy":
-            return self._best_fitness_island(
-                candidates,
-            )
+            return self._best_fitness_island(candidates)
 
         if strategy == "greedy_neighbor":
             neighbors = [
@@ -588,9 +548,7 @@ class IslandMigration(MigrationDriverBase):
                 if island_id in candidates
             ]
 
-            return self._best_fitness_island(
-                neighbors,
-            )
+            return self._best_fitness_island(neighbors)
 
         if strategy == "greedy_random":
             fitness = np.asarray(
@@ -599,41 +557,25 @@ class IslandMigration(MigrationDriverBase):
             )
 
             if np.all(np.isinf(fitness)):
-                return self._random_island(
-                    candidates,
-                )
+                return self._random_island(candidates)
 
-            random_values = self._rng.random(
-                len(candidates),
-            )
-
+            random_values = self._rng.random(len(candidates))
             greedy = 2 * sp.special.expit(fitness) - 1
             scores = random_values * greedy
             minimum = np.min(scores)
-
-            choices = np.flatnonzero(
-                scores == minimum,
-            )
+            choices = np.flatnonzero(scores == minimum)
 
             return candidates[int(self._rng.choice(choices))]
 
         if strategy == "ring_sequential":
-            return self._next_ring_island(
-                donor,
-            )
+            return self._next_ring_island(donor)
 
         raise RuntimeError(f"Unsupported movement strategy: {strategy!r}")
 
     def _random_island(self, candidates: list[str]) -> str:
-        random_values = self._rng.random(
-            len(candidates),
-        )
-
+        random_values = self._rng.random(len(candidates))
         minimum = np.min(random_values)
-
-        choices = np.flatnonzero(
-            random_values == minimum,
-        )
+        choices = np.flatnonzero(random_values == minimum)
 
         return candidates[int(self._rng.choice(choices))]
 
@@ -642,21 +584,14 @@ class IslandMigration(MigrationDriverBase):
             raise RuntimeError("No receiver candidates are available.")
 
         fitness = np.asarray(
-            [self._island_fitness(island_id) for island_id in candidates],
-            dtype=float,
+            [self._island_fitness(island_id) for island_id in candidates], dtype=float
         )
 
         if np.all(np.isinf(fitness)):
-            return self._random_island(
-                candidates,
-            )
+            return self._random_island(candidates)
 
         minimum = np.min(fitness)
-
-        choices = np.flatnonzero(
-            fitness == minimum,
-        )
-
+        choices = np.flatnonzero(fitness == minimum)
         return candidates[int(self._rng.choice(choices))]
 
     def _island_fitness(self, island_id: str) -> float:
@@ -673,9 +608,7 @@ class IslandMigration(MigrationDriverBase):
         return float(np.min(fitness))
 
     def _neighbors(self, island_id: str) -> list[str]:
-        index = self._island_ids.index(
-            island_id,
-        )
+        index = self._island_ids.index(island_id)
 
         return [
             self._island_ids[(index - 1) % len(self._island_ids)],
@@ -688,21 +621,14 @@ class IslandMigration(MigrationDriverBase):
         ]
 
     def _receive_particle(self, payload: dict[str, Any]) -> None:
-        request_id = payload.get(
-            "request_id",
-        )
+        request_id = payload.get("request_id")
 
-        particle = payload.get(
-            "particle",
-        )
+        particle = payload.get("particle")
 
         if not isinstance(request_id, str):
             return
 
-        request = self._pending_requests.pop(
-            request_id,
-            None,
-        )
+        request = self._pending_requests.pop(request_id, None)
 
         if request is None:
             return
@@ -710,15 +636,10 @@ class IslandMigration(MigrationDriverBase):
         donor, receiver, actual_iter = request
 
         if not isinstance(particle, dict):
-            self._finish_ring_request(
-                actual_iter=actual_iter,
-            )
+            self._finish_ring_request(actual_iter=actual_iter)
             return
 
-        self._states[donor]["population"].pop(
-            particle["identifier"],
-            None,
-        )
+        self._states[donor]["population"].pop(particle["identifier"], None)
 
         self._states[receiver]["population"][particle["identifier"]] = particle[
             "fitness"
@@ -735,15 +656,10 @@ class IslandMigration(MigrationDriverBase):
         )
 
         self.migration_log(
-            particle=particle,
-            origin=donor,
-            destination=receiver,
-            iteration=actual_iter,
+            particle=particle, origin=donor, destination=receiver, iteration=actual_iter
         )
 
-        self._finish_ring_request(
-            actual_iter=actual_iter,
-        )
+        self._finish_ring_request(actual_iter=actual_iter)
 
     def _finish_ring_request(self, actual_iter: int) -> None:
         if actual_iter not in self._ring_pending:
@@ -751,20 +667,14 @@ class IslandMigration(MigrationDriverBase):
 
         self._ring_received[actual_iter] += 1
 
-        self._finish_ring_if_ready(
-            actual_iter=actual_iter,
-        )
+        self._finish_ring_if_ready(actual_iter=actual_iter)
 
     def _maybe_activate_ring(self, actual_iter: int) -> None:
         if actual_iter != self._next_migration_iter:
             return
 
         if not all(
-            self._states.get(
-                island_id,
-                {},
-            ).get("actual_iter")
-            == actual_iter
+            self._states.get(island_id, {}).get("actual_iter") == actual_iter
             for island_id in self._island_ids
         ):
             return
@@ -772,9 +682,7 @@ class IslandMigration(MigrationDriverBase):
         if actual_iter in self._ring_pending:
             return
 
-        self._activate_ring(
-            actual_iter=actual_iter,
-        )
+        self._activate_ring(actual_iter=actual_iter)
 
         self._next_migration_iter = actual_iter + self._min_interval
 
@@ -786,32 +694,20 @@ class IslandMigration(MigrationDriverBase):
         self._ring_received[actual_iter] = 0
 
         for donor in donors:
-            receiver = self._next_ring_island(
-                donor,
-            )
+            receiver = self._next_ring_island(donor)
 
             request_id = f"ring:{actual_iter}:{donor}"
 
-            self._pending_requests[request_id] = (
-                donor,
-                receiver,
-                actual_iter,
-            )
+            self._pending_requests[request_id] = (donor, receiver, actual_iter)
 
             self._request_particle(
-                donor=donor,
-                request_id=request_id,
-                actual_iter=actual_iter,
+                donor=donor, request_id=request_id, actual_iter=actual_iter
             )
 
-        self._finish_ring_if_ready(
-            actual_iter=actual_iter,
-        )
+        self._finish_ring_if_ready(actual_iter=actual_iter)
 
     def _finish_ring_if_ready(self, actual_iter: int) -> None:
-        expected = self._ring_pending.get(
-            actual_iter,
-        )
+        expected = self._ring_pending.get(actual_iter)
 
         if expected is None:
             return
