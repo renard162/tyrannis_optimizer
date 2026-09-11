@@ -43,6 +43,7 @@ class GlobalBestProcessor(MigrationProcessorBase):
 
         self._last_published_fitness: float | None = None
         self._migration_signal: LocalEvent | None = None
+        self._population: dict[str, float] | None = None
 
     def initialize_loop_context(self, migration_signal: LocalEvent) -> None:
         """Initialize resources required by the processor iteration loop."""
@@ -50,6 +51,7 @@ class GlobalBestProcessor(MigrationProcessorBase):
         self._migration_signal = migration_signal
         self._synchronization_iter = self._initial_iter
         self._last_published_fitness = None
+        self._population = None
         self._communication_processor.set_message_signal(migration_signal)
 
     def finalize_loop_context(self) -> None:
@@ -57,6 +59,7 @@ class GlobalBestProcessor(MigrationProcessorBase):
 
         self._communication_processor.set_message_signal(None)
         self._migration_signal = None
+        self._population = None
 
     def start(self) -> None:
         """Start the processor communication backend."""
@@ -80,6 +83,8 @@ class GlobalBestProcessor(MigrationProcessorBase):
 
         if self._migration_signal is None:
             raise RuntimeError("Migration loop context has not been initialized.")
+
+        self._population = population
 
         self._consume_messages(
             population=population,
@@ -116,6 +121,9 @@ class GlobalBestProcessor(MigrationProcessorBase):
         if actual_iter < self._synchronization_iter:
             return
 
+        if self._population is None:
+            raise RuntimeError("Migration population has not been initialized.")
+
         checkpoint = self._synchronization_iter
 
         self._communication_processor.outgoing_queue.put(
@@ -127,6 +135,7 @@ class GlobalBestProcessor(MigrationProcessorBase):
 
             self._consume_message(
                 message=message,
+                population=self._population,
                 insert_arrival_particle=insert_arrival_particle,
                 departure_particle=departure_particle,
             )
@@ -182,6 +191,7 @@ class GlobalBestProcessor(MigrationProcessorBase):
 
             self._consume_message(
                 message=message,
+                population=population,
                 insert_arrival_particle=insert_arrival_particle,
                 departure_particle=departure_particle,
             )
@@ -189,6 +199,7 @@ class GlobalBestProcessor(MigrationProcessorBase):
     def _consume_message(
         self,
         message: str,
+        population: dict[str, float],
         insert_arrival_particle: Callable[[dict[str, Any]], None],
         departure_particle: Callable[[str], None],
     ) -> None:
