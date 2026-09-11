@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
+from numpy.random import SeedSequence
 
 from ..core.results import HistoryConfig
 from .algorithm import AlgorithmBase
@@ -99,6 +100,7 @@ class MigrationProcessorBase(ABC):
         self,
         initial_iter: int,
         communication_processor: CommunicationProcessorBase,
+        seed: SeedSequence | int | None,
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -524,6 +526,12 @@ class MigrationDriverBase(ABC):
     synchronization models, including asynchronous strategies in which
     processors operate independently and synchronous strategies in which the
     driver coordinates when processors may proceed.
+
+    The migration driver also maintains a random seed sequence initialized
+    from the optimizer seed. Each processor-side migration module receives an
+    independent child seed sequence when it is created. This keeps the random
+    streams of different migration processors independent while preserving
+    deterministic derivation from the original seed.
     """
 
     _processor_class: type[MigrationProcessorBase]
@@ -531,6 +539,7 @@ class MigrationDriverBase(ABC):
     _communication_processor_class: type[CommunicationProcessorBase]
     _migration_processor_init_kargs: dict[str, Any]
     _history_buffer: list[str]
+    _seed_sequence: np.random.SeedSequence
 
     @abstractmethod
     def __init__(self, initial_iter: int = 1, *args: Any, **kargs: Any) -> None:
@@ -614,6 +623,15 @@ class MigrationDriverBase(ABC):
             communication processor. The processor-specific `identifier`
             is added by `create_processor_module`.
 
+        history_config:
+            Configuration controlling which migration history events are
+            recorded.
+
+        seed:
+            Seed used to initialize the migration random seed sequence. A
+            child seed sequence is generated from this sequence for each
+            migration processor created by `create_processor_module`.
+
         Notes
         -----
         This method configures the communication context; it does not start
@@ -624,11 +642,9 @@ class MigrationDriverBase(ABC):
         being stored, so later modifications to the original dictionary do
         not alter the migration configuration.
 
-        Concrete migration strategies overriding this method must call
-        `super().initialize_context(...)` unless they intentionally replace
-        the base implementation in its entirety. The base implementation is
-        responsible for storing the communication context required by
-        `create_processor_module`.
+        The seed is used only to initialize the driver-side seed sequence.
+        Individual migration processors receive independent child seed
+        sequences when they are created.
         """
         self._communication_driver = communication_driver
         self._communication_processor_class = communication_processor_class
@@ -638,6 +654,7 @@ class MigrationDriverBase(ABC):
         )
         self._history_buffer = []
         self._seed = seed
+        self._seed_sequence = np.random.SeedSequence(seed)
         self._rng = np.random.default_rng(seed)
 
     def create_processor_module(self, identifier: str) -> MigrationProcessorBase:
@@ -658,7 +675,8 @@ class MigrationDriverBase(ABC):
         -------
         MigrationProcessorBase
             A new migration processor configured with an independent
-            communication processor for the specified processor.
+            communication processor and random seed sequence for the
+            specified processor.
 
         Notes
         -----
@@ -672,6 +690,11 @@ class MigrationDriverBase(ABC):
         Migration-specific initialization arguments are kept separate from
         communication arguments. The communication configuration is removed
         before constructing the migration processor itself.
+
+        Each migration processor receives a distinct child seed sequence
+        generated from the driver's seed sequence. Consequently, processor
+        random streams are independently derived from the original optimizer
+        seed.
 
         This method is responsible only for construction. Runtime resources
         must be initialized according to the lifecycle contract of the
@@ -691,6 +714,7 @@ class MigrationDriverBase(ABC):
 
         return self._processor_class(
             communication_processor=communication_processor,
+            seed=self._seed_sequence.spawn(1)[0],
             **migration_processor_kargs,
         )
 
