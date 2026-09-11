@@ -279,6 +279,12 @@ class ProcessorBase(ABC, Generic[SignalType]):
             departure_particle=self._departure_particle,
         )
 
+        self._migration_processor.synchronization_control(
+            actual_iter=actual_iter,
+            insert_arrival_particle=self._insert_arrival_particle,
+            departure_particle=self._departure_particle,
+        )
+
     def _insert_arrival_particle(self, particle_data: dict[str, Any]) -> None:
         particle_id = particle_data.get("identifier")
 

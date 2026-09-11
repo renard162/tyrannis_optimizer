@@ -23,6 +23,8 @@ class IslandMigrationProcessor(MigrationProcessorBase):
     MIGRATION_REQUEST = "migration_request"
     PARTICLE = "particle"
     RING_RELEASE = "ring_release"
+    SYNCHRONIZATION_PAUSE = "synchronization_pause"
+    SYNCHRONIZATION_RELEASE = "synchronization_release"
 
     def __init__(
         self,
@@ -31,6 +33,7 @@ class IslandMigrationProcessor(MigrationProcessorBase):
         migration_size: int,
         min_interval: int,
         movement_strategy: str,
+        trigger: str,
         communication_processor: CommunicationProcessorBase,
         *args: Any,
         **kwargs: Any,
@@ -40,6 +43,7 @@ class IslandMigrationProcessor(MigrationProcessorBase):
         self._migration_size = migration_size
         self._min_interval = min_interval
         self._movement_strategy = movement_strategy
+        self._trigger = trigger
         self._communication_processor = communication_processor
 
         self._migration_signal: LocalEvent | None = None
@@ -47,6 +51,9 @@ class IslandMigrationProcessor(MigrationProcessorBase):
 
         self._ring_iter = initial_iter
         self._ring_released = False
+
+        self._next_synchronization_iter = initial_iter
+        self._synchronization_paused_iter: int | None = None
 
         self._rng = np.random.default_rng()
 
@@ -58,11 +65,14 @@ class IslandMigrationProcessor(MigrationProcessorBase):
 
     def initialize_loop_context(self, migration_signal: LocalEvent) -> None:
         self._migration_signal = migration_signal
+        self._next_synchronization_iter = self._initial_iter
+        self._synchronization_paused_iter = None
         self._communication_processor.set_message_signal(migration_signal)
 
     def finalize_loop_context(self) -> None:
         self._communication_processor.set_message_signal(None)
         self._migration_signal = None
+        self._synchronization_paused_iter = None
 
     def migration_control(
         self,
@@ -109,6 +119,39 @@ class IslandMigrationProcessor(MigrationProcessorBase):
         self._ring_released = False
         self._migration_signal.clear()
 
+    def synchronization_control(
+        self,
+        actual_iter: int,
+        insert_arrival_particle: Callable[[dict[str, Any]], None],
+        departure_particle: Callable[[str], None],
+    ) -> None:
+        if self._trigger != "synchronous":
+            return
+
+        if actual_iter < self._next_synchronization_iter:
+            return
+
+        checkpoint = self._next_synchronization_iter
+
+        if self._synchronization_paused_iter != checkpoint:
+            self._synchronization_paused_iter = checkpoint
+            self._communication_processor.outgoing_queue.put(
+                json.dumps(
+                    {
+                        "type": self.SYNCHRONIZATION_PAUSE,
+                        "actual_iter": checkpoint,
+                    }
+                )
+            )
+
+        while actual_iter >= self._next_synchronization_iter:
+            message = self._communication_processor.messages.get()
+            self._consume_message(
+                message=message,
+                insert_arrival_particle=insert_arrival_particle,
+                departure_particle=departure_particle,
+            )
+
     def _send_state(self, actual_iter: int, population: dict[str, float]) -> None:
         self._communication_processor.outgoing_queue.put(
             json.dumps(
@@ -131,34 +174,56 @@ class IslandMigrationProcessor(MigrationProcessorBase):
             except Empty:
                 return
 
-            try:
-                payload = json.loads(message)
-            except (TypeError, json.JSONDecodeError):
-                continue
+            self._consume_message(
+                message=message,
+                insert_arrival_particle=insert_arrival_particle,
+                departure_particle=departure_particle,
+            )
 
-            if not isinstance(payload, dict):
-                continue
+    def _consume_message(
+        self,
+        message: str,
+        insert_arrival_particle: Callable[[dict[str, Any]], None],
+        departure_particle: Callable[[str], None],
+    ) -> None:
+        try:
+            payload = json.loads(message)
+        except (TypeError, json.JSONDecodeError):
+            return
 
-            message_type = payload.get("type")
+        if not isinstance(payload, dict):
+            return
 
-            if message_type == self.MIGRATION_REQUEST:
-                self._send_selected_particle(
-                    request_id=payload.get("request_id"),
-                    actual_iter=payload.get("actual_iter"),
-                    departure_particle=departure_particle,
-                )
+        message_type = payload.get("type")
 
-            elif message_type == self.PARTICLE:
-                particle = payload.get("particle")
+        if message_type == self.MIGRATION_REQUEST:
+            self._send_selected_particle(
+                request_id=payload.get("request_id"),
+                actual_iter=payload.get("actual_iter"),
+                departure_particle=departure_particle,
+            )
+            return
 
-                if isinstance(particle, dict):
-                    insert_arrival_particle(particle)
+        if message_type == self.PARTICLE:
+            particle = payload.get("particle")
 
-            elif message_type == self.RING_RELEASE:
-                actual_iter = payload.get("actual_iter")
+            if isinstance(particle, dict):
+                insert_arrival_particle(particle)
+            return
 
-                if actual_iter == self._ring_iter:
-                    self._ring_released = True
+        if message_type == self.RING_RELEASE:
+            actual_iter = payload.get("actual_iter")
+
+            if actual_iter == self._ring_iter:
+                self._ring_released = True
+            return
+
+        if message_type == self.SYNCHRONIZATION_RELEASE:
+            actual_iter = payload.get("actual_iter")
+
+            if actual_iter == self._next_synchronization_iter:
+                self._next_synchronization_iter = actual_iter + self._min_interval
+                self._synchronization_paused_iter = None
 
     def _send_selected_particle(
         self,
@@ -259,7 +324,7 @@ class IslandMigration(MigrationDriverBase):
 
         selections = {"random", "best", "worst"}
 
-        triggers = {"n_iter", "random"}
+        triggers = {"n_iter", "random", "synchronous"}
 
         if initial_iter < 1:
             raise ValueError("initial_iter must be greater than 0.")
@@ -303,6 +368,7 @@ class IslandMigration(MigrationDriverBase):
             "migration_size": migration_size,
             "min_interval": min_interval,
             "movement_strategy": movement_strategy,
+            "trigger": trigger,
         }
 
         self._island_ids: list[str] = []
@@ -326,6 +392,9 @@ class IslandMigration(MigrationDriverBase):
 
         self._ring_pending: dict[int, int] = {}
         self._ring_received: dict[int, int] = {}
+
+        self._synchronization_paused: dict[int, set[str]] = {}
+        self._synchronization_pending: dict[int, set[str]] = {}
 
         self._running = Event()
         self._thread: Thread | None = None
@@ -356,6 +425,8 @@ class IslandMigration(MigrationDriverBase):
         self._reserved_departures.clear()
         self._ring_pending.clear()
         self._ring_received.clear()
+        self._synchronization_paused.clear()
+        self._synchronization_pending.clear()
 
         self._next_migration_iter = self._initial_iter
         self._last_trigger_check_iter = None
@@ -416,6 +487,67 @@ class IslandMigration(MigrationDriverBase):
 
         if message_type == IslandMigrationProcessor.PARTICLE:
             self._receive_particle(payload=payload)
+            return
+
+        if message_type == IslandMigrationProcessor.SYNCHRONIZATION_PAUSE:
+            self._receive_synchronization_pause(island_id=island_id, payload=payload)
+
+    def _receive_synchronization_pause(
+        self, island_id: str, payload: dict[str, Any]
+    ) -> None:
+        actual_iter = payload.get("actual_iter")
+
+        if not isinstance(actual_iter, int):
+            return
+
+        if actual_iter != self._next_migration_iter:
+            return
+
+        paused = self._synchronization_paused.setdefault(actual_iter, set())
+
+        if island_id in paused:
+            return
+
+        paused.add(island_id)
+
+        if len(paused) != len(self._island_ids):
+            return
+
+        if not self._all_states_current(actual_iter):
+            return
+
+        if self._pending_requests:
+            return
+
+        pending_requests: set[str] = set()
+        self._synchronization_pending[actual_iter] = pending_requests
+
+        self._activate_migration(
+            actual_iter=actual_iter,
+            pending_requests=pending_requests,
+        )
+
+        self._finish_synchronization(actual_iter=actual_iter)
+
+    def _finish_synchronization(self, actual_iter: int) -> None:
+        pending = self._synchronization_pending.get(actual_iter)
+
+        if pending is None or pending:
+            return
+
+        release = json.dumps(
+            {
+                "type": IslandMigrationProcessor.SYNCHRONIZATION_RELEASE,
+                "actual_iter": actual_iter,
+            }
+        )
+
+        for queue in self._communication_driver.outgoing_queues.values():
+            queue.put(release)
+
+        self._next_migration_iter = actual_iter + self._min_interval
+        self._synchronization_pending.pop(actual_iter, None)
+        self._synchronization_paused.pop(actual_iter, None)
 
     def _receive_state(self, island_id: str, payload: dict[str, Any]) -> None:
         actual_iter = payload.get("actual_iter")
@@ -470,7 +602,7 @@ class IslandMigration(MigrationDriverBase):
 
         if self._movement_strategy == "ring":
             self._maybe_activate_ring(actual_iter=actual_iter)
-        else:
+        elif self._trigger != "synchronous":
             self._maybe_activate(actual_iter=actual_iter)
 
     def _migration_watermark(self) -> int | None:
@@ -515,7 +647,9 @@ class IslandMigration(MigrationDriverBase):
         if activated:
             self._next_migration_iter = actual_iter + self._min_interval
 
-    def _activate_migration(self, actual_iter: int) -> bool:
+    def _activate_migration(
+        self, actual_iter: int, pending_requests: set[str] | None = None
+    ) -> bool:
         activated = False
 
         for _ in range(self._migration_size):
@@ -529,6 +663,9 @@ class IslandMigration(MigrationDriverBase):
             request_id = f"migration:{actual_iter}:{len(self._pending_requests)}"
 
             self._pending_requests[request_id] = (donor, receiver, actual_iter)
+
+            if pending_requests is not None:
+                pending_requests.add(request_id)
 
             self._reserve_departure(donor=donor)
 
@@ -747,18 +884,23 @@ class IslandMigration(MigrationDriverBase):
         if request is None:
             return
 
+        for pending_requests in self._synchronization_pending.values():
+            pending_requests.discard(request_id)
+
         donor, receiver, actual_iter = request
 
         self._release_departure(donor=donor)
 
         if not isinstance(particle, dict):
             self._finish_ring_request(actual_iter=actual_iter)
+            self._finish_synchronization(actual_iter=actual_iter)
             return
 
         identifier = particle.get("identifier")
 
         if not isinstance(identifier, str):
             self._finish_ring_request(actual_iter=actual_iter)
+            self._finish_synchronization(actual_iter=actual_iter)
             return
 
         donor_state = self._states.get(donor)
@@ -767,6 +909,7 @@ class IslandMigration(MigrationDriverBase):
 
         if donor_state is None or receiver_state is None:
             self._finish_ring_request(actual_iter=actual_iter)
+            self._finish_synchronization(actual_iter=actual_iter)
             return
 
         donor_state["population"].pop(identifier, None)
@@ -794,6 +937,7 @@ class IslandMigration(MigrationDriverBase):
         )
 
         self._finish_ring_request(actual_iter=actual_iter)
+        self._finish_synchronization(actual_iter=actual_iter)
 
     def _finish_ring_request(self, actual_iter: int) -> None:
         if actual_iter not in self._ring_pending:
@@ -834,6 +978,9 @@ class IslandMigration(MigrationDriverBase):
             request_id = f"ring:{actual_iter}:{donor}"
 
             self._pending_requests[request_id] = (donor, receiver, actual_iter)
+
+            if pending_requests is not None:
+                pending_requests.add(request_id)
 
             self._reserve_departure(donor=donor)
 

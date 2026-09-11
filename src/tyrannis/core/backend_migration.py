@@ -363,6 +363,97 @@ class MigrationProcessorBase(ABC):
         """
         raise NotImplementedError
 
+    @abstractmethod
+    def synchronization_control(
+        self,
+        actual_iter: int,
+        insert_arrival_particle: Callable[[dict[str, Any]], None],
+        departure_particle: Callable[[str], None],
+    ) -> None:
+        """
+        Control processor-side synchronization after migration control.
+
+        This method is called by the processor immediately after
+        `migration_control` on every optimization-loop iteration. It is a
+        mandatory extension point for all migration strategies, including
+        strategies that do not require synchronization. Implementations that
+        do not use processor-side synchronization must provide an inert
+        implementation that returns without performing any action.
+
+        The method exists separately from `migration_control` because migration
+        control and optimization-loop synchronization have different
+        responsibilities. `migration_control` is responsible for evaluating
+        and applying the migration policy for the current iteration, whereas
+        this method is responsible for controlling whether the processor may
+        continue executing the optimization loop after that migration-control
+        phase.
+
+        Parameters
+        ----------
+        actual_iter:
+            Current processor iteration. The implementation must use this value
+            to determine whether the processor has reached a synchronization
+            point defined by its migration strategy.
+
+        insert_arrival_particle:
+            Callback used to insert a particle received through migration into
+            the local processor population. If synchronization requires the
+            processor to remain active while waiting for a driver command, the
+            implementation may use this callback when processing pending
+            migration messages during the synchronization phase.
+
+            The migration strategy must not directly modify the processor's
+            population or algorithm state. Population insertion must occur
+            exclusively through this callback.
+
+        departure_particle:
+            Callback used to remove a particle selected for migration from the
+            local processor population. If synchronization requires the
+            processor to remain active while waiting for a driver command, the
+            implementation may use this callback when processing pending
+            migration requests during the synchronization phase.
+
+            The migration strategy must not directly modify the processor's
+            population or algorithm state. Population removal must occur
+            exclusively through this callback.
+
+        Notes
+        -----
+        This method executes in the processor's main optimization-loop context.
+        A synchronous migration strategy may block this method when the
+        processor reaches a synchronization checkpoint. The communication
+        layer may receive commands asynchronously, but it must not directly
+        modify processor or algorithm state. Any state changes caused by
+        migration must remain under the control of the processor execution
+        context through the supplied callbacks.
+
+        A synchronous implementation must ensure that waiting does not prevent
+        the processor from handling migration messages required to complete the
+        synchronization barrier. In particular, if the driver sends a migration
+        request while the processor is waiting at a checkpoint, the processor
+        must remain capable of processing that request and returning the
+        requested particle before waiting for the final release command.
+
+        Synchronization commands must be associated with the corresponding
+        synchronization point or iteration whenever the strategy supports
+        multiple synchronization points. A delayed command belonging to an
+        earlier synchronization point must never release or alter a later
+        synchronization point.
+
+        Implementations must preserve the synchronization guarantees of the
+        migration strategy without introducing race conditions between the
+        optimization loop, communication layer, and migration driver. In
+        particular, a synchronization release must not be observed before the
+        processor has reached and confirmed the corresponding synchronization
+        point.
+
+        For asynchronous migration strategies, this method should normally be
+        inert and return immediately. For synchronous migration strategies, it
+        is the extension point where the processor-side synchronization barrier
+        is enforced.
+        """
+        raise NotImplementedError
+
 
 class MigrationDriverBase(ABC):
     """
