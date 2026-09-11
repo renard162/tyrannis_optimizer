@@ -234,7 +234,7 @@ class IslandMigration(MigrationDriverBase):
         migration_size: int = 1,
         trigger: str = "n_iter",
         movement_strategy: str = "random",
-        selection: str = "random",
+        particle_selection: str = "random",
         balance_population: bool = True,
         migration_probability: float = 0.5,
     ) -> None:
@@ -266,8 +266,8 @@ class IslandMigration(MigrationDriverBase):
         if movement_strategy not in movement_strategies:
             raise ValueError(f"Invalid movement_strategy: {movement_strategy!r}.")
 
-        if selection not in selections:
-            raise ValueError(f"Invalid selection: {selection!r}.")
+        if particle_selection not in selections:
+            raise ValueError(f"Invalid selection: {particle_selection!r}.")
 
         if trigger not in triggers:
             raise ValueError(f"Invalid trigger: {trigger!r}.")
@@ -298,7 +298,7 @@ class IslandMigration(MigrationDriverBase):
 
         self._migration_processor_init_kargs = {
             "initial_iter": initial_iter,
-            "selection": selection,
+            "selection": particle_selection,
             "migration_size": migration_size,
             "min_interval": min_interval,
         }
