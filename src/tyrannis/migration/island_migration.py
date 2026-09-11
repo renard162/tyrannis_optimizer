@@ -307,13 +307,15 @@ class IslandMigration(MigrationDriverBase):
 
         self._island_ids: list[str] = []
 
-        # Logical state used by the migration driver.
         self._states: dict[str, dict[str, Any]] = {}
 
-        # Latest snapshots received from processors while migrations are
-        # pending. They are not discarded; they are reconciled once the
-        # current migration activation has completed.
-        self._pending_states: dict[str, dict[str, Any]] = {}
+        # Confirmed departures that have not yet appeared in a processor
+        # STATE snapshot.
+        self._state_departures: dict[str, set[str]] = {}
+
+        # Confirmed arrivals that have not yet appeared in a processor
+        # STATE snapshot.
+        self._state_arrivals: dict[str, dict[str, Any]] = {}
 
         self._next_migration_iter = initial_iter
         self._last_trigger_check_iter: int | None = None
@@ -348,7 +350,8 @@ class IslandMigration(MigrationDriverBase):
 
     def start(self) -> None:
         self._states.clear()
-        self._pending_states.clear()
+        self._state_departures.clear()
+        self._state_arrivals.clear()
         self._pending_requests.clear()
         self._reserved_departures.clear()
         self._ring_pending.clear()
@@ -426,88 +429,93 @@ class IslandMigration(MigrationDriverBase):
 
         current_state = self._states.get(island_id)
 
-        pending_state = self._pending_states.get(island_id)
-
-        current_iter = (
-            current_state["actual_iter"] if current_state is not None else None
-        )
-
-        pending_iter = (
-            pending_state["actual_iter"] if pending_state is not None else None
-        )
-
-        newest_iter = max(
-            value
-            for value in (current_iter, pending_iter, actual_iter)
-            if value is not None
-        )
-
-        if actual_iter < newest_iter:
+        if current_state is not None and actual_iter < current_state["actual_iter"]:
             return
 
-        state = {"actual_iter": actual_iter, "population": population}
+        state_population = dict(population)
 
-        if self._pending_requests:
-            self._pending_states[island_id] = state
-            return
+        departures = self._state_departures.get(island_id, set())
 
-        self._states[island_id] = state
+        arrivals = self._state_arrivals.get(island_id, {})
+
+        for particle_id in departures:
+            state_population.pop(particle_id, None)
+
+        for particle_id, fitness in arrivals.items():
+            state_population[particle_id] = fitness
+
+        confirmed_departures = {
+            particle_id for particle_id in departures if particle_id not in population
+        }
+
+        confirmed_arrivals = {
+            particle_id for particle_id in arrivals if particle_id in population
+        }
+
+        departures.difference_update(confirmed_departures)
+
+        for particle_id in confirmed_arrivals:
+            arrivals.pop(particle_id, None)
+
+        if not departures:
+            self._state_departures.pop(island_id, None)
+
+        if not arrivals:
+            self._state_arrivals.pop(island_id, None)
+
+        self._states[island_id] = {
+            "actual_iter": actual_iter,
+            "population": state_population,
+        }
 
         if self._movement_strategy == "ring":
             self._maybe_activate_ring(actual_iter=actual_iter)
         else:
             self._maybe_activate(actual_iter=actual_iter)
 
-    def _reconcile_pending_states(self) -> None:
-        if self._pending_requests:
-            return
+    def _migration_watermark(self) -> int | None:
+        if not self._island_ids:
+            return None
 
-        if not self._pending_states:
-            return
+        iterations = [
+            self._states[island_id]["actual_iter"]
+            for island_id in self._island_ids
+            if island_id in self._states
+        ]
 
-        pending_states = self._pending_states
-        self._pending_states = {}
+        if len(iterations) != len(self._island_ids):
+            return None
 
-        for island_id, pending_state in pending_states.items():
-            current_state = self._states.get(island_id)
-
-            if (
-                current_state is not None
-                and pending_state["actual_iter"] < current_state["actual_iter"]
-            ):
-                continue
-
-            self._states[island_id] = pending_state
+        return min(iterations)
 
     def _all_states_current(self, actual_iter: int) -> bool:
         return all(
-            self._states.get(island_id, {}).get("actual_iter") == actual_iter
+            self._states.get(island_id, {}).get("actual_iter", -1) >= actual_iter
             for island_id in self._island_ids
         )
 
     def _maybe_activate(self, actual_iter: int) -> None:
-        if actual_iter < self._next_migration_iter:
-            return
+        watermark = self._migration_watermark()
 
-        if not self._all_states_current(actual_iter=actual_iter):
+        if watermark is None or watermark < self._next_migration_iter:
             return
 
         if self._pending_requests:
             return
 
         if self._trigger == "random":
-            if self._last_trigger_check_iter == actual_iter:
+            if self._last_trigger_check_iter == watermark:
                 return
 
-            self._last_trigger_check_iter = actual_iter
+            self._last_trigger_check_iter = watermark
 
             if self._rng.random() >= self._migration_probability:
                 return
 
-        activated = self._activate_migration(actual_iter=actual_iter)
+        activated = self._activate_migration(actual_iter=watermark)
 
         if activated:
-            self._next_migration_iter = actual_iter + self._min_interval
+            self._next_migration_iter = watermark + self._min_interval
 
     def _activate_migration(self, actual_iter: int) -> bool:
         activated = False
@@ -538,7 +546,7 @@ class IslandMigration(MigrationDriverBase):
         self._communication_driver.outgoing_queues[donor].put(
             json.dumps(
                 {
-                    "type": (IslandMigrationProcessor.MIGRATION_REQUEST),
+                    "type": IslandMigrationProcessor.MIGRATION_REQUEST,
                     "request_id": request_id,
                     "actual_iter": actual_iter,
                 }
@@ -747,18 +755,12 @@ class IslandMigration(MigrationDriverBase):
 
         if not isinstance(particle, dict):
             self._finish_ring_request(actual_iter=actual_iter)
-
-            self._reconcile_pending_states()
-
             return
 
         identifier = particle.get("identifier")
 
         if not isinstance(identifier, str):
             self._finish_ring_request(actual_iter=actual_iter)
-
-            self._reconcile_pending_states()
-
             return
 
         donor_state = self._states.get(donor)
@@ -767,19 +769,22 @@ class IslandMigration(MigrationDriverBase):
 
         if donor_state is None or receiver_state is None:
             self._finish_ring_request(actual_iter=actual_iter)
-
-            self._reconcile_pending_states()
-
             return
 
         donor_state["population"].pop(identifier, None)
 
-        receiver_state["population"][identifier] = particle.get("fitness")
+        self._state_departures.setdefault(donor, set()).add(identifier)
+
+        receiver_fitness = particle.get("fitness")
+
+        receiver_state["population"][identifier] = receiver_fitness
+
+        self._state_arrivals.setdefault(receiver, {})[identifier] = receiver_fitness
 
         self._communication_driver.outgoing_queues[receiver].put(
             json.dumps(
                 {
-                    "type": (IslandMigrationProcessor.PARTICLE),
+                    "type": IslandMigrationProcessor.PARTICLE,
                     "particle": particle,
                     "actual_iter": actual_iter,
                 }
@@ -792,8 +797,6 @@ class IslandMigration(MigrationDriverBase):
 
         self._finish_ring_request(actual_iter=actual_iter)
 
-        self._reconcile_pending_states()
-
     def _finish_ring_request(self, actual_iter: int) -> None:
         if actual_iter not in self._ring_pending:
             return
@@ -803,11 +806,12 @@ class IslandMigration(MigrationDriverBase):
         self._finish_ring_if_ready(actual_iter=actual_iter)
 
     def _maybe_activate_ring(self, actual_iter: int) -> None:
-        if actual_iter != self._next_migration_iter:
+        watermark = self._migration_watermark()
+
+        if watermark is None or watermark < self._next_migration_iter:
             return
 
-        if not self._all_states_current(actual_iter=actual_iter):
-            return
+        actual_iter = self._next_migration_iter
 
         if self._pending_requests:
             return
@@ -851,10 +855,7 @@ class IslandMigration(MigrationDriverBase):
             return
 
         release = json.dumps(
-            {
-                "type": (IslandMigrationProcessor.RING_RELEASE),
-                "actual_iter": actual_iter,
-            }
+            {"type": IslandMigrationProcessor.RING_RELEASE, "actual_iter": actual_iter}
         )
 
         for queue in self._communication_driver.outgoing_queues.values():
@@ -863,5 +864,3 @@ class IslandMigration(MigrationDriverBase):
         del self._ring_pending[actual_iter]
 
         del self._ring_received[actual_iter]
-
-        self._reconcile_pending_states()
