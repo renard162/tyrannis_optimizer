@@ -495,27 +495,25 @@ class IslandMigration(MigrationDriverBase):
         )
 
     def _maybe_activate(self, actual_iter: int) -> None:
-        watermark = self._migration_watermark()
-
-        if watermark is None or watermark < self._next_migration_iter:
+        if actual_iter < self._next_migration_iter:
             return
 
         if self._pending_requests:
             return
 
         if self._trigger == "random":
-            if self._last_trigger_check_iter == watermark:
+            if self._last_trigger_check_iter == actual_iter:
                 return
 
-            self._last_trigger_check_iter = watermark
+            self._last_trigger_check_iter = actual_iter
 
             if self._rng.random() >= self._migration_probability:
                 return
 
-        activated = self._activate_migration(actual_iter=watermark)
+        activated = self._activate_migration(actual_iter=actual_iter)
 
         if activated:
-            self._next_migration_iter = watermark + self._min_interval
+            self._next_migration_iter = actual_iter + self._min_interval
 
     def _activate_migration(self, actual_iter: int) -> bool:
         activated = False
