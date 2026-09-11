@@ -10,8 +10,8 @@ class HistoryConfig:
     new_particle: bool = False
     error: bool = False
     iteration: bool = False
-    best: bool = False
     status: bool = False
+    best: bool = False
 
     EVENT: ClassVar[dict[str, str]] = {
         "migration": "0 - migration",
@@ -19,9 +19,9 @@ class HistoryConfig:
         "new_particle": "2 - new_particle",
         "error": "3 - error",
         "iteration": "4 - iteration",
-        "local_best": "5 - local_best",
         "iter_best": "5 - iter_best",
         "iter_worst": "5 - iter_worst",
+        "local_best": "6 - local_best",
     }
 
     @classmethod
@@ -36,6 +36,7 @@ class HistoryConfig:
             or self.new_particle
             or self.error
             or self.iteration
+            or self.status
             or self.best
         )
 
