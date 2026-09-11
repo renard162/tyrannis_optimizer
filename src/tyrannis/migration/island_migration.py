@@ -39,13 +39,10 @@ class IslandMigrationProcessor(MigrationProcessorBase):
         self._migration_size = migration_size
         self._min_interval = min_interval
         self._communication_processor = communication_processor
-
         self._migration_signal: LocalEvent | None = None
         self._algorithm = None
-
         self._ring_iter = initial_iter
         self._ring_released = False
-
         self._rng = np.random.default_rng()
 
     def start(self) -> None:
@@ -56,10 +53,7 @@ class IslandMigrationProcessor(MigrationProcessorBase):
 
     def initialize_loop_context(self, migration_signal: LocalEvent) -> None:
         self._migration_signal = migration_signal
-
-        self._communication_processor.set_message_signal(
-            migration_signal,
-        )
+        self._communication_processor.set_message_signal(migration_signal)
 
     def finalize_loop_context(self) -> None:
         self._communication_processor.set_message_signal(None)
@@ -183,7 +177,6 @@ class IslandMigrationProcessor(MigrationProcessorBase):
             )
 
             particle = self._algorithm.population[particle_id]()
-
             departure_particle(particle_id)
 
         self._communication_processor.outgoing_queue.put(
@@ -311,20 +304,12 @@ class IslandMigration(MigrationDriverBase):
         }
 
         self._island_ids: list[str] = []
-
         self._states: dict[str, dict[str, Any]] = {}
-
         self._next_migration_iter = initial_iter
         self._last_trigger_check_iter: int | None = None
-
-        self._pending_requests: dict[
-            str,
-            tuple[str, str, int],
-        ] = {}
-
+        self._pending_requests: dict[str, tuple[str, str, int]] = {}
         self._ring_pending: dict[int, int] = {}
         self._ring_received: dict[int, int] = {}
-
         self._running = Event()
         self._thread: Thread | None = None
 
