@@ -3,7 +3,7 @@ from collections.abc import Callable
 from typing import TypeAlias, cast
 
 import numpy as np
-import scipy as sp
+from scipy.special import expit
 
 from tyrannis.core.space import SpaceBase
 
@@ -17,14 +17,14 @@ class Binary(SpaceBase):
 
     _boundaries: int | list[str]
     _limits: Limits | None
-    _deterministic: bool
+    _decoder: str
     _rng: np.random.Generator
 
     def __init__(
         self,
         cost_function: Callable[..., float] | None,
         bits: int | list[str],
-        deterministic: bool = True,
+        decoder: str = "angle_modulation",
         bounds: Limits | None = None,
         use_cache: bool = False,
         cache_type: str = "lru",
@@ -43,17 +43,16 @@ class Binary(SpaceBase):
             Number of positional binary variables or names of keyword
             arguments.
 
-        deterministic:
-            Select the binary decoding method. When True, angle modulation is
-            used. When False, a sigmoid transfer function is used to determine
-            the probability of each bit being one, followed by stochastic
-            sampling.
+        decoder:
+            Method used to decode the continuous representation into binary
+            variables. Available options are ``"angle_modulation"`` and
+            ``"s-shape"``.
 
         bounds:
             Lower and upper limits of the continuous encoded representation.
             When ``None``, the limits are selected according to the decoding
             method: ``(-2.0, 2.0)`` for angle modulation and
-            ``(-10.0, 10.0)`` for sigmoid transfer-function decoding.
+            ``(-10.0, 10.0)`` for S-shaped transfer-function decoding.
 
         use_cache:
             Whether cost-function evaluations should be cached.
@@ -86,12 +85,15 @@ class Binary(SpaceBase):
         else:
             raise TypeError("bits must be an int or a list of strings.")
 
-        if not isinstance(deterministic, bool):
-            raise TypeError("deterministic must be a bool.")
+        if decoder not in {"angle_modulation", "s-shape"}:
+            raise ValueError(
+                f"Invalid decoder: {decoder!r}. "
+                "Expected one of: 'angle_modulation', 's-shape'."
+            )
 
         if bounds is not None:
             if not isinstance(bounds, tuple) or len(bounds) != 2:
-                raise TypeError("bounds must be a tuple with two float values.")
+                raise TypeError("bounds must be a tuple with two numeric values.")
 
             if not all(
                 isinstance(value, (float, int, np.floating, np.integer))
@@ -104,22 +106,28 @@ class Binary(SpaceBase):
                     "The lower bound must be smaller than the upper bound."
                 )
 
-            bounds = (float(bounds[0]), float(bounds[1]))
-
         self._boundaries = bits
         self._limits = bounds
-        self._deterministic = deterministic
+        self._decoder = decoder
+        self._is_kwargs = isinstance(bits, list)
 
     def initialize_context(self, seed: int | None = None) -> None:
         """
         Initialize the execution context of the binary search space.
         """
+
+        default_bounds = {
+            "angle_modulation": (-2.0, 2.0),
+            "s-shape": (-10.0, 10.0),
+        }
+
         if self._limits is not None:
             boundary = self._limits
-        elif self._deterministic:
-            boundary = (-2.0, 2.0)
         else:
-            boundary = (-10.0, 10.0)
+            boundary = default_bounds.get(self._decoder)
+
+        if boundary is None:
+            raise RuntimeError("boundary cannot be None")
 
         if isinstance(self._boundaries, int):
             self._encoded_boundaries = {
@@ -130,12 +138,11 @@ class Binary(SpaceBase):
 
         self._rng = np.random.default_rng(seed)
 
-        if not self._deterministic and seed is None:
+        if self._decoder == "s-shape" and seed is None:
             warnings.warn(
-                "A non-deterministic binary decoding method was selected "
-                "without a seed. Each bit will be sampled according to the "
-                "probability determined by the transfer function, so "
-                "different evaluations may produce different bit sequences.",
+                "A stochastic binary decoding method was selected without "
+                "a seed. Different evaluations may produce different bit "
+                "sequences.",
                 RuntimeWarning,
                 stacklevel=2,
             )
@@ -156,10 +163,17 @@ class Binary(SpaceBase):
                     f"the boundaries ({lower}, {upper})."
                 )
 
-        if self._deterministic:
-            decoded = self._decode_angle_modulation(float_inputs)
-        else:
-            decoded = self._decode_transfer_function(float_inputs)
+        decoders = {
+            "angle_modulation": self._decode_angle_modulation,
+            "s-shape": self._decode_s_shape,
+        }
+
+        decoder = decoders.get(self._decoder)
+
+        if decoder is None:
+            raise RuntimeError(f"Decoder {self._decoder!r} is not available.")
+
+        decoded = decoder(float_inputs)
 
         if self.is_kwargs:
             return decoded
@@ -206,25 +220,17 @@ class Binary(SpaceBase):
             for key, value in float_inputs.items()
         }
 
-    def _decode_transfer_function(
-        self, float_inputs: dict[str, float]
-    ) -> dict[str, bool]:
+    def _decode_s_shape(self, float_inputs: dict[str, float]) -> dict[str, bool]:
         """
-        Decode variables using the sigmoid transfer function.
+        Decode variables using the S-shaped transfer function.
 
-        The probability of a bit being one is given by:
+        The transfer function is the sigmoid:
 
             S(x) = 1 / (1 + exp(-x))
 
-        Each bit is independently sampled using the RNG initialized by
-        initialize_context.
+        The resulting value represents the probability of the bit being one.
         """
         return {
-            key: bool(self._rng.random() < sp.special.expit(value))
+            key: bool(self._rng.random() < expit(value))
             for key, value in float_inputs.items()
         }
-
-    @property
-    def is_kwargs(self) -> bool:
-        """Return whether the binary space uses keyword arguments."""
-        return isinstance(self._boundaries, list)

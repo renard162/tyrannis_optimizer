@@ -48,11 +48,9 @@ class Integer(SpaceBase):
 
         self._boundaries = boundaries
         self._decoder = decoder
+        self._is_kwargs = isinstance(boundaries, dict)
 
     def initialize_context(self, seed: int | None = None) -> None:
-        """
-        Initialize the execution context of the integer search space.
-        """
         if isinstance(self._boundaries, dict):
             self._decoded_boundaries = {
                 key: (float(lower), float(upper))
@@ -63,39 +61,26 @@ class Integer(SpaceBase):
                 (float(lower), float(upper)) for lower, upper in self._boundaries
             ]
 
-        if self._decoder in {"scaling", "transfer_function"}:
+        if self._decoder == "scaling":
             boundary = (0.0, 1.0)
+        else:
+            boundary = None
 
-            if isinstance(self._boundaries, dict):
-                self._encoded_boundaries = {key: boundary for key in self._boundaries}
-            else:
-                self._encoded_boundaries = {
-                    str(index): boundary for index in range(len(self._boundaries))
-                }
-        elif isinstance(self._boundaries, dict):
-            self._encoded_boundaries = self._boundaries.copy()
+        if isinstance(self._boundaries, dict):
+            self._encoded_boundaries = {
+                key: boundary or self._decoded_boundaries[key]
+                for key in self._boundaries
+            }
         else:
             self._encoded_boundaries = {
-                str(index): boundary for index, boundary in enumerate(self._boundaries)
+                str(index): boundary or self._decoded_boundaries[index]
+                for index in range(len(self._boundaries))
             }
 
         self._rng = np.random.default_rng(seed)
 
     def decode(self, float_inputs: dict[str, float]) -> list[int] | dict[str, int]:
-        """
-        Decode the continuous solver representation into integer variables.
-        """
-        for key, value in float_inputs.items():
-            if key not in self._encoded_boundaries:
-                raise KeyError(f"Unknown integer-space variable: {key!r}.")
-
-            lower, upper = self._encoded_boundaries[key]
-
-            if not lower <= value <= upper:
-                raise ValueError(
-                    f"Value {value} for variable {key!r} is outside "
-                    f"the boundaries ({lower}, {upper})."
-                )
+        self._check_input_bounds(float_inputs)
 
         decoders = {
             "round": self._decode_round,
@@ -117,36 +102,21 @@ class Integer(SpaceBase):
         return [decoded[str(index)] for index in range(len(self._boundaries))]
 
     def encode_cache(self, inputs: IntegerInput) -> CacheKey:
-        """
-        Encode the cost-function inputs into a canonical cache key.
-        """
         if isinstance(inputs, dict):
             return tuple(sorted(inputs.items()))
 
         return tuple(inputs)
 
     def decode_cache(self, inputs: CacheKey) -> IntegerInput:
-        """
-        Decode a canonical cache key into the cost-function representation.
-        """
         if self.is_kwargs:
             return dict(cast(tuple[tuple[str, int], ...], inputs))
 
         return list(cast(tuple[int, ...], inputs))
 
     def _decode_round(self, float_inputs: dict[str, float]) -> dict[str, int]:
-        """
-        Decode variables using nearest-integer rounding and clipping.
-        """
-        return {
-            key: int(np.clip(np.round(value), *self._decoded_boundaries[key]))
-            for key, value in float_inputs.items()
-        }
+        return {key: int(np.round(value)) for key, value in float_inputs.items()}
 
     def _decode_scaling(self, float_inputs: dict[str, float]) -> dict[str, int]:
-        """
-        Decode normalized variables by scaling them to the integer bounds.
-        """
         return {
             key: int(np.round(lower + value * (upper - lower)))
             for key, value in float_inputs.items()
@@ -156,9 +126,6 @@ class Integer(SpaceBase):
     def _decode_stochastic_round(
         self, float_inputs: dict[str, float]
     ) -> dict[str, int]:
-        """
-        Decode variables using stochastic rounding.
-        """
         return {
             key: int(np.floor(value) + (self._rng.random() < value % 1))
             for key, value in float_inputs.items()
@@ -167,16 +134,8 @@ class Integer(SpaceBase):
     def _decode_transfer_function(
         self, float_inputs: dict[str, float]
     ) -> dict[str, int]:
-        """
-        Decode normalized variables using a sigmoid transfer function.
-        """
         return {
-            key: int(np.floor(lower + sp.special.expit(value) * (upper - lower + 1)))
+            key: int(np.round(lower + sp.special.expit(value) * (upper - lower)))
             for key, value in float_inputs.items()
             for lower, upper in [self._decoded_boundaries[key]]
         }
-
-    @property
-    def is_kwargs(self) -> bool:
-        """Return whether the integer space uses keyword arguments."""
-        return isinstance(self._boundaries, dict)

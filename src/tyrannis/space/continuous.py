@@ -64,6 +64,7 @@ class Continuous(SpaceBase):
             cache_size=cache_size,
         )
         self._boundaries = boundaries
+        self._is_kwargs = isinstance(boundaries, dict)
 
     def initialize_context(self, seed: int | None = None) -> None:
         if isinstance(self._boundaries, dict):
@@ -75,17 +76,7 @@ class Continuous(SpaceBase):
         }
 
     def decode(self, float_inputs: dict[str, float]) -> list[float] | dict[str, float]:
-        for key, value in float_inputs.items():
-            if key not in self._encoded_boundaries:
-                raise KeyError(f"Unknown continuous-space variable: {key!r}.")
-
-            lower, upper = self._encoded_boundaries[key]
-
-            if not lower <= value <= upper:
-                raise ValueError(
-                    f"Value {value} for variable {key!r} is outside "
-                    f"the boundaries ({lower}, {upper})."
-                )
+        self._check_input_bounds(float_inputs)
 
         if isinstance(self._boundaries, dict):
             return float_inputs
@@ -109,7 +100,3 @@ class Continuous(SpaceBase):
             return dict(cast(tuple[tuple[str, float], ...], inputs))
 
         return list(cast(tuple[float, ...], inputs))
-
-    @property
-    def is_kwargs(self) -> bool:
-        return isinstance(self._boundaries, dict)

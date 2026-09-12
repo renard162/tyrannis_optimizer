@@ -74,6 +74,7 @@ class SpaceBase(ABC):
     _kwargs: dict[str, Any]
     _encoded_boundaries: dict[str, tuple[float, float]]
     _use_cache: bool
+    _is_kwargs: bool
     _cache_type: str
     _cache_size: int
     _cached_cost_function: Callable[[Any], float] | None
@@ -278,28 +279,25 @@ class SpaceBase(ABC):
         raise NotImplementedError
 
     @property
-    @abstractmethod
     def is_kwargs(self) -> bool:
-        """
-        Identify whether the user-provided search space can be used as keyword
-        arguments when calling the cost function.
-
-        Returns
-        -------
-        bool
-            ``True`` when the search-space representation can be used as keyword
-            arguments, or ``False`` otherwise.
-
-        Raises
-        ------
-        NotImplementedError
-            This property must be implemented by concrete search-space classes.
-        """
-        raise NotImplementedError
+        return self._is_kwargs
 
     @property
     def encoded_boundaries(self) -> dict[str, tuple[float, float]]:
         return self._encoded_boundaries.copy()
+
+    def _check_input_bounds(self, float_inputs: dict[str, float]) -> None:
+        for key, value in float_inputs.items():
+            if key not in self._encoded_boundaries:
+                raise KeyError(f"Unknown variable: {key!r}.")
+
+            lower, upper = self._encoded_boundaries[key]
+
+            if not lower <= value <= upper:
+                raise ValueError(
+                    f"Value {value} for variable {key!r} is outside "
+                    f"the boundaries ({lower}, {upper})."
+                )
 
     def __call__(self, float_inputs: dict[str, float]) -> np.float64:
         """
