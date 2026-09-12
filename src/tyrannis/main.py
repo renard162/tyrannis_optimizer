@@ -6,6 +6,8 @@ from csv import writer
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from .backend.local import Local
 from .core.algorithm import AlgorithmBase
 from .core.backend import BackendBase
@@ -213,14 +215,12 @@ class Optimizer:
         ]
 
     @property
-    def history_generator(self) -> Iterator[list[Any]]:
+    def internal_history_generator_(self) -> Iterator[list[Any]]:
         """Generate optimization history as rows of tabular data.
 
         Only history records whose event is registered in
         ``self._history_config.registered_events`` are processed.
         """
-
-        registered_events = set(self._history_config.registered_events)
         variable_names = list(self._space.encoded_boundaries)
 
         if self._result is None:
@@ -231,7 +231,7 @@ class Optimizer:
 
             event = data.get("event")
 
-            if event not in registered_events:
+            if event not in self._history_config.registered_events:
                 continue
 
             particle = data.get("particle") or {}
@@ -254,8 +254,46 @@ class Optimizer:
                 json.dumps(internal_state) if internal_state else None,
             ]
 
+    @property
+    def history_generator(self) -> Iterator[list[Any]]:
+        """Generate optimization history as rows of tabular data.
+
+        Only history records whose event is registered in
+        ``self._history_config.registered_events`` are processed.
+        """
+        if self._result is None:
+            return
+
+        for history_entry in self._result.history:
+            data = json.loads(history_entry)
+            event = data.get("event")
+
+            if event not in self._history_config.registered_events:
+                continue
+
+            particle = data.get("particle", {})
+            variables = particle.get("variables", {})
+            decoded_variables = self._space.decode(variables)
+
+            if isinstance(decoded_variables, dict):
+                decoded_variables = decoded_variables.values()
+
+            yield [
+                event,
+                data.get("iteration", None),
+                particle.get("identifier", None),
+                data.get("origin", None),
+                data.get("destination", None),
+                particle.get("fitness", None),
+                *decoded_variables,
+            ]
+
     def save_history_csv(
-        self, file_location: str | Path, encoding: str = "utf-8", sep: str = ","
+        self,
+        file_location: str | Path,
+        encoding: str = "utf-8",
+        sep: str = ",",
+        internal_state: bool = False,
     ) -> None:
         """Save the registered optimization history to a CSV file."""
 
@@ -276,44 +314,30 @@ class Optimizer:
 
         if len(sep) != 1:
             raise ValueError(f"CSV separator must be a single character: {sep!r}")
+        columns = self.history_columns
+        columns = columns if internal_state else columns[:-1]
+        fitness_index = columns.index("fitness")
+        error_event = self._history_config.get_event("error")
+        row_generator = (
+            self.internal_history_generator_
+            if internal_state
+            else self.history_generator
+        )
 
-        with file_location.open(
-            "w",
-            newline="",
-            encoding=encoding,
-        ) as file:
+        with file_location.open("w", newline="", encoding=encoding) as file:
             csv_writer = writer(file, delimiter=sep)
-            csv_writer.writerow(self.history_columns)
-            csv_writer.writerows(self.history_generator)
+            csv_writer.writerow(columns)
 
-    def save_history_json(self, file_location: str | Path) -> None:
-        """Save the optimization history to a JSON file."""
+            for row in row_generator:
+                fitness = row[fitness_index]
 
-        file_location = Path(file_location)
+                if np.isinf(fitness) and (row[0] == error_event):
+                    row[fitness_index] = "Raise"
+                elif np.isinf(fitness):
+                    row[fitness_index] = "Infinity"
+                elif np.isnan(fitness):
+                    row[fitness_index] = "NaN"
+                else:
+                    row[fitness_index] = str(fitness)
 
-        if file_location.suffix.lower() != ".json":
-            raise ValueError(
-                f"History file must have a '.json' extension: {file_location}"
-            )
-
-        if file_location.exists() and not file_location.is_file():
-            raise ValueError(f"History file location is not a file: {file_location}")
-
-        if not file_location.parent.exists():
-            raise FileNotFoundError(
-                f"Parent directory does not exist: {file_location.parent}"
-            )
-
-        if self._result is None:
-            raise RuntimeError("Execute fit to get result")
-
-        with file_location.open("w", encoding="utf-8") as file:
-            file.write("[")
-
-            for index, history_entry in enumerate(self._result.history):
-                if index:
-                    file.write(",")
-
-                file.write(history_entry)
-
-            file.write("]")
+                csv_writer.writerow(row)
