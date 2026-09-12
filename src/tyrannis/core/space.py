@@ -232,17 +232,6 @@ class SpaceBase(ABC):
         """
         raise NotImplementedError
 
-    def encode(self, inputs: Any) -> Any:
-        """
-        Encode values into the representation used by the search space.
-
-        Spaces that do not require an explicit encoding operation may use the
-        default implementation, which returns the supplied values unchanged.
-        Concrete spaces may override this method when their user-facing
-        representation requires an encoding operation.
-        """
-        return inputs
-
     @abstractmethod
     def encode_cache(self, inputs: Any) -> Any:
         """
