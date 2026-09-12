@@ -8,12 +8,14 @@ from tyrannis.core.space import SpaceBase
 
 CacheKey: TypeAlias = tuple[bool, ...] | tuple[tuple[str, bool], ...]
 BinaryInput: TypeAlias = list[bool] | dict[str, bool]
+Limits: TypeAlias = tuple[float, float]
 
 
 class Binary(SpaceBase):
     """Binary optimization search space."""
 
     _boundaries: int | list[str]
+    _limits: Limits | None
     _deterministic: bool
     _rng: np.random.Generator
 
@@ -22,6 +24,7 @@ class Binary(SpaceBase):
         cost_function: Callable[..., float] | None,
         bits: int | list[str],
         deterministic: bool = True,
+        bounds: Limits | None = None,
         use_cache: bool = False,
         cache_type: str = "lru",
         cache_size: int = 100_000,
@@ -39,20 +42,17 @@ class Binary(SpaceBase):
             Number of positional binary variables or names of keyword
             arguments.
 
-            When an integer is provided, the cost function receives a list
-            containing one boolean value for each bit.
-
-            When a list of strings is provided, the cost function receives a
-            dictionary using those strings as keys.
-
         deterministic:
-            Select the binary decoding method.
-
-            When True, angle modulation is used.
-
-            When False, a sigmoid transfer function is used to determine the
-            probability of each bit being one, followed by stochastic
+            Select the binary decoding method. When True, angle modulation is
+            used. When False, a sigmoid transfer function is used to determine
+            the probability of each bit being one, followed by stochastic
             sampling.
+
+        bounds:
+            Lower and upper limits of the continuous encoded representation.
+            When ``None``, the limits are selected according to the decoding
+            method: ``(-2.0, 2.0)`` for angle modulation and
+            ``(-10.0, 10.0)`` for sigmoid transfer-function decoding.
 
         use_cache:
             Whether cost-function evaluations should be cached.
@@ -88,17 +88,37 @@ class Binary(SpaceBase):
         if not isinstance(deterministic, bool):
             raise TypeError("deterministic must be a bool.")
 
+        if bounds is not None:
+            if not isinstance(bounds, tuple) or len(bounds) != 2:
+                raise TypeError("bounds must be a tuple with two float values.")
+
+            if not all(
+                isinstance(value, (float, int, np.floating, np.integer))
+                for value in bounds
+            ):
+                raise TypeError("bounds values must be numeric.")
+
+            if bounds[0] >= bounds[1]:
+                raise ValueError(
+                    "The lower bound must be smaller than the upper bound."
+                )
+
+            bounds = (float(bounds[0]), float(bounds[1]))
+
         self._boundaries = bits
+        self._limits = bounds
         self._deterministic = deterministic
 
     def initialize_context(self, seed: int | None = None) -> None:
         """
         Initialize the execution context of the binary search space.
-
-        Angle modulation uses the continuous domain [-2, 2]. The sigmoid
-        transfer-function representation uses [-10, 10].
         """
-        boundary = (-2.0, 2.0) if self._deterministic else (-10.0, 10.0)
+        if self._limits is not None:
+            boundary = self._limits
+        elif self._deterministic:
+            boundary = (-2.0, 2.0)
+        else:
+            boundary = (-10.0, 10.0)
 
         if isinstance(self._boundaries, int):
             self._encoded_boundaries = {
@@ -179,6 +199,7 @@ class Binary(SpaceBase):
         Positive values represent one and non-positive values represent zero.
         """
         pi_2 = 2.0 * np.pi
+
         return {
             key: bool(np.sin(pi_2 * value * np.cos(pi_2 * value)) > 0.0)
             for key, value in float_inputs.items()
@@ -198,7 +219,7 @@ class Binary(SpaceBase):
         initialize_context.
         """
         return {
-            key: bool(self._rng.random() < (1.0 / (1.0 + np.exp(-value))))
+            key: bool(self._rng.random() < 1.0 / (1.0 + np.exp(-value)))
             for key, value in float_inputs.items()
         }
 
