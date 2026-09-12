@@ -148,20 +148,7 @@ class Binary(SpaceBase):
             )
 
     def decode(self, float_inputs: dict[str, float]) -> list[bool] | dict[str, bool]:
-        """
-        Decode the continuous solver representation into binary variables.
-        """
-        for key, value in float_inputs.items():
-            if key not in self._encoded_boundaries:
-                raise KeyError(f"Unknown binary-space variable: {key!r}.")
-
-            lower, upper = self._encoded_boundaries[key]
-
-            if not lower <= value <= upper:
-                raise ValueError(
-                    f"Value {value} for variable {key!r} is outside "
-                    f"the boundaries ({lower}, {upper})."
-                )
+        self._check_input_bounds(float_inputs)
 
         decoders = {
             "angle_modulation": self._decode_angle_modulation,
