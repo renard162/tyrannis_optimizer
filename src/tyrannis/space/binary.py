@@ -52,7 +52,7 @@ class Binary(SpaceBase):
             Lower and upper limits of the continuous encoded representation.
             When ``None``, the limits are selected according to the decoding
             method: ``(-2.0, 2.0)`` for angle modulation and
-            ``(-10.0, 10.0)`` for S-shaped transfer-function decoding.
+            ``(-6.0, 6.0)`` for S-shaped transfer-function decoding.
 
         use_cache:
             Whether cost-function evaluations should be cached.
@@ -118,7 +118,7 @@ class Binary(SpaceBase):
 
         default_bounds = {
             "angle_modulation": (-2.0, 2.0),
-            "s-shape": (-10.0, 10.0),
+            "s-shape": (-6.0, 6.0),
         }
 
         if self._limits is not None:
@@ -138,9 +138,9 @@ class Binary(SpaceBase):
 
         self._rng = np.random.default_rng(seed)
 
-        if self._decoder == "s-shape" and seed is None:
+        if self._decoder in {"s-shape"} and (seed is None):
             warnings.warn(
-                "A stochastic binary decoding method was selected without "
+                "A stochastic decoding method was selected without "
                 "a seed. Different evaluations may produce different bit "
                 "sequences.",
                 RuntimeWarning,
