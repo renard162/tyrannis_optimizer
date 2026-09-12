@@ -98,11 +98,9 @@ class SpaceBase(ABC):
     def __init__(
         self,
         cost_function: Callable[..., float] | None,
-        *args: Any,
         use_cache: bool = False,
         cache_type: str = "lru",
         cache_size: int = 100_000,
-        **kwargs: Any,
     ) -> None:
         """
         Initialize the user-facing search-space interface.
@@ -162,8 +160,6 @@ class SpaceBase(ABC):
             implementation.
         """
         self._cost_function = cost_function
-        self._args = args
-        self._kwargs = kwargs
         self._use_cache = use_cache
         self._cache_type = cache_type
         self._cache_size = cache_size
