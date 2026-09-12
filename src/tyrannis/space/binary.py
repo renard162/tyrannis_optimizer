@@ -3,6 +3,7 @@ from collections.abc import Callable
 from typing import TypeAlias, cast
 
 import numpy as np
+import scipy as sp
 
 from tyrannis.core.space import SpaceBase
 
@@ -219,7 +220,7 @@ class Binary(SpaceBase):
         initialize_context.
         """
         return {
-            key: bool(self._rng.random() < 1.0 / (1.0 + np.exp(-value)))
+            key: bool(self._rng.random() < sp.special.expit(value))
             for key, value in float_inputs.items()
         }
 
