@@ -141,9 +141,6 @@ class SpaceBase(ABC):
         cost_function:
             User-defined cost function that receives the decoded search-space
             representation and returns its fitness value.
-        *args:
-            Positional arguments specific to the concrete search-space
-            implementation.
         use_cache:
             Whether cost-function evaluations should be cached. When ``False``,
             no cache is created or used, regardless of ``cache_type``.
@@ -155,9 +152,6 @@ class SpaceBase(ABC):
             Maximum cache size. For in-memory caches, this represents the
             maximum number of cached records. For the disk cache, this
             represents the maximum size in megabytes.
-        **kwargs:
-            Keyword arguments specific to the concrete search-space
-            implementation.
         """
         self._cost_function = cost_function
         self._use_cache = use_cache
