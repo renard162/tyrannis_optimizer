@@ -75,6 +75,7 @@ class Integer(SpaceBase):
         self._boundaries = boundaries
         self._decoder = decoder
         self._custom_bounds = custom_bounds
+        self._is_kwargs = isinstance(boundaries, dict)
 
     def initialize_context(self, seed: int | None = None) -> None:
         if isinstance(self._boundaries, dict):
