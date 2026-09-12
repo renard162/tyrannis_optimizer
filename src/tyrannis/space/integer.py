@@ -1,8 +1,9 @@
+import warnings
 from collections.abc import Callable
 from typing import TypeAlias, cast
 
 import numpy as np
-import scipy as sp
+from scipy.special import expit
 
 from tyrannis.core.space import SpaceBase
 
@@ -16,7 +17,7 @@ class Integer(SpaceBase):
     """Integer optimization search space."""
 
     _boundaries: Boundaries
-    _decoded_boundaries: list[tuple[float, float]] | dict[str, tuple[float, float]]
+    _decoded_boundaries: dict[str, tuple[float, float]]
     _decoder: str
     _rng: np.random.Generator
 
@@ -25,15 +26,40 @@ class Integer(SpaceBase):
         cost_function: Callable[..., float] | None,
         boundaries: Boundaries,
         decoder: str = "round",
+        custom_bounds: tuple[float, float] | None = None,
         use_cache: bool = False,
         cache_type: str = "lru",
         cache_size: int = 100_000,
     ) -> None:
         """
         Initialize the user-facing integer search space.
+
+        Parameters
+        ----------
+        cost_function:
+            User-defined cost function to be evaluated after decoding.
+        boundaries:
+            Integer search-space boundaries. A list contains one
+            ``(lower, upper)`` tuple for each positional input. A dictionary maps
+            each input name to its ``(lower, upper)`` tuple.
+        decoder:
+            Decoder used to convert the continuous solver representation into
+            integer values. Supported decoders are ``"round"``, ``"scaling"``,
+            ``"stochastic_round"``, and ``"transfer_function"``.
+        custom_bounds:
+            Continuous interval considered during optimization when
+            ``decoder="transfer_function"``. If ``None``, the interval
+            ``(-6.0, 6.0)`` is used. This default follows the interval commonly
+            used with sigmoid transfer functions in meta-heuristic optimization.
+        use_cache:
+            Whether cost-function evaluations should be cached.
+        cache_type:
+            Cache strategy to use when caching is enabled.
+        cache_size:
+            Maximum cache size.
         """
         super().__init__(
-            cost_function,
+            cost_function=cost_function,
             use_cache=use_cache,
             cache_type=cache_type,
             cache_size=cache_size,
@@ -48,7 +74,7 @@ class Integer(SpaceBase):
 
         self._boundaries = boundaries
         self._decoder = decoder
-        self._is_kwargs = isinstance(boundaries, dict)
+        self._custom_bounds = custom_bounds
 
     def initialize_context(self, seed: int | None = None) -> None:
         if isinstance(self._boundaries, dict):
@@ -57,27 +83,37 @@ class Integer(SpaceBase):
                 for key, (lower, upper) in self._boundaries.items()
             }
         else:
-            self._decoded_boundaries = [
-                (float(lower), float(upper)) for lower, upper in self._boundaries
-            ]
+            self._decoded_boundaries = {
+                str(index): (float(lower), float(upper))
+                for index, (lower, upper) in enumerate(self._boundaries)
+            }
 
-        if self._decoder == "scaling":
-            boundary = (0.0, 1.0)
-        else:
-            boundary = None
+        transfer_function_bounds = (
+            (-6.0, 6.0) if (self._custom_bounds is None) else self._custom_bounds
+        )
 
-        if isinstance(self._boundaries, dict):
+        default_boundaries = {
+            "scaling": (0.0, 1.0),
+            "transfer_function": transfer_function_bounds,
+        }
+        boundaries = default_boundaries.get(self._decoder)
+
+        if boundaries is not None:
             self._encoded_boundaries = {
-                key: boundary or self._decoded_boundaries[key]
-                for key in self._boundaries
+                key: boundaries for key in self._decoded_boundaries
             }
         else:
-            self._encoded_boundaries = {
-                str(index): boundary or self._decoded_boundaries[index]
-                for index in range(len(self._boundaries))
-            }
+            self._encoded_boundaries = self._decoded_boundaries.copy()
 
         self._rng = np.random.default_rng(seed)
+
+        if self._decoder in {"stochastic_round"} and (seed is None):
+            warnings.warn(
+                "A stochastic decoding method was selected without a seed. "
+                "Different evaluations may produce different results",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
     def decode(self, float_inputs: dict[str, float]) -> list[int] | dict[str, int]:
         self._check_input_bounds(float_inputs)
@@ -116,26 +152,30 @@ class Integer(SpaceBase):
     def _decode_round(self, float_inputs: dict[str, float]) -> dict[str, int]:
         return {key: int(np.round(value)) for key, value in float_inputs.items()}
 
-    def _decode_scaling(self, float_inputs: dict[str, float]) -> dict[str, int]:
-        return {
-            key: int(np.round(lower + value * (upper - lower)))
-            for key, value in float_inputs.items()
-            for lower, upper in [self._decoded_boundaries[key]]
-        }
-
     def _decode_stochastic_round(
         self, float_inputs: dict[str, float]
     ) -> dict[str, int]:
         return {
-            key: int(np.floor(value) + (self._rng.random() < value % 1))
+            key: int(np.floor(value) + (self._rng.random() < (value % 1)))
             for key, value in float_inputs.items()
         }
+
+    def _decode_scaling(self, float_inputs: dict[str, float]) -> dict[str, int]:
+        decoded = {}
+        for key, value in float_inputs.items():
+            lower, upper = self._decoded_boundaries[key]
+            scaled = lower + (value * (upper - lower))
+            decoded[key] = int(np.round(scaled))
+
+        return decoded
 
     def _decode_transfer_function(
         self, float_inputs: dict[str, float]
     ) -> dict[str, int]:
-        return {
-            key: int(np.round(lower + sp.special.expit(value) * (upper - lower)))
-            for key, value in float_inputs.items()
-            for lower, upper in [self._decoded_boundaries[key]]
-        }
+        decoded = {}
+        for key, value in float_inputs.items():
+            lower, upper = self._decoded_boundaries[key]
+            scaled = lower + (expit(value) * (upper - lower))
+            decoded[key] = int(np.round(scaled))
+
+        return decoded
