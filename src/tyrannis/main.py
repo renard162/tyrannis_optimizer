@@ -67,6 +67,7 @@ class Optimizer:
         self._algorithm.initialize_context(
             fitness_function=self._space,
             boundaries=self._space.encoded_boundaries,
+            n_iter=self._n_iterations,
         )
 
         self._processor.initialize_context(
