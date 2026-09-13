@@ -1,3 +1,4 @@
+import warnings
 from collections.abc import Callable, Iterable
 from typing import Any, TypeAlias, cast
 
@@ -9,7 +10,7 @@ from ..core.space import SpaceBase
 from . import register_space
 
 Choice: TypeAlias = Any
-Choices: TypeAlias = list[Choice] | tuple[Choice, ...] | np.ndarray
+Choices: TypeAlias = Iterable[Choice]
 Boundaries: TypeAlias = list[Choices] | dict[str, Choices]
 CategoricalInput: TypeAlias = list[Any] | dict[str, Any]
 CacheKey: TypeAlias = tuple[Any, ...] | tuple[tuple[str, Any], ...]
@@ -38,9 +39,75 @@ class Categorical(SpaceBase):
         """
         Initialize the user-facing categorical search space.
 
-        The choices can be supplied as a single collection, a collection of
-        collections for positional inputs, or a dictionary of collections
-        for named inputs.
+        The categorical choices can be provided as a single collection, a
+        collection of collections, or a dictionary associating each variable
+        with its collection of possible choices.
+
+        When a single collection is provided, it represents one categorical
+        input. This form is also useful when the space is used as a component
+        of a mixed search space.
+
+        When a collection of collections is provided, each inner collection
+        represents one positional input of the cost function.
+
+        When a dictionary is provided, each key identifies one input of the
+        cost function and its associated collection contains the possible
+        choices for that input.
+
+        The concrete collection type is not relevant to the search-space
+        interface. Lists, tuples, NumPy arrays, and other iterable
+        collections can be used to represent the available choices.
+
+        Parameters
+        ----------
+        choices:
+            Categories available to each optimization variable. A single
+            collection represents one categorical input. A collection of
+            collections represents multiple positional inputs. A dictionary
+            maps each input name to its collection of possible choices.
+
+        cost_function:
+            User-defined cost function to be evaluated after decoding the
+            solver inputs. It may be ``None`` during construction, but
+            ``initialize_context`` requires a valid cost function.
+
+        decoder:
+            Method used to decode the continuous solver representation.
+            ``"one-hot"`` selects the category with the highest encoded
+            value. ``"softmax"`` interprets the encoded values as logits,
+            converts them into probabilities with softmax, and samples a
+            category according to those probabilities. ``"gumbel_softmax"``
+            adds Gumbel noise to the encoded values, applies the configured
+            temperature and softmax, and samples a category from the
+            resulting probability distribution. ``"scalar"`` represents
+            each categorical variable with a single continuous value.
+
+        bounds:
+            Continuous search interval exposed to the optimization
+            algorithm. When ``None``, decoder-specific default bounds are
+            used. The ``"scalar"`` decoder defaults to ``(0.0, 1.0)`` while
+            the remaining decoders default to ``(-1.0, 1.0)``.
+
+        gumbel_temperature:
+            Temperature used by the ``"gumbel_softmax"`` decoder. Lower
+            temperatures make the resulting probability distribution more
+            concentrated, while higher temperatures make it more uniform.
+            When ``None``, a temperature of ``1.0`` is used.
+
+        use_cache:
+            Whether cost-function evaluations should be cached. When
+            ``False``, no cache is created or used.
+
+        cache_type:
+            Cache strategy to use when caching is enabled. Supported
+            strategies are ``"lru"``, ``"lfu"``, ``"fifo"``, ``"rr"``, and
+            ``"disk"``. The default ``"lru"`` uses the Python standard
+            library.
+
+        cache_size:
+            Maximum cache size. For in-memory caches, this represents the
+            maximum number of cached records. For the disk cache, this
+            represents the maximum size in megabytes.
         """
         super().__init__(
             cost_function,
@@ -54,7 +121,7 @@ class Categorical(SpaceBase):
                 key: self._to_choices(value) for key, value in choices.items()
             }
             self._is_kwargs = True
-        elif self._is_choice_collection(choices):
+        elif self._is_choices_collection(choices):
             self._boundaries = [self._to_choices(choices)]
             self._is_kwargs = False
         else:
@@ -108,40 +175,52 @@ class Categorical(SpaceBase):
         register_space(name=self._type, space_class=Categorical)
 
     def initialize_context(self, seed: int | None = None) -> None:
-        default_bounds = {
-            "one-hot": (-1.0, 1.0),
-            "softmax": (-1.0, 1.0),
-            "gumbel_softmax": (-1.0, 1.0),
-            "scalar": (0.0, 1.0),
-        }
-
         bounds = self._bounds
 
+        if self._bounds is None:
+            default_bounds = {
+                "one-hot": (-1.0, 1.0),
+                "softmax": (-1.0, 1.0),
+                "gumbel_softmax": (-1.0, 1.0),
+                "scalar": (0.0, 1.0),
+            }
+            bounds = default_bounds.get(self._decoder)
+
         if bounds is None:
-            bounds = default_bounds[self._decoder]
+            raise RuntimeError("bounds cannot be None")
 
         if isinstance(self._boundaries, dict):
             if self._decoder == "scalar":
                 self._encoded_boundaries = {key: bounds for key in self._boundaries}
             else:
-                self._encoded_boundaries = {
-                    f"{key}-{str(choice)}": bounds
-                    for key, choices in self._boundaries.items()
-                    for choice in choices
-                }
+                self._encoded_boundaries = {}
+                for key, choices in self._boundaries.items():
+                    for choice in choices:
+                        choice_str = str(choice)
+                        encoded_key = f"{key}-{choice_str}"
+                        self._encoded_boundaries[encoded_key] = bounds
         else:
             if self._decoder == "scalar":
                 self._encoded_boundaries = {
                     str(index): bounds for index in range(len(self._boundaries))
                 }
             else:
-                self._encoded_boundaries = {
-                    f"{index}-{str(choice)}": bounds
-                    for index, choices in enumerate(self._boundaries)
-                    for choice in choices
-                }
+                self._encoded_boundaries = {}
+                for index, choices in enumerate(self._boundaries):
+                    for choice in choices:
+                        choice_str = str(choice)
+                        encoded_key = f"{index}-{choice_str}"
+                        self._encoded_boundaries[encoded_key] = bounds
 
         self._rng = np.random.default_rng(seed)
+
+        if self._decoder in {"softmax", "gumbel_softmax"} and seed is None:
+            warnings.warn(
+                "A stochastic decoding method was selected without a seed. "
+                "Different evaluations may produce different results",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
     def decode(self, float_inputs: dict[str, float]) -> list[Any] | dict[str, Any]:
         self._check_input_bounds(float_inputs)
@@ -153,7 +232,11 @@ class Categorical(SpaceBase):
             "scalar": self._decode_scalar,
         }
 
-        decoder = decoders[self._decoder]
+        decoder = decoders.get(self._decoder)
+
+        if decoder is None:
+            raise RuntimeError(f"Decoder {self._decoder!r} is not available.")
+
         decoded = decoder(float_inputs)
 
         if self._is_kwargs:
@@ -172,7 +255,7 @@ class Categorical(SpaceBase):
                 hash(key)
             except TypeError as error:
                 raise TypeError(
-                    "Categorical choices must be hashable when caching is enabled."
+                    "Categorical values must be hashable when caching is enabled."
                 ) from error
 
         return key
@@ -187,9 +270,11 @@ class Categorical(SpaceBase):
         decoded = {}
 
         for key, choices in self._iter_choices():
-            values = np.asarray(
-                [float_inputs[f"{key}-{str(choice)}"] for choice in choices]
-            )
+            values = []
+
+            for choice in choices:
+                choice_str = str(choice)
+                values.append(float_inputs[f"{key}-{choice_str}"])
 
             index = int(np.argmax(values))
             decoded[key] = choices[index]
@@ -200,9 +285,11 @@ class Categorical(SpaceBase):
         decoded = {}
 
         for key, choices in self._iter_choices():
-            values = np.asarray(
-                [float_inputs[f"{key}-{str(choice)}"] for choice in choices]
-            )
+            values = []
+
+            for choice in choices:
+                choice_str = str(choice)
+                values.append(float_inputs[f"{key}-{choice_str}"])
 
             probabilities = softmax(values)
 
@@ -214,18 +301,16 @@ class Categorical(SpaceBase):
 
     def _decode_gumbel_softmax(self, float_inputs: dict[str, float]) -> dict[str, Any]:
         decoded = {}
-
         for key, choices in self._iter_choices():
-            values = np.asarray(
-                [float_inputs[f"{key}-{str(choice)}"] for choice in choices]
-            )
+            values = []
+            for choice in choices:
+                choice_str = str(choice)
+                values.append(float_inputs[f"{key}-{choice_str}"])
 
-            gumbel = gumbel_r.rvs(size=len(choices), random_state=self._rng)
-
-            probabilities = softmax((values + gumbel) / self._gumbel_temperature)
-
+            gumbel_gi = gumbel_r.rvs(size=len(choices), random_state=self._rng)
+            gumbel = (np.asarray(values) + gumbel_gi) / self._gumbel_temperature
+            probabilities = softmax(gumbel)
             index = int(self._rng.choice(len(choices), p=probabilities))
-
             decoded[key] = choices[index]
 
         return decoded
@@ -240,24 +325,24 @@ class Categorical(SpaceBase):
 
         for key, choices in self._iter_choices():
             value = float_inputs[key]
-
             normalized = (value - lower) / (upper - lower)
-
             index = min(int(normalized * len(choices)), len(choices) - 1)
-
             decoded[key] = choices[index]
 
         return decoded
 
-    def _iter_choices(self) -> Iterable[tuple[str, Choices]]:
+    def _iter_choices(self) -> list[tuple[str, list[Any]]]:
         if isinstance(self._boundaries, dict):
-            return self._boundaries.items()
+            return [(key, list(choices)) for key, choices in self._boundaries.items()]
 
-        return ((str(index), choices) for index, choices in enumerate(self._boundaries))
+        return [
+            (str(index), list(choices))
+            for index, choices in enumerate(self._boundaries)
+        ]
 
     @staticmethod
-    def _is_choice_collection(value: object) -> bool:
-        if isinstance(value, (str, bytes, dict)):
+    def _is_choices_collection(value: object) -> bool:
+        if isinstance(value, (str, bytes)):
             return False
 
         if isinstance(value, np.ndarray):
@@ -266,16 +351,18 @@ class Categorical(SpaceBase):
         if not isinstance(value, Iterable):
             return False
 
-        values = list(value)
+        iterator = iter(value)
 
-        if not values:
+        try:
+            first = next(iterator)
+        except StopIteration:
             return True
 
-        return not all(Categorical._is_nested_collection(item) for item in values)
+        return not Categorical._is_nested_collection(first)
 
     @staticmethod
     def _is_nested_collection(value: object) -> bool:
-        if isinstance(value, (str, bytes, dict)):
+        if isinstance(value, (str, bytes)):
             return False
 
         if isinstance(value, np.ndarray):
@@ -284,7 +371,7 @@ class Categorical(SpaceBase):
         return isinstance(value, Iterable)
 
     @staticmethod
-    def _to_choices(value: object) -> Choices:
+    def _to_choices(value: object) -> list[Any]:
         if isinstance(value, np.ndarray):
             if value.ndim != 1:
                 raise ValueError(
@@ -292,20 +379,12 @@ class Categorical(SpaceBase):
                     "a one-dimensional collection of choices."
                 )
 
-            return value
+            return value.tolist()
 
-        if isinstance(value, (str, bytes)):
-            raise TypeError(
-                "A categorical variable must contain a collection "
-                "of choices, not a string."
-            )
-
-        try:
-            choices = list(value)
-        except TypeError as error:
+        if not isinstance(value, Iterable):
             raise TypeError(
                 "Each categorical variable must be represented by "
                 "an iterable collection of choices."
-            ) from error
+            )
 
-        return choices
+        return list(value)
