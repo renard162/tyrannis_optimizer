@@ -1,15 +1,24 @@
+_SPACE_CLASSES = {}
+
+
+def register_space(name: str, space_class: type) -> None:
+    if name in _SPACE_CLASSES:
+        return
+    _SPACE_CLASSES[name] = space_class
+
+
+def get_space_class(name: str) -> type | None:
+    return _SPACE_CLASSES.get(name)
+
+
 from .binary import Binary
 from .continuous import Continuous
 from .integer import Integer
+from .mixed import Mixed
 
 __all__ = [
     "Binary",
     "Continuous",
     "Integer",
+    "Mixed",
 ]
-
-SPACE_CLASSES = {
-    "binary": Binary,
-    "continuous": Continuous,
-    "integer": Integer,
-}

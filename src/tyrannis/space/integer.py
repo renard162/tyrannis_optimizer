@@ -5,7 +5,8 @@ from typing import TypeAlias, cast
 import numpy as np
 from scipy.special import expit
 
-from tyrannis.core.space import SpaceBase
+from ..core.space import SpaceBase
+from . import register_space
 
 Boundary: TypeAlias = tuple[int, int]
 Boundaries: TypeAlias = list[Boundary] | dict[str, Boundary]
@@ -87,6 +88,7 @@ class Integer(SpaceBase):
 
         self._type = "integer"
         self._configs = {"decoder": decoder, "custom_bounds": custom_bounds}
+        register_space(name=self._type, space_class=Integer)
 
     def initialize_context(self, seed: int | None = None) -> None:
         if isinstance(self._boundaries, dict):

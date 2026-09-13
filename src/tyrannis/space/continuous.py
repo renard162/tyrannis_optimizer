@@ -1,7 +1,8 @@
 from collections.abc import Callable
 from typing import TypeAlias, cast
 
-from tyrannis.core.space import SpaceBase
+from ..core.space import SpaceBase
+from . import register_space
 
 Boundary: TypeAlias = tuple[float, float]
 Boundaries: TypeAlias = list[Boundary] | dict[str, Boundary]
@@ -75,6 +76,7 @@ class Continuous(SpaceBase):
 
         self._type = "continuous"
         self._configs = {}
+        register_space(name=self._type, space_class=Continuous)
 
     def initialize_context(self, seed: int | None = None) -> None:
         if isinstance(self._boundaries, dict):

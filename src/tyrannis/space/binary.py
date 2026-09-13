@@ -5,7 +5,8 @@ from typing import TypeAlias, cast
 import numpy as np
 from scipy.special import expit
 
-from tyrannis.core.space import SpaceBase
+from ..core.space import SpaceBase
+from . import register_space
 
 CacheKey: TypeAlias = tuple[bool, ...] | tuple[tuple[str, bool], ...]
 BinaryInput: TypeAlias = list[bool] | dict[str, bool]
@@ -115,6 +116,7 @@ class Binary(SpaceBase):
 
         self._type = "binary"
         self._configs = {"decoder": decoder, "bounds": bounds}
+        register_space(name=self._type, space_class=Binary)
 
     def initialize_context(self, seed: int | None = None) -> None:
         """

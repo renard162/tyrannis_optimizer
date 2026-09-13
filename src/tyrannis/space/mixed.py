@@ -2,19 +2,20 @@ from collections.abc import Callable
 from typing import Any
 
 from ..core.space import SpaceBase
-from . import SPACE_CLASSES
+from . import get_space_class
 
 
 class Mixed(SpaceBase):
     """Mixed optimization search space."""
 
+    _boundaries: list
     _spaces: list[SpaceBase]
     _space_variables: list[list[str]]
 
     def __init__(
         self,
         spaces: dict[str, SpaceBase],
-        cost_function: Callable[..., float] | None = None,
+        cost_function: Callable[..., float],
         use_cache: bool = False,
         cache_type: str = "lru",
         cache_size: int = 100_000,
@@ -44,6 +45,9 @@ class Mixed(SpaceBase):
             cache_size=cache_size,
         )
 
+        self._boundaries = []
+        self._encoded_boundaries = {}
+        self._is_kwargs = True
         self._type = "mixed"
         self._configs = {}
         self._spaces = []
@@ -69,23 +73,23 @@ class Mixed(SpaceBase):
             group = grouped_spaces[group_key]
             group["variables"].append(key)
 
-            if space_type == "binary":
+            if group["space"] == "binary":
                 group["boundaries"].append(key)
             else:
-                group["boundaries"].append((key, arguments["boundaries"][key]))
+                group["boundaries"].append((key, arguments["boundaries"][0]))
 
         for group in grouped_spaces.values():
-            space_class = SPACE_CLASSES[group["space"]]
+            space_class = get_space_class(group["space"])
+
+            if space_class is None:
+                raise ValueError("A Mixed space cannot contain another Mixed space.")
 
             if group["space"] == "binary":
                 boundaries = group["boundaries"]
             else:
                 boundaries = dict(group["boundaries"])
 
-            space = space_class(
-                boundaries, cost_function=cost_function, **group["configs"]
-            )
-
+            space = space_class(boundaries, **group["configs"])
             self._spaces.append(space)
             self._space_variables.append(group["variables"])
 
@@ -104,7 +108,6 @@ class Mixed(SpaceBase):
         Decode the mixed solver representation into the user representation.
         """
         decoded = {}
-
         for space, variables in zip(self._spaces, self._space_variables, strict=True):
             space_inputs = {key: float_inputs[key] for key in variables}
             decoded.update(space.decode(space_inputs))
@@ -115,19 +118,19 @@ class Mixed(SpaceBase):
         """
         Encode the decoded mixed representation into a canonical cache key.
         """
-        return tuple(
+        encoded = tuple(
             space.encode_cache({key: inputs[key] for key in variables})
             for space, variables in zip(
                 self._spaces, self._space_variables, strict=True
             )
         )
+        return encoded
 
     def decode_cache(self, inputs: tuple[Any, ...]) -> dict[str, Any]:
         """
         Decode a canonical mixed cache key into the user representation.
         """
         decoded = {}
-
         for space, cache_key in zip(self._spaces, inputs, strict=True):
             decoded.update(space.decode_cache(cache_key))
 
