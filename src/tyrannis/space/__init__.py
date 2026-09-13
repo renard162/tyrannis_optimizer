@@ -7,3 +7,9 @@ __all__ = [
     "Continuous",
     "Integer",
 ]
+
+SPACE_CLASSES = {
+    "binary": Binary,
+    "continuous": Continuous,
+    "integer": Integer,
+}

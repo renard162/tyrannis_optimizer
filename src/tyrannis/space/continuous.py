@@ -14,8 +14,8 @@ class Continuous(SpaceBase):
 
     def __init__(
         self,
-        cost_function: Callable[..., float] | None,
-        boundaries: Boundaries,
+        boundaries: Boundaries | Boundary,
+        cost_function: Callable[..., float] | None = None,
         use_cache: bool = False,
         cache_type: str = "lru",
         cache_size: int = 100_000,
@@ -63,8 +63,18 @@ class Continuous(SpaceBase):
             cache_type=cache_type,
             cache_size=cache_size,
         )
-        self._boundaries = boundaries
-        self._is_kwargs = isinstance(boundaries, dict)
+        if isinstance(boundaries, dict):
+            self._boundaries = boundaries
+            self._is_kwargs = True
+        elif self._is_interval(boundaries):
+            self._boundaries = [cast(Boundary, boundaries)]
+            self._is_kwargs = False
+        else:
+            self._boundaries = cast(Boundaries, boundaries)
+            self._is_kwargs = False
+
+        self._type = "continuous"
+        self._configs = {}
 
     def initialize_context(self, seed: int | None = None) -> None:
         if isinstance(self._boundaries, dict):
@@ -96,7 +106,7 @@ class Continuous(SpaceBase):
         self,
         inputs: tuple[float, ...] | tuple[tuple[str, float], ...],
     ) -> list[float] | dict[str, float]:
-        if self.is_kwargs:
+        if self._is_kwargs:
             return dict(cast(tuple[tuple[str, float], ...], inputs))
 
         return list(cast(tuple[float, ...], inputs))

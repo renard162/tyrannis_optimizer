@@ -23,8 +23,8 @@ class Integer(SpaceBase):
 
     def __init__(
         self,
-        cost_function: Callable[..., float] | None,
         boundaries: Boundaries,
+        cost_function: Callable[..., float] | None = None,
         decoder: str = "round",
         custom_bounds: tuple[float, float] | None = None,
         use_cache: bool = False,
@@ -72,10 +72,21 @@ class Integer(SpaceBase):
                 "'stochastic_round', 'transfer_function'."
             )
 
-        self._boundaries = boundaries
+        if isinstance(boundaries, dict):
+            self._boundaries = boundaries
+            self._is_kwargs = True
+        elif self._is_interval(boundaries):
+            self._boundaries = [cast(Boundary, boundaries)]
+            self._is_kwargs = False
+        else:
+            self._boundaries = cast(Boundaries, boundaries)
+            self._is_kwargs = False
+
         self._decoder = decoder
         self._custom_bounds = custom_bounds
-        self._is_kwargs = isinstance(boundaries, dict)
+
+        self._type = "integer"
+        self._configs = {"decoder": decoder, "custom_bounds": custom_bounds}
 
     def initialize_context(self, seed: int | None = None) -> None:
         if isinstance(self._boundaries, dict):
@@ -133,7 +144,7 @@ class Integer(SpaceBase):
 
         decoded = decoder(float_inputs)
 
-        if self.is_kwargs:
+        if self._is_kwargs:
             return decoded
 
         return [decoded[str(index)] for index in range(len(self._boundaries))]
@@ -145,7 +156,7 @@ class Integer(SpaceBase):
         return tuple(inputs)
 
     def decode_cache(self, inputs: CacheKey) -> IntegerInput:
-        if self.is_kwargs:
+        if self._is_kwargs:
             return dict(cast(tuple[tuple[str, int], ...], inputs))
 
         return list(cast(tuple[int, ...], inputs))

@@ -69,6 +69,9 @@ class SpaceBase(ABC):
     transmitted when a space is distributed to another process or worker.
     """
 
+    _type: str
+    _configs: dict[str, Any]
+    _boundaries: Any
     _cost_function: Callable[..., float] | None
     _args: tuple[Any, ...]
     _kwargs: dict[str, Any]
@@ -269,12 +272,25 @@ class SpaceBase(ABC):
         raise NotImplementedError
 
     @property
-    def is_kwargs(self) -> bool:
-        return self._is_kwargs
-
-    @property
     def encoded_boundaries(self) -> dict[str, tuple[float, float]]:
         return self._encoded_boundaries.copy()
+
+    @property
+    def input_arguments(self) -> Any:
+        return {
+            "space": self._type,
+            "boundaries": self._boundaries,
+            "configs": self._configs,
+        }
+
+    def _is_interval(self, value: object) -> bool:
+        if not isinstance(value, (list, tuple, np.ndarray)):
+            return False
+
+        if len(value) != 2:
+            return False
+
+        return all(np.isscalar(item) for item in value)
 
     def _check_input_bounds(self, float_inputs: dict[str, float]) -> None:
         for key, value in float_inputs.items():
@@ -319,7 +335,7 @@ class SpaceBase(ABC):
         """
         if self._cost_function is None:
             raise RuntimeError("self._cost_function cannot be None.")
-        if self.is_kwargs:
+        if self._is_kwargs:
             return self._cost_function(**inputs)
 
         return self._cost_function(*inputs)

@@ -22,8 +22,8 @@ class Binary(SpaceBase):
 
     def __init__(
         self,
-        cost_function: Callable[..., float] | None,
-        bits: int | list[str],
+        bits: int | list[str] | None = None,
+        cost_function: Callable[..., float] | None = None,
         decoder: str = "angle_modulation",
         bounds: Limits | None = None,
         use_cache: bool = False,
@@ -70,18 +70,20 @@ class Binary(SpaceBase):
             cache_size=cache_size,
         )
 
-        if isinstance(bits, bool):
-            raise TypeError("bits must be an int or a list of strings.")
+        if bits is None:
+            bits = 1  # No arguments, to use with mixed inputs
 
-        if isinstance(bits, int):
+        elif isinstance(bits, int):
             if bits <= 0:
                 raise ValueError("bits must be greater than 0.")
+
         elif isinstance(bits, list):
             if not all(isinstance(bit, str) for bit in bits):
                 raise TypeError("bits must be a list of strings.")
 
             if len(set(bits)) != len(bits):
                 raise ValueError("bits must contain unique strings.")
+
         else:
             raise TypeError("bits must be an int or a list of strings.")
 
@@ -107,9 +109,12 @@ class Binary(SpaceBase):
                 )
 
         self._boundaries = bits
-        self._limits = bounds
         self._decoder = decoder
+        self._limits = bounds
         self._is_kwargs = isinstance(bits, list)
+
+        self._type = "binary"
+        self._configs = {"decoder": decoder, "bounds": bounds}
 
     def initialize_context(self, seed: int | None = None) -> None:
         """
@@ -162,7 +167,7 @@ class Binary(SpaceBase):
 
         decoded = decoder(float_inputs)
 
-        if self.is_kwargs:
+        if self._is_kwargs:
             return decoded
 
         return [decoded[str(index)] for index in range(cast(int, self._boundaries))]
@@ -183,7 +188,7 @@ class Binary(SpaceBase):
         """
         Decode a canonical cache key into the cost-function representation.
         """
-        if self.is_kwargs:
+        if self._is_kwargs:
             return dict(cast(tuple[tuple[str, bool], ...], inputs))
 
         return list(cast(tuple[bool, ...], inputs))
