@@ -19,6 +19,57 @@ class ThreadsPool(ProcessorBase):
         n_jobs: int | None = None,
         chunksize: int = 1,
     ) -> None:
+        """
+        Thread-based processor for parallel particle evaluation.
+
+        `ThreadsPool` evaluates particles concurrently using a pool of worker
+        threads. The optimization algorithm and its migration system remain
+        controlled by the main execution thread, while particle evaluation and
+        new-particle consolidation are distributed across the thread pool.
+
+        Parameters
+        ----------
+        n_jobs:
+            Number of worker threads used to evaluate particles concurrently. If
+            `None`, all logical CPUs available to the system are used.
+
+        chunksize:
+            Number of particles grouped into each task batch during parallel
+            evaluation. If `None`, the chunk size is calculated automatically based
+            on the number of particles and worker threads. Larger values reduce
+            task-scheduling overhead, while smaller values provide finer workload
+            distribution and can improve load balancing when evaluation times vary.
+
+        Notes
+        -----
+        Unlike process-based processors, worker threads share the same memory
+        space as the main process. Consequently, particles, the optimization
+        algorithm, the search space, and the cost function do not need to be
+        serialized and transferred between processes for each evaluation.
+
+        The cost function is executed concurrently by multiple worker threads and
+        must therefore be thread-safe and reentrant. It must safely support
+        simultaneous calls from different threads and must not rely on shared
+        mutable state that can be accessed or modified concurrently without
+        proper synchronization. Resources shared between evaluations, such as
+        files, database connections, random-number generators, or other mutable
+        objects, must likewise support concurrent access or be independently
+        managed by each thread. Evaluations must not depend on the execution order
+        of other particles or modify shared state in a way that allows one
+        evaluation to affect another.
+
+        The performance benefit of increasing `n_jobs` depends on the cost
+        function. CPU-bound Python code that does not release the Global
+        Interpreter Lock (GIL) generally does not scale with additional threads,
+        whereas I/O-bound operations and computations performed by native
+        libraries that release the GIL can benefit from concurrent execution.
+
+        The `chunksize` parameter controls the trade-off between task-scheduling
+        overhead and workload distribution. Smaller values provide finer
+        load balancing when particle evaluation times vary significantly, while
+        larger values can be more efficient when evaluations have similar
+        execution times.
+        """
         if chunksize <= 0:
             raise ValueError("chunksize must be greater than zero.")
 
