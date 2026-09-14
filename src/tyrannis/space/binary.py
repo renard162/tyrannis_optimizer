@@ -1,6 +1,6 @@
 import warnings
 from collections.abc import Callable
-from typing import TypeAlias, cast
+from typing import Any, TypeAlias, cast
 
 import numpy as np
 from scipy.special import expit
@@ -19,6 +19,7 @@ class Binary(SpaceBase):
     _boundaries: int | list[str]
     _limits: Limits | None
     _decoder: str
+    _params: dict[str, Any]
     _rng: np.random.Generator
 
     def __init__(
@@ -27,6 +28,7 @@ class Binary(SpaceBase):
         cost_function: Callable[..., float] | None = None,
         decoder: str = "angle_modulation",
         bounds: Limits | None = None,
+        params: dict[str, Any] | None = None,
         use_cache: bool = False,
         cache_type: str = "lru",
         cache_size: int = 100_000,
@@ -54,6 +56,22 @@ class Binary(SpaceBase):
             When ``None``, the limits are selected according to the decoding
             method: ``(-2.0, 2.0)`` for angle modulation and
             ``(-6.0, 6.0)`` for S-shaped transfer-function decoding.
+
+        params:
+            Parameters used by the selected decoding method. Parameters are
+            provided as a dictionary where each key is the name of a
+            parameter and its value is the corresponding parameter value.
+            Supported parameters are:
+
+            ``alpha``:
+                Controls the inclination of the logistic transfer function
+                used by the ``"s-shape"`` decoder. Higher values produce a
+                steeper transition around the center of the logistic
+                function, causing the probability of selecting ``True`` to
+                change more rapidly as the continuous input moves through
+                the transition region. Lower values produce a smoother
+                transition over a wider range of continuous inputs. Defaults
+                to ``1.0``.
 
         use_cache:
             Whether cost-function evaluations should be cached.
@@ -112,21 +130,15 @@ class Binary(SpaceBase):
         self._boundaries = bits
         self._decoder = decoder
         self._limits = bounds
+        self._params = {} if params is None else params
         self._is_kwargs = isinstance(bits, list)
 
         self._type = "binary"
-        self._configs = {"decoder": decoder, "bounds": bounds}
+        self._configs = {"decoder": decoder, "bounds": bounds, "params": self._params}
         register_space(name=self._type, space_class=Binary)
 
     def initialize_context(self, seed: int | None = None) -> None:
-        """
-        Initialize the execution context of the binary search space.
-        """
-
-        default_bounds = {
-            "angle_modulation": (-2.0, 2.0),
-            "s-shape": (-6.0, 6.0),
-        }
+        default_bounds = {"angle_modulation": (-2.0, 2.0), "s-shape": (-6.0, 6.0)}
 
         if self._limits is not None:
             boundary = self._limits
@@ -224,7 +236,8 @@ class Binary(SpaceBase):
 
         The resulting value represents the probability of the bit being one.
         """
+        alpha = self._params.get("alpha", 1.0)
         return {
-            key: bool(self._rng.random() < expit(value))
+            key: bool(self._rng.random() < expit(alpha * value))
             for key, value in float_inputs.items()
         }
