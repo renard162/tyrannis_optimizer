@@ -283,13 +283,79 @@ class GlobalBestProcessor(MigrationProcessorBase):
 
 
 class GlobalBest(MigrationDriverBase):
-    """Global-best migration strategy."""
-
     _processor_class = GlobalBestProcessor
 
     def __init__(
-        self, initial_iter: int = 1, check_interval: int = 1, synchronous: bool = False
+        self,
+        initial_iter: int = 1,
+        check_interval: int = 1,
+        synchronous: bool = False,
     ) -> None:
+        """
+        Global-best migration strategy for distributed island-model optimization.
+
+        `GlobalBest` propagates the best solution found across all optimization
+        islands. Unlike island migration, which transfers particles between specific
+        donor and destination islands, global-best migration maintains a single
+        best-known particle across the entire distributed optimization process and
+        broadcasts improvements to all other islands.
+
+        Each island periodically evaluates its current iteration-best particle and
+        publishes it when its fitness improves upon the last best candidate published
+        by that island. The driver receives these candidates, maintains the best
+        solution observed globally, and broadcasts every new global improvement to
+        the other islands. When an improved global-best particle arrives at an island,
+        it replaces that island's worst particle while preserving the size of the
+        local population.
+
+        Parameters
+        ----------
+        initial_iter:
+            First optimization iteration at which a global-best check may occur.
+            Iterations before this value do not publish global-best candidates. For
+            `synchronous=True`, this value also defines the first synchronization
+            checkpoint.
+
+        check_interval:
+            Number of optimization iterations between consecutive global-best checks.
+            In asynchronous mode, each island independently checks its iteration-best
+            particle whenever it reaches the next eligible checkpoint. In synchronous
+            mode, the value determines the distance between global synchronization
+            checkpoints after each checkpoint is released.
+
+        synchronous:
+            Controls whether global-best migration operates synchronously.
+
+            When `False`, each island evaluates and publishes its local iteration-best
+            particle independently when it reaches an eligible checkpoint. The driver
+            immediately incorporates an arriving candidate when it improves the
+            current global best and broadcasts the improvement to the other islands.
+            Islands therefore do not wait for one another before continuing their
+            optimization.
+
+            When `True`, all islands must reach the same checkpoint before the driver
+            evaluates the candidates from that checkpoint. Each island pauses at the
+            checkpoint after notifying the driver, and the driver waits until all
+            islands have reached it. The candidates received from the participating
+            islands are then compared with the global best, the best candidate is
+            broadcast to all islands, and a release message allows the islands to
+            continue to the next checkpoint.
+
+        Notes
+        -----
+        Global-best migration propagates the best solution found across the
+        distributed population. The originating island retains the particle, while
+        receiving islands replace their worst valid particle, preserving the local
+        population size.
+
+        Only strictly improving candidates are propagated. Each island also tracks
+        the fitness of its last published candidate to avoid repeatedly submitting
+        the same or a worse solution.
+
+        Invalid migration messages or particles with invalid fitness are ignored.
+        If an island has no particle with a valid fitness, an incoming global-best
+        particle is not inserted.
+        """
         if initial_iter < 1:
             raise ValueError("initial_iter must be greater than or equal to 1.")
 
