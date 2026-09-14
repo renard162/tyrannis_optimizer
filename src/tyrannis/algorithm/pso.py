@@ -107,12 +107,16 @@ class PSO(AlgorithmBase):
         constriction_factor : bool, default=False
             Whether to use the PSO constriction factor formulation. When enabled,
             the constriction factor is calculated from the sum of the cognitive
-            and social coefficients and applied to the velocity update. The
-            inertia weight is set to 1 and its provided value or dynamic range is
-            completely ignored.
+            and social coefficients and applied to the complete velocity update.
+            The inertia weight is set to 1 and its provided value or dynamic range
+            is completely ignored, since the constriction factor itself controls
+            the contraction of the velocity update in this formulation.
 
             This option requires the sum of ``cognitive_coefficient`` and
-            ``social_coefficient`` to be greater than or equal to 4.
+            ``social_coefficient`` to be greater than or equal to 4. A commonly
+            used configuration is ``cognitive_coefficient=2.05`` and
+            ``social_coefficient=2.05``, resulting in ``phi=4.10`` and a
+            constriction factor of approximately 0.7298.
 
         Notes
         -----
@@ -125,19 +129,27 @@ class PSO(AlgorithmBase):
         When ``constriction_factor`` is enabled, the constriction coefficient is
         calculated as
 
-        ``2 / abs(2 - phi - sqrt(phi**2 - 4 * phi))``
+        ``chi = 2 / abs(2 - phi - sqrt(phi**2 - 4 * phi))``
 
-        where ``phi`` is the sum of the cognitive and social coefficients. In this
-        formulation, the inertia weight is fixed at 1 and the constriction
-        coefficient controls the magnitude of the resulting velocity.
+        where ``phi`` is the sum of the cognitive and social coefficients. The
+        coefficient is then multiplied by the complete velocity update:
+
+        ``v(t+1) = chi * [v(t) + c1*r1*(p(t)-x(t)) + c2*r2*(g(t)-x(t))]``
+
+        In this formulation, ``chi`` controls the overall contraction of the
+        particle velocity and provides the stability mechanism derived from the
+        dynamical analysis of PSO. Consequently, the inertia weight is fixed at
+        1 so that it does not introduce an additional contraction factor. Any
+        value or dynamic range supplied through ``inertia`` is therefore ignored
+        when the constriction factor is enabled.
 
         The PSO formulation is based on Kennedy and Eberhart (1995). The inertia
-        weight was introduced by Shi and Eberhart (1998), who also studied its
-        effect on PSO performance. The linear time-varying inertia strategy
-        implemented here follows the commonly used time-decreasing inertia-weight
-        approach introduced in this line of work. The constriction-factor
-        formulation is based on the stability analysis of Clerc and Kennedy
-        (2002).
+        weight was introduced by Shi and Eberhart (1998), who studied its effect
+        on the exploration and convergence behavior of PSO. The linear
+        time-varying inertia strategy implemented here follows the commonly used
+        time-decreasing inertia-weight approach from this line of research. The
+        constriction-factor formulation is based on the stability analysis of
+        Clerc and Kennedy (2002).
 
         References
         ----------
