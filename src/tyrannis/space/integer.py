@@ -131,7 +131,7 @@ class Integer(SpaceBase):
         self._decoder = decoder
         self._custom_bounds = custom_bounds
         self._params = {} if params is None else params
-
+        self._params = dict(sorted(self._params.items()))
         self._type = "integer"
         self._configs = {
             "decoder": decoder,

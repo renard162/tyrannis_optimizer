@@ -1,3 +1,4 @@
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -78,19 +79,18 @@ class Mixed(SpaceBase):
         self._spaces = []
         self._space_variables = []
 
-        grouped_spaces: dict[tuple[str, Any], dict[str, Any]] = {}
+        grouped_spaces: dict[str, dict[str, Any]] = {}
 
         for key, space in spaces.items():
             arguments = space.input_arguments
-            space_type = arguments["space"]
-            configs = arguments["configs"]
-
-            group_key = (space_type, tuple(sorted(configs.items())))
+            group_key = json.dumps(arguments, sort_keys=True)
 
             if group_key not in grouped_spaces:
+                group_arguments = json.loads(group_key)
+
                 grouped_spaces[group_key] = {
-                    "space": space_type,
-                    "configs": configs.copy(),
+                    "space": group_arguments["space"],
+                    "configs": group_arguments["configs"],
                     "boundaries": [],
                     "variables": [],
                 }
@@ -133,6 +133,7 @@ class Mixed(SpaceBase):
         Decode the mixed solver representation into the user representation.
         """
         decoded = {}
+
         for space, variables in zip(self._spaces, self._space_variables, strict=True):
             space_inputs = {key: float_inputs[key] for key in variables}
             decoded.update(space.decode(space_inputs))

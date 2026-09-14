@@ -151,6 +151,7 @@ class Binary(SpaceBase):
         self._decoder = decoder
         self._limits = bounds
         self._params = {} if params is None else params
+        self._params = dict(sorted(self._params.items()))
         self._is_kwargs = isinstance(bits, list)
 
         self._type = "binary"

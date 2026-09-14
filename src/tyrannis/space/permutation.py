@@ -174,6 +174,7 @@ class Permutation(SpaceBase):
         self._bounds = bounds
         self._decoder = decoder
         self._params = {} if params is None else params
+        self._params = dict(sorted(self._params.items()))
         self._type = "permutation"
         self._configs = {"decoder": decoder, "bounds": bounds, "params": self._params}
 
