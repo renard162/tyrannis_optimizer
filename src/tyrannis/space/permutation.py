@@ -1,5 +1,429 @@
+import warnings
+from collections.abc import Callable, Iterable
+from typing import Any, TypeAlias, cast
+
+import numpy as np
+from scipy.optimize import linear_sum_assignment
+from scipy.special import softmax
+from scipy.stats import gumbel_r
+
 from ..core.space import SpaceBase
+from . import register_space
+
+Choice: TypeAlias = Any
+Choices: TypeAlias = Iterable[Choice]
+Boundaries: TypeAlias = list[Choices] | dict[str, Choices]
+PermutationInput: TypeAlias = list[list[Any]] | dict[str, list[Any]]
+CacheKey: TypeAlias = tuple[Any, ...] | tuple[tuple[str, Any], ...]
 
 
 class Permutation(SpaceBase):
-    """Placeholder"""
+    """Permutation optimization search space."""
+
+    _boundaries: Boundaries
+    _bounds: tuple[float, float] | None
+    _decoder: str
+    _rng: np.random.Generator
+
+    def __init__(
+        self,
+        choices: Choices | Boundaries,
+        cost_function: Callable[..., float] | None = None,
+        decoder: str = "random-keys",
+        bounds: tuple[float, float] | None = None,
+        use_cache: bool = False,
+        cache_type: str = "lru",
+        cache_size: int = 100_000,
+    ) -> None:
+        """
+        Initialize the user-facing permutation search space.
+
+        The permutation choices can be provided as a single collection, a
+        collection of collections, or a dictionary associating each variable
+        with its collection of possible choices.
+
+        When a single collection is provided, it represents one permutation
+        input. This form is also useful when the space is used as a component
+        of a mixed search space.
+
+        When a collection of collections is provided, each inner collection
+        represents one positional input of the cost function, with the
+        elements of each collection being permuted independently.
+
+        When a dictionary is provided, each key identifies one input of the
+        cost function and its associated collection contains the elements
+        whose order is optimized.
+
+        The concrete collection type is not relevant to the search-space
+        interface. Lists, tuples, NumPy arrays, and other iterable
+        collections can be used to represent the available choices.
+
+        Parameters
+        ----------
+        choices:
+            Elements available to each permutation variable. A single
+            collection represents one permutation input. A collection of
+            collections represents multiple positional permutation inputs.
+            A dictionary maps each input name to the collection whose order
+            will be optimized.
+
+        cost_function:
+            User-defined cost function to be evaluated after decoding the
+            solver inputs. It may be ``None`` during construction, but
+            ``initialize_context`` requires a valid cost function.
+
+        decoder:
+            Method used to decode the continuous solver representation into
+            permutations. Supported methods are ``"random-keys"``,
+            ``"gumbel-random-keys"``, ``"plackett-luce"``, and
+            ``"gumbel-sinkhorn"``.
+
+        bounds:
+            Continuous search interval exposed to the optimization
+            algorithm. When ``None``, ``(0.0, 1.0)`` is used.
+
+        use_cache:
+            Whether cost-function evaluations should be cached. When
+            ``False``, no cache is created or used.
+
+        cache_type:
+            Cache strategy to use when caching is enabled. Supported
+            strategies are ``"lru"``, ``"lfu"``, ``"fifo"``, ``"rr"``, and
+            ``"disk"``.
+
+        cache_size:
+            Maximum cache size. For in-memory caches, this represents the
+            maximum number of cached records. For the disk cache, this
+            represents the maximum size in megabytes.
+        """
+        super().__init__(
+            cost_function,
+            use_cache=use_cache,
+            cache_type=cache_type,
+            cache_size=cache_size,
+        )
+
+        if isinstance(choices, dict):
+            self._boundaries = {
+                key: self._to_choices(value) for key, value in choices.items()
+            }
+            self._is_kwargs = True
+        elif self._is_choices_collection(choices):
+            self._boundaries = [self._to_choices(choices)]
+            self._is_kwargs = False
+        else:
+            self._boundaries = [self._to_choices(value) for value in choices]
+            self._is_kwargs = False
+
+        if not self._boundaries:
+            raise ValueError("choices cannot be empty.")
+
+        if isinstance(self._boundaries, dict):
+            if any(not choices for choices in self._boundaries.values()):
+                raise ValueError(
+                    "Each permutation variable must have at least one choice."
+                )
+        elif any(not choices for choices in self._boundaries):
+            raise ValueError("Each permutation variable must have at least one choice.")
+
+        if decoder not in {
+            "random-keys",
+            "gumbel-random-keys",
+            "plackett-luce",
+            "gumbel-sinkhorn",
+        }:
+            raise ValueError(
+                f"Invalid decoder: {decoder!r}. "
+                "Expected one of: 'random-keys', 'gumbel-random-keys', "
+                "'plackett-luce', 'gumbel-sinkhorn'."
+            )
+
+        if bounds is not None:
+            if len(bounds) != 2:
+                raise ValueError("bounds must contain exactly two values.")
+
+            if bounds[0] >= bounds[1]:
+                raise ValueError(
+                    "The lower bound must be smaller than the upper bound."
+                )
+
+        self._bounds = bounds
+        self._decoder = decoder
+
+        self._type = "permutation"
+        self._configs = {
+            "decoder": decoder,
+            "bounds": bounds,
+        }
+
+        register_space(name=self._type, space_class=Permutation)
+
+    def initialize_context(self, seed: int | None = None) -> None:
+        bounds = self._bounds
+
+        if bounds is None:
+            bounds = (0.0, 1.0)
+
+        if isinstance(self._boundaries, dict):
+            self._encoded_boundaries = {}
+
+            for key, choices in self._boundaries.items():
+                if self._decoder == "gumbel-sinkhorn":
+                    for row in choices:
+                        row_str = str(row)
+
+                        for column in choices:
+                            column_str = str(column)
+                            encoded_key = f"{key}-{row_str}-{column_str}"
+                            self._encoded_boundaries[encoded_key] = bounds
+                else:
+                    for choice in choices:
+                        choice_str = str(choice)
+                        encoded_key = f"{key}-{choice_str}"
+                        self._encoded_boundaries[encoded_key] = bounds
+        else:
+            self._encoded_boundaries = {}
+
+            for index, choices in enumerate(self._boundaries):
+                variable = str(index)
+
+                if self._decoder == "gumbel-sinkhorn":
+                    for row in choices:
+                        row_str = str(row)
+
+                        for column in choices:
+                            column_str = str(column)
+                            encoded_key = f"{variable}-{row_str}-{column_str}"
+                            self._encoded_boundaries[encoded_key] = bounds
+                else:
+                    for choice in choices:
+                        choice_str = str(choice)
+                        encoded_key = f"{variable}-{choice_str}"
+                        self._encoded_boundaries[encoded_key] = bounds
+
+        self._rng = np.random.default_rng(seed)
+
+        if (
+            self._decoder
+            in {
+                "gumbel-random-keys",
+                "plackett-luce",
+                "gumbel-sinkhorn",
+            }
+            and seed is None
+        ):
+            warnings.warn(
+                "A stochastic decoding method was selected without a seed. "
+                "Different evaluations may produce different results",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
+    def decode(
+        self, float_inputs: dict[str, float]
+    ) -> list[list[Any]] | dict[str, list[Any]]:
+        self._check_input_bounds(float_inputs)
+
+        decoders = {
+            "random-keys": self._decode_random_keys,
+            "gumbel-random-keys": self._decode_gumbel_random_keys,
+            "plackett-luce": self._decode_plackett_luce,
+            "gumbel-sinkhorn": self._decode_gumbel_sinkhorn,
+        }
+
+        decoder = decoders.get(self._decoder)
+
+        if decoder is None:
+            raise RuntimeError(f"Decoder {self._decoder!r} is not available.")
+
+        decoded = decoder(float_inputs)
+
+        if self._is_kwargs:
+            return decoded
+
+        return [decoded[str(index)] for index in range(len(self._boundaries))]
+
+    def encode_cache(self, inputs: PermutationInput) -> CacheKey:
+        if isinstance(inputs, dict):
+            key = tuple(
+                (name, tuple(values)) for name, values in sorted(inputs.items())
+            )
+        else:
+            key = tuple(tuple(values) for values in inputs)
+
+        if self._use_cache:
+            try:
+                hash(key)
+            except TypeError as error:
+                raise TypeError(
+                    "Permutation values must be hashable when caching is enabled."
+                ) from error
+
+        return key
+
+    def decode_cache(self, inputs: CacheKey) -> PermutationInput:
+        if self._is_kwargs:
+            return {
+                name: list(values)
+                for name, values in cast(
+                    tuple[tuple[str, tuple[Any, ...]], ...], inputs
+                )
+            }
+
+        return [list(values) for values in cast(tuple[tuple[Any, ...], ...], inputs)]
+
+    def _decode_random_keys(
+        self, float_inputs: dict[str, float]
+    ) -> dict[str, list[Any]]:
+        decoded = {}
+
+        for key, choices in self._iter_choices():
+            values = []
+            for choice in choices:
+                choice_str = str(choice)
+                values.append(float_inputs[f"{key}-{choice_str}"])
+
+            order = np.argsort(values, kind="stable")
+            decoded[key] = [choices[index] for index in order]
+
+        return decoded
+
+    def _decode_gumbel_random_keys(
+        self, float_inputs: dict[str, float]
+    ) -> dict[str, list[Any]]:
+        decoded = {}
+
+        for key, choices in self._iter_choices():
+            values = []
+            for choice in choices:
+                choice_str = str(choice)
+                values.append(float_inputs[f"{key}-{choice_str}"])
+
+            gumbel_g = gumbel_r.rvs(size=len(choices), random_state=self._rng)
+            order = np.argsort(np.asarray(values) + gumbel_g, kind="stable")
+            decoded[key] = [choices[index] for index in order]
+
+        return decoded
+
+    def _decode_plackett_luce(
+        self, float_inputs: dict[str, float]
+    ) -> dict[str, list[Any]]:
+        decoded = {}
+
+        for key, choices in self._iter_choices():
+            values = []
+            for choice in choices:
+                choice_str = str(choice)
+                values.append(float_inputs[f"{key}-{choice_str}"])
+
+            remaining = list(range(len(choices)))
+            permutation = []
+            while remaining:
+                remaining_values = np.asarray([values[index] for index in remaining])
+                probabilities = softmax(remaining_values)
+                selected = int(self._rng.choice(len(remaining), p=probabilities))
+                permutation.append(remaining.pop(selected))
+
+            decoded[key] = [choices[index] for index in permutation]
+
+        return decoded
+
+    def _decode_gumbel_sinkhorn(
+        self, float_inputs: dict[str, float]
+    ) -> dict[str, list[Any]]:
+        decoded = {}
+
+        for key, choices in self._iter_choices():
+            size = len(choices)
+            values = np.empty((size, size), dtype=float)
+
+            for row_index, row in enumerate(choices):
+                row_str = str(row)
+
+                for column_index, column in enumerate(choices):
+                    column_str = str(column)
+                    matrix_key = f"{key}-{row_str}-{column_str}"
+                    values[row_index, column_index] = float_inputs[matrix_key]
+
+            gumbel_g = gumbel_r.rvs(size=(size, size), random_state=self._rng)
+            matrix = values + gumbel_g
+            matrix = self._sinkhorn(matrix)
+            row_indices, column_indices = linear_sum_assignment(-matrix)
+            order = np.argsort(column_indices, kind="stable")
+            permutation = row_indices[order]
+            decoded[key] = [choices[index] for index in permutation]
+
+        return decoded
+
+    @staticmethod
+    def _sinkhorn(matrix: np.ndarray) -> np.ndarray:
+        matrix = matrix - np.max(matrix)
+
+        matrix = np.exp(matrix)
+
+        for _ in range(20):
+            row_sums = matrix.sum(axis=1, keepdims=True)
+            matrix /= row_sums
+
+            column_sums = matrix.sum(axis=0, keepdims=True)
+            matrix /= column_sums
+
+        return matrix
+
+    def _iter_choices(self) -> list[tuple[str, list[Any]]]:
+        if isinstance(self._boundaries, dict):
+            return [(key, list(choices)) for key, choices in self._boundaries.items()]
+
+        return [
+            (str(index), list(choices))
+            for index, choices in enumerate(self._boundaries)
+        ]
+
+    @staticmethod
+    def _is_choices_collection(value: object) -> bool:
+        if isinstance(value, (str, bytes)):
+            return False
+
+        if isinstance(value, np.ndarray):
+            return value.ndim == 1
+
+        if not isinstance(value, Iterable):
+            return False
+
+        iterator = iter(value)
+
+        try:
+            first = next(iterator)
+        except StopIteration:
+            return True
+
+        return not Permutation._is_nested_collection(first)
+
+    @staticmethod
+    def _is_nested_collection(value: object) -> bool:
+        if isinstance(value, (str, bytes)):
+            return False
+
+        if isinstance(value, np.ndarray):
+            return value.ndim > 0
+
+        return isinstance(value, Iterable)
+
+    @staticmethod
+    def _to_choices(value: object) -> list[Any]:
+        if isinstance(value, np.ndarray):
+            if value.ndim != 1:
+                raise ValueError(
+                    "Each permutation variable must be represented by "
+                    "a one-dimensional collection of choices."
+                )
+
+            return value.tolist()
+
+        if not isinstance(value, Iterable):
+            raise TypeError(
+                "Each permutation variable must be represented by "
+                "an iterable collection of choices."
+            )
+
+        return list(value)
