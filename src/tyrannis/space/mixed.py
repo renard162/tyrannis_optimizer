@@ -12,6 +12,7 @@ class Mixed(SpaceBase):
     _boundaries: list
     _spaces: list[SpaceBase]
     _space_variables: list[list[str]]
+    _space_encoded_variables: list[list[str]]
 
     def __init__(
         self,
@@ -78,12 +79,18 @@ class Mixed(SpaceBase):
         self._configs = {}
         self._spaces = []
         self._space_variables = []
+        self._space_encoded_variables = []
 
         grouped_spaces: dict[str, dict[str, Any]] = {}
 
         for key, space in spaces.items():
             arguments = space.input_arguments
-            group_key = json.dumps(arguments, sort_keys=True)
+
+            grouping_arguments = {
+                "space": arguments["space"],
+                "configs": arguments["configs"],
+            }
+            group_key = json.dumps(grouping_arguments, sort_keys=True)
 
             if group_key not in grouped_spaces:
                 group_arguments = json.loads(group_key)
@@ -97,11 +104,17 @@ class Mixed(SpaceBase):
 
             group = grouped_spaces[group_key]
             group["variables"].append(key)
+            boundaries = arguments["boundaries"]
 
             if group["space"] == "binary":
                 group["boundaries"].append(key)
             else:
-                group["boundaries"].append((key, arguments["boundaries"][0]))
+                if isinstance(boundaries, dict):
+                    boundary = boundaries[next(iter(boundaries))]
+                else:
+                    boundary = boundaries[0]
+
+                group["boundaries"].append((key, boundary))
 
         for group in grouped_spaces.values():
             space_class = get_space_class(group["space"])
@@ -119,31 +132,27 @@ class Mixed(SpaceBase):
             self._space_variables.append(group["variables"])
 
     def initialize_context(self, seed: int | None = None) -> None:
-        """
-        Initialize the execution context of all component spaces.
-        """
         self._encoded_boundaries = {}
-
+        self._space_encoded_variables = []
         for space in self._spaces:
             space.initialize_context(seed)
-            self._encoded_boundaries.update(space.encoded_boundaries)
+            encoded_boundaries = space.encoded_boundaries
+            self._encoded_boundaries.update(encoded_boundaries)
+            self._space_encoded_variables.append(list(encoded_boundaries))
 
     def decode(self, float_inputs: dict[str, float]) -> dict[str, Any]:
-        """
-        Decode the mixed solver representation into the user representation.
-        """
         decoded = {}
 
-        for space, variables in zip(self._spaces, self._space_variables, strict=True):
-            space_inputs = {key: float_inputs[key] for key in variables}
+        for space, encoded_variables in zip(
+            self._spaces, self._space_encoded_variables, strict=True
+        ):
+            space_inputs = {key: float_inputs[key] for key in encoded_variables}
+
             decoded.update(space.decode(space_inputs))
 
         return decoded
 
     def encode_cache(self, inputs: dict[str, Any]) -> tuple[Any, ...]:
-        """
-        Encode the decoded mixed representation into a canonical cache key.
-        """
         encoded = tuple(
             space.encode_cache({key: inputs[key] for key in variables})
             for space, variables in zip(
@@ -153,9 +162,6 @@ class Mixed(SpaceBase):
         return encoded
 
     def decode_cache(self, inputs: tuple[Any, ...]) -> dict[str, Any]:
-        """
-        Decode a canonical mixed cache key into the user representation.
-        """
         decoded = {}
         for space, cache_key in zip(self._spaces, inputs, strict=True):
             decoded.update(space.decode_cache(cache_key))
