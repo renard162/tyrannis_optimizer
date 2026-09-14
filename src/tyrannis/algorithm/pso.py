@@ -129,7 +129,7 @@ class PSO(AlgorithmBase):
         When ``constriction_factor`` is enabled, the constriction coefficient is
         calculated as
 
-        ``chi = 2 / abs(2 - phi - sqrt(phi**2 - 4 * phi))``
+        ``chi =2 / abs(2 - phi - sqrt(phi**2 - 4 * phi))``
 
         where ``phi`` is the sum of the cognitive and social coefficients. The
         coefficient is then multiplied by the complete velocity update:
