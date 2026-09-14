@@ -1,6 +1,6 @@
 import warnings
 from collections.abc import Callable
-from typing import TypeAlias, cast
+from typing import Any, TypeAlias, cast
 
 import numpy as np
 from scipy.special import expit
@@ -20,6 +20,7 @@ class Integer(SpaceBase):
     _boundaries: Boundaries
     _decoded_boundaries: dict[str, tuple[float, float]]
     _decoder: str
+    _params: dict[str, Any]
     _rng: np.random.Generator
 
     def __init__(
@@ -28,6 +29,7 @@ class Integer(SpaceBase):
         cost_function: Callable[..., float] | None = None,
         decoder: str = "round",
         custom_bounds: tuple[float, float] | None = None,
+        params: dict[str, Any] | None = None,
         use_cache: bool = False,
         cache_type: str = "lru",
         cache_size: int = 100_000,
@@ -41,8 +43,8 @@ class Integer(SpaceBase):
             User-defined cost function to be evaluated after decoding.
         boundaries:
             Integer search-space boundaries. A list contains one
-            ``(lower, upper)`` tuple for each positional input. A dictionary maps
-            each input name to its ``(lower, upper)`` tuple.
+            ``(lower, upper)`` tuple for each positional input. A dictionary
+            maps each input name to its ``(lower, upper)`` tuple.
         decoder:
             Decoder used to convert the continuous solver representation into
             integer values. Supported decoders are ``"round"``, ``"scaling"``,
@@ -51,7 +53,22 @@ class Integer(SpaceBase):
             Continuous interval considered during optimization when
             ``decoder="transfer_function"``. If ``None``, the interval
             ``(-6.0, 6.0)`` is used. This default follows the interval commonly
-            used with sigmoid transfer functions in meta-heuristic optimization.
+            used with sigmoid transfer functions in meta-heuristic
+            optimization.
+        params:
+            Parameters used by the selected decoding method. Parameters are
+            provided as a dictionary where each key is the name of a parameter
+            and its value is the corresponding parameter value. Supported
+            parameters are:
+
+            ``alpha``:
+                Controls the inclination of the logistic transfer function
+                used by the ``"transfer_function"`` decoder. Higher values
+                produce a steeper transition around the center of the
+                logistic function, causing the transformation to move more
+                rapidly between its lower and upper regions. Lower values
+                produce a smoother transition over a wider portion of the
+                continuous search interval. Defaults to ``1.0``.
         use_cache:
             Whether cost-function evaluations should be cached.
         cache_type:
@@ -85,9 +102,14 @@ class Integer(SpaceBase):
 
         self._decoder = decoder
         self._custom_bounds = custom_bounds
+        self._params = {} if params is None else params
 
         self._type = "integer"
-        self._configs = {"decoder": decoder, "custom_bounds": custom_bounds}
+        self._configs = {
+            "decoder": decoder,
+            "custom_bounds": custom_bounds,
+            "params": self._params,
+        }
         register_space(name=self._type, space_class=Integer)
 
     def initialize_context(self, seed: int | None = None) -> None:
@@ -186,10 +208,11 @@ class Integer(SpaceBase):
     def _decode_transfer_function(
         self, float_inputs: dict[str, float]
     ) -> dict[str, int]:
+        alpha = self._params.get("alpha", 1.0)
         decoded = {}
         for key, value in float_inputs.items():
             lower, upper = self._decoded_boundaries[key]
-            scaled = lower + (expit(value) * (upper - lower))
+            scaled = lower + (expit(alpha * value) * (upper - lower))
             decoded[key] = int(np.round(scaled))
 
         return decoded
