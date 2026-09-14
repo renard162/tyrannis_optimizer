@@ -123,13 +123,12 @@ class Categorical(SpaceBase):
         cache_type:
             Cache strategy to use when caching is enabled. Supported
             strategies are ``"lru"``, ``"lfu"``, ``"fifo"``, ``"rr"``, and
-            ``"disk"``. The default ``"lru"`` uses the Python standard
-            library.
+            ``"disk"``.
 
         cache_size:
-            Maximum cache size. For in-memory caches, this represents the
-            maximum number of cached records. For the disk cache, this
-            represents the maximum size in megabytes.
+            Maximum cache size for in-memory caches, expressed as the maximum
+            number of cached records. This parameter has no effect when
+            ``cache_type="disk"``.
         """
         super().__init__(
             cost_function,

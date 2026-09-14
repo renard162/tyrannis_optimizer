@@ -91,11 +91,13 @@ class Permutation(SpaceBase):
             parameters are:
 
             ``temperature``:
-                Controls the intensity of stochasticity in the
-                ``"gumbel-random-keys"``, ``"plackett-luce"``, and
-                ``"gumbel-sinkhorn"`` decoders. Higher values increase
-                randomness, while lower values make the decoding more
-                deterministic. Defaults to ``1.0``.
+                Controls the stochasticity of the ``"gumbel-random-keys"``,
+                ``"plackett-luce"``, and ``"gumbel-sinkhorn"`` decoders.
+                Higher values increase randomness, while lower values make
+                decoding more deterministic. Recommended range: 0.1–10,
+                with low values (0.1–1), medium values (1–5), and high values
+                (5–10). Values below 0.1 or above 10 are generally ineffective
+                in practice. Defaults to ``1.0``.
 
             ``sinkhorn_iterations``:
                 Number of normalization iterations performed by the
@@ -114,9 +116,9 @@ class Permutation(SpaceBase):
             ``"disk"``.
 
         cache_size:
-            Maximum cache size. For in-memory caches, this represents the
-            maximum number of cached records. For the disk cache, this
-            represents the maximum size in megabytes.
+            Maximum cache size for in-memory caches, expressed as the maximum
+            number of cached records. This parameter has no effect when
+            ``cache_type="disk"``.
         """
         super().__init__(
             cost_function,

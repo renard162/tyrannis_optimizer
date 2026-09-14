@@ -36,26 +36,43 @@ class Binary(SpaceBase):
         """
         Initialize the user-facing binary search space.
 
+        The binary search space represents optimization variables whose
+        decoded values are Boolean values. The optimization algorithm
+        operates on a continuous representation, which is converted into
+        binary values according to the selected decoder.
+
+        Binary variables can be defined either by their number, producing
+        positional inputs, or by a list of names, producing keyword inputs.
+        The selected decoder determines how the continuous representation is
+        mapped to the resulting Boolean values.
+
         Parameters
         ----------
+        bits:
+            Number of binary variables or names of keyword arguments. An
+            integer creates that many positional Boolean inputs, while a list
+            of strings creates keyword inputs with the specified names.
+
         cost_function:
             User-defined cost function to be evaluated after decoding the
-            solver representation.
-
-        bits:
-            Number of positional binary variables or names of keyword
-            arguments.
+            solver inputs. It receives the variables as Boolean values in
+            their user-facing representation. It may be ``None`` during
+            construction, but ``initialize_context`` requires a valid cost
+            function.
 
         decoder:
-            Method used to decode the continuous representation into binary
-            variables. Available options are ``"angle_modulation"`` and
-            ``"s-shape"``.
+            Method used to decode the continuous solver representation into
+            binary variables. ``"angle_modulation"`` determines each bit
+            through the sign of an angle-modulation function, while
+            ``"s-shape"`` uses a sigmoid transfer function to obtain the
+            probability of each bit being ``True`` and samples the resulting
+            Boolean value.
 
         bounds:
             Lower and upper limits of the continuous encoded representation.
-            When ``None``, the limits are selected according to the decoding
-            method: ``(-2.0, 2.0)`` for angle modulation and
-            ``(-6.0, 6.0)`` for S-shaped transfer-function decoding.
+            When ``None``, decoder-specific default bounds are used:
+            ``(-2.0, 2.0)`` for ``"angle_modulation"`` and
+            ``(-6.0, 6.0)`` for ``"s-shape"``.
 
         params:
             Parameters used by the selected decoding method. Parameters are
@@ -67,20 +84,23 @@ class Binary(SpaceBase):
                 Controls the inclination of the logistic transfer function
                 used by the ``"s-shape"`` decoder. Higher values produce a
                 steeper transition around the center of the logistic
-                function, causing the probability of selecting ``True`` to
-                change more rapidly as the continuous input moves through
-                the transition region. Lower values produce a smoother
-                transition over a wider range of continuous inputs. Defaults
-                to ``1.0``.
+                function, while lower values produce a smoother transition
+                over a wider range of continuous inputs. Defaults to
+                ``1.0``.
 
         use_cache:
-            Whether cost-function evaluations should be cached.
+            Whether cost-function evaluations should be cached. When
+            ``False``, no cache is created or used.
 
         cache_type:
-            Cache strategy to use when caching is enabled.
+            Cache strategy to use when caching is enabled. Supported
+            strategies are ``"lru"``, ``"lfu"``, ``"fifo"``, ``"rr"``, and
+            ``"disk"``.
 
         cache_size:
-            Maximum cache size.
+            Maximum cache size for in-memory caches, expressed as the maximum
+            number of cached records. This parameter has no effect when
+            ``cache_type="disk"``.
         """
         super().__init__(
             cost_function,

@@ -23,20 +23,45 @@ class Mixed(SpaceBase):
         """
         Initialize the user-facing mixed search space.
 
+        The mixed search space combines multiple search-space types into a
+        single optimization problem. Each variable is associated with a
+        component search-space instance, allowing continuous, integer,
+        categorical, binary, and permutation variables to coexist.
+
+        The component spaces are grouped according to their type and
+        configuration and are internally combined into the representation
+        exposed to the optimization algorithm. Decoding is delegated to the
+        corresponding component spaces, preserving the user-facing
+        representation of each variable.
+
         Parameters
         ----------
         spaces:
             Dictionary associating each input name with its corresponding
-            search-space instance.
+            search-space instance. Each component space defines the
+            representation, boundaries, decoder, and other configuration of
+            its associated variables. A ``Mixed`` space cannot contain
+            another ``Mixed`` space.
+
         cost_function:
-            User-defined cost function to be evaluated after decoding the
-            solver representation.
+            User-defined cost function to be evaluated after all component
+            spaces have decoded their respective variables. It receives all
+            variables in their combined user-facing representation as
+            keyword arguments.
+
         use_cache:
-            Whether cost-function evaluations should be cached.
+            Whether cost-function evaluations should be cached. When
+            ``False``, no cache is created or used.
+
         cache_type:
-            Cache strategy to use when caching is enabled.
+            Cache strategy to use when caching is enabled. Supported
+            strategies are ``"lru"``, ``"lfu"``, ``"fifo"``, ``"rr"``, and
+            ``"disk"``.
+
         cache_size:
-            Maximum cache size.
+            Maximum cache size for in-memory caches, expressed as the maximum
+            number of cached records. This parameter has no effect when
+            ``cache_type="disk"``.
         """
         super().__init__(
             cost_function,

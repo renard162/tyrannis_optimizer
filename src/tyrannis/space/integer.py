@@ -37,44 +37,72 @@ class Integer(SpaceBase):
         """
         Initialize the user-facing integer search space.
 
+        The integer search space represents optimization variables whose
+        decoded values are restricted to integers. The optimization algorithm
+        operates on a continuous representation, which is converted into
+        integer values according to the selected decoder.
+
+        Boundaries define the valid integer range of each variable. They can
+        be provided either as a list of intervals for positional inputs or as
+        a dictionary associating each variable with its interval.
+
         Parameters
         ----------
-        cost_function:
-            User-defined cost function to be evaluated after decoding.
         boundaries:
             Integer search-space boundaries. A list contains one
             ``(lower, upper)`` tuple for each positional input. A dictionary
-            maps each input name to its ``(lower, upper)`` tuple.
+            maps each input name to its ``(lower, upper)`` tuple. The bounds
+            define the valid integer range of each variable.
+
+        cost_function:
+            User-defined cost function to be evaluated after decoding the
+            solver inputs. It receives the variables as integers in their
+            user-facing representation. It may be ``None`` during
+            construction, but ``initialize_context`` requires a valid cost
+            function.
+
         decoder:
-            Decoder used to convert the continuous solver representation into
-            integer values. Supported decoders are ``"round"``, ``"scaling"``,
-            ``"stochastic_round"``, and ``"transfer_function"``.
+            Method used to convert the continuous solver representation into
+            integer values. ``"round"`` rounds the continuous value to the
+            nearest integer. ``"scaling"`` maps the encoded value from
+            ``[0.0, 1.0]`` to the corresponding integer boundary range.
+            ``"stochastic_round"`` performs probabilistic rounding based on
+            the fractional part of the value. ``"transfer_function"`` uses
+            a logistic transfer function to map the encoded value to the
+            integer boundary range.
+
         custom_bounds:
-            Continuous interval considered during optimization when
-            ``decoder="transfer_function"``. If ``None``, the interval
-            ``(-6.0, 6.0)`` is used. This default follows the interval commonly
-            used with sigmoid transfer functions in meta-heuristic
-            optimization.
+            Continuous interval used by the optimization algorithm when
+            ``decoder="transfer_function"``. When ``None``, ``(-6.0, 6.0)``
+            is used. This parameter has no effect for the other decoders.
+
         params:
             Parameters used by the selected decoding method. Parameters are
-            provided as a dictionary where each key is the name of a parameter
-            and its value is the corresponding parameter value. Supported
-            parameters are:
+            provided as a dictionary where each key is the name of a
+            parameter and its value is the corresponding parameter value.
+            Supported parameters are:
 
             ``alpha``:
                 Controls the inclination of the logistic transfer function
                 used by the ``"transfer_function"`` decoder. Higher values
                 produce a steeper transition around the center of the
-                logistic function, causing the transformation to move more
-                rapidly between its lower and upper regions. Lower values
-                produce a smoother transition over a wider portion of the
-                continuous search interval. Defaults to ``1.0``.
+                logistic function, while lower values produce a smoother
+                transition over a wider portion of the continuous search
+                interval. Defaults to ``1.0``.
+
         use_cache:
-            Whether cost-function evaluations should be cached.
+            Whether cost-function evaluations should be cached. When
+            ``False``, no cache is created or used.
+
         cache_type:
-            Cache strategy to use when caching is enabled.
+            Cache strategy to use when caching is enabled. Supported
+            strategies are ``"lru"``, ``"lfu"``, ``"fifo"``, ``"rr"``, and
+            ``"disk"``.
+
         cache_size:
-            Maximum cache size.
+            Maximum cache size for in-memory caches, expressed as the maximum
+            number of cached records. This parameter has no effect when
+            ``cache_type="disk"``.
         """
         super().__init__(
             cost_function=cost_function,
