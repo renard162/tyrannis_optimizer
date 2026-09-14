@@ -89,10 +89,26 @@ class Categorical(SpaceBase):
             the remaining decoders default to ``(-1.0, 1.0)``.
 
         gumbel_temperature:
-            Temperature used by the ``"gumbel_softmax"`` decoder. Lower
-            temperatures make the resulting probability distribution more
-            concentrated, while higher temperatures make it more uniform.
-            When ``None``, a temperature of ``1.0`` is used.
+            Temperature factor used by the ``"gumbel_softmax"`` decoder to
+            control the concentration of the categorical probability
+            distribution. Lower temperatures produce increasingly
+            concentrated distributions, making the decoder more likely to
+            select the category with the highest perturbed value, while
+            higher temperatures produce increasingly uniform distributions,
+            increasing exploration among categories.
+
+            The mathematical domain is ``(0, +inf)``. In practice, the
+            recommended range is ``[0.1, 10.0]``, as values outside this
+            range provide increasingly limited practical benefit due to
+            excessive concentration or near-uniformity of the resulting
+            distribution.
+
+            As a practical guideline, temperatures can be interpreted as:
+            values below ``0.5`` are low and favor exploitation, values from
+            ``0.5`` to ``2.0`` are moderate and provide a balance between
+            exploration and exploitation, and values above ``2.0`` are high
+            and favor exploration. A temperature of ``1.0`` is used by
+            default.
 
         use_cache:
             Whether cost-function evaluations should be cached. When
