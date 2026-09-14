@@ -281,6 +281,221 @@ class IslandMigration(MigrationDriverBase):
         balance_population: bool = True,
         migration_probability: float = 0.5,
     ) -> None:
+        """
+        Configurable migration strategy for distributed island-model optimization.
+
+        `IslandMigration` coordinates the exchange of particles between multiple
+        optimization islands. Migration does not create or destroy particles: every
+        particle involved in a migration is only removed from its donor island and
+        reallocated to a destination island. Consequently, migration changes the
+        distribution of particles among the islands while preserving the total number
+        of particles in the optimization process.
+
+        The driver maintains a distributed view of each island's population, selects
+        migration origins and destinations according to the configured strategies,
+        requests particles from donor islands, and forwards the selected particles to
+        their destination islands.
+
+        Migration can be controlled by iteration-based, probabilistic, or synchronous
+        triggers. The origin and destination of each migration can independently be
+        influenced by population balance, topology, and island fitness. The particle
+        transferred by a donor can likewise be selected randomly, by fitness, or by
+        fitness in the opposite direction.
+
+        The migration process is controlled by three independent concepts:
+
+        - `trigger` determines *when* a migration opportunity is activated.
+        - `movement_strategy` determines *where* a selected particle is sent.
+        - `particle_selection` determines *which* particle is selected by the donor
+        island.
+
+
+        Parameters
+        ----------
+        initial_iter:
+            First optimization iteration at which migration may occur. Iterations
+            before this value do not activate migration. The value also defines the
+            initial synchronization checkpoint when `trigger="synchronous"`.
+
+        min_interval:
+            Minimum number of optimization iterations between consecutive
+            migration events. After a migration is activated, the next migration cannot
+            be activated before `min_interval` additional iterations. With
+            `trigger="synchronous"`, the same interval determines the next
+            synchronization checkpoint after a synchronization is released.
+
+        min_population:
+            Minimum population that a donor island must retain. An island can
+            donate only when its available population is greater than
+            `min_population`, accounting for particles already reserved for
+            departure.
+
+        migration_size:
+            Number of independent migration events attempted at each activation.
+            Each event independently selects a donor island, a particle according
+            to `particle_selection`, and a destination according to
+            `movement_strategy`. Events are processed sequentially, so islands
+            that become ineligible during the activation are excluded from
+            subsequent events. The actual number of migrations may therefore be
+            lower than `migration_size`.
+
+        trigger:
+            Defines when migration is activated. The available options are:
+
+            - `"n_iter"`:
+                Activates migration when an island reaches its next eligible
+                iteration, as defined by `initial_iter` and `min_interval`.
+                Activation is asynchronous, so each island migrates independently
+                without waiting for the others. This is advantageous with slow
+                cost function evaluations, but can be inefficient with fast
+                evaluations due to concurrent activations and potential waiting
+                between islands.
+
+            - `"random"`:
+                Evaluates `migration_probability` when an island reaches an
+                eligible iteration, activating migration with the given
+                probability. Activation is asynchronous, so each island migrates
+                independently without waiting for the others. Like `"n_iter"`, this
+                is advantageous with slow cost function evaluations, but can be
+                inefficient with fast evaluations due to concurrent activations and
+                potential waiting between islands. `min_interval` limits the
+                frequency of activation for each island.
+
+            - `"synchronous"`:
+                Activates migration only after all islands reach the same
+                migration checkpoint, ensuring that the event is completed
+                synchronously across all islands. This is advantageous with fast
+                cost function evaluations, but can significantly increase
+                execution time with slow or highly variable evaluations, as
+                faster islands must wait for the slowest one.
+
+        movement_strategy:
+            Defines how the destination island is selected for each migrating
+            particle.
+
+            The available strategies are:
+
+            - `"random"`:
+                Selects a destination uniformly at random from all islands except
+                the donor. This strategy does not consider island topology, population
+                size, or fitness.
+
+            - `"random_neighbor"`:
+                Selects a destination uniformly at random from the donor's
+                neighboring islands. Islands are arranged in a circular topology,
+                so every island has exactly two neighbors: the preceding and following
+                islands in the sorted island identifier order.
+
+            - `"greedy"`:
+                Selects the island with the best population fitness among all
+                islands except the donor. Fitness is minimized, so the island containing
+                the lowest observed fitness is preferred. Empty populations or populations
+                whose particles have no valid fitness are treated as having infinite
+                fitness. If all candidate islands have infinite fitness, selection falls
+                back to random selection.
+
+            - `"greedy_neighbor"`:
+                Selects the best-fitness neighboring island of the donor. As with
+                `"greedy"`, lower fitness is preferred and random selection is used
+                when all candidate neighbors have infinite fitness.
+
+            - `"greedy_random"`:
+                Combines island fitness with a random selection factor. Candidate islands
+                are scored using their best observed fitness and a random value, producing
+                a stochastic preference toward better islands without making the best island
+                deterministically mandatory. If all candidate islands have infinite fitness,
+                selection falls back to random selection.
+
+            - `"star"`:
+                Uses a star topology centered on the first island in the sorted
+                island identifier order. When the donor is not the hub, the particle is
+                always sent to the hub. When the donor is the hub, the destination is
+                selected randomly from the remaining islands. This creates a centralized
+                migration topology in which the hub acts as the main receiver of particles
+                from the other islands.
+
+            - `"ring"`:
+                Sends particles to the next island in a circular topology. The destination is
+                the island immediately following the donor in the sorted island identifier order,
+                wrapping around from the last island to the first. This strategy is intended for
+                synchronous migration and therefore requires `trigger="synchronous"`.
+
+            - `"ring_sequential"`:
+                Uses the same circular topology as `"ring"`, sending each particle
+                from an island to its next island. Unlike `"ring"`, this strategy does not
+                require a synchronous trigger. It can therefore be used with asynchronous or
+                iteration-based migration. The distinction between `"ring"` and `"ring_sequential"`
+                is intentional: `"ring"` is restricted to synchronized migration, whereas
+                `"ring_sequential"` permits the same directional topology without requiring a global
+                synchronization barrier.
+
+        particle_selection:
+            Defines which particle is selected from a donor island when a
+            migration request is received. The available options are:
+
+            - `"random"`:
+                Selects a particle uniformly at random from the donor population.
+
+            - `"best"`:
+                Selects the particle with the lowest fitness. This corresponds to
+                exploitation-oriented migration, preferentially propagating the strongest
+                solution currently available on the donor island.
+
+            - `"worst"`:
+                Selects the particle with the highest fitness. This corresponds to
+                exploration-oriented migration, transferring a weaker solution and allowing
+                other islands to explore regions that may not otherwise be represented in their
+                populations. When multiple particles have the same target fitness, one of the tied
+                particles is selected randomly.
+
+        balance_population:
+            Controls whether donor selection considers the relative population
+            sizes of the islands. When `False`, eligible donor islands are selected without any
+            population-balancing preference. When `True`, donor selection incorporates the number
+            of currently available particles into its selection score, reducing the tendency
+            to repeatedly remove particles from smaller islands and favoring migration from
+            relatively larger populations. Regardless of this setting, an island must satisfy
+            `min_population` before it can become a donor.
+
+        migration_probability:
+            Probability of activating a migration event when `trigger="random"`. The value must
+            be in the closed interval `[0, 1]`. This parameter has no effect when `trigger` is
+            `"n_iter"` or `"synchronous"`.
+
+        Notes
+        -----
+        Migration consists of two separate selections.
+
+        First, the driver selects a donor and receiver island according to
+        `balance_population` and `movement_strategy`. Second, the donor selects
+        the actual particle according to `particle_selection`.
+
+        Consequently, `movement_strategy` does not determine which particle is
+        transferred; it only determines the destination island.
+
+        The driver tracks pending migration requests and reserves donor
+        population slots while requests are in flight. This prevents multiple
+        simultaneous migration requests from selecting the same available
+        population capacity and ensures that `min_population` is respected
+        while migrations are pending.
+
+        Population state is exchanged between processors so that destination
+        selection can use the most recent population information available to the
+        driver. Confirmed departures and arrivals are temporarily incorporated
+        into the driver's state until the corresponding processor population
+        snapshot confirms the change.
+
+        For `trigger="synchronous"`, migration acts as a global synchronization
+        barrier. All islands must reach the migration checkpoint before migration
+        can be activated, and the islands remain paused until all migration
+        requests associated with that checkpoint have completed.
+
+        The `"ring"` and `"ring_sequential"` strategies use the sorted order of
+        island identifiers to define their circular topology. The resulting
+        topology is therefore deterministic for a fixed set of island
+        identifiers.
+        """
+
         movement_strategies = {
             "random",
             "random_neighbor",
