@@ -22,7 +22,7 @@ class Categorical(SpaceBase):
     _boundaries: Boundaries
     _bounds: tuple[float, float] | None
     _decoder: str
-    _gumbel_temperature: float
+    _params: dict[str, Any]
     _rng: np.random.Generator
 
     def __init__(
@@ -31,7 +31,7 @@ class Categorical(SpaceBase):
         cost_function: Callable[..., float] | None = None,
         decoder: str = "one-hot",
         bounds: tuple[float, float] | None = None,
-        gumbel_temperature: float | None = None,
+        params: dict[str, Any] | None = None,
         use_cache: bool = False,
         cache_type: str = "lru",
         cache_size: int = 100_000,
@@ -88,27 +88,33 @@ class Categorical(SpaceBase):
             used. The ``"scalar"`` decoder defaults to ``(0.0, 1.0)`` while
             the remaining decoders default to ``(-1.0, 1.0)``.
 
-        gumbel_temperature:
-            Temperature factor used by the ``"gumbel-softmax"`` decoder to
-            control the concentration of the categorical probability
-            distribution. Lower temperatures produce increasingly
-            concentrated distributions, making the decoder more likely to
-            select the category with the highest perturbed value, while
-            higher temperatures produce increasingly uniform distributions,
-            increasing exploration among categories.
+        params:
+            Parameters used by the selected decoding method. Parameters are
+            provided as a dictionary where each key is the name of a
+            parameter and its value is the corresponding parameter value.
+            Supported parameters are:
 
-            The mathematical domain is ``(0, +inf)``. In practice, the
-            recommended range is ``[0.1, 10.0]``, as values outside this
-            range provide increasingly limited practical benefit due to
-            excessive concentration or near-uniformity of the resulting
-            distribution.
+            ``temperature``:
+                Temperature factor used by the ``"gumbel-softmax"`` decoder
+                to control the concentration of the categorical probability
+                distribution. Lower temperatures produce increasingly
+                concentrated distributions, making the decoder more likely
+                to select the category with the highest perturbed value,
+                while higher temperatures produce increasingly uniform
+                distributions, increasing exploration among categories.
 
-            As a practical guideline, temperatures can be interpreted as:
-            values below ``0.5`` are low and favor exploitation, values from
-            ``0.5`` to ``2.0`` are moderate and provide a balance between
-            exploration and exploitation, and values above ``2.0`` are high
-            and favor exploration. A temperature of ``1.0`` is used by
-            default.
+                The mathematical domain is ``(0, +inf)``. In practice, the
+                recommended range is ``[0.1, 10.0]``, as values outside this
+                range provide increasingly limited practical benefit due to
+                excessive concentration or near-uniformity of the resulting
+                distribution.
+
+                As a practical guideline, temperatures can be interpreted
+                as: values below ``0.5`` are low and favor exploitation,
+                values from ``0.5`` to ``2.0`` are moderate and provide a
+                balance between exploration and exploitation, and values
+                above ``2.0`` are high and favor exploration. A temperature
+                of ``1.0`` is used by default.
 
         use_cache:
             Whether cost-function evaluations should be cached. When
@@ -171,22 +177,11 @@ class Categorical(SpaceBase):
                     "The lower bound must be smaller than the upper bound."
                 )
 
-        if gumbel_temperature is None:
-            gumbel_temperature = 1.0
-
-        if gumbel_temperature <= 0:
-            raise ValueError("gumbel_temperature must be greater than zero.")
-
         self._bounds = bounds
         self._decoder = decoder
-        self._gumbel_temperature = float(gumbel_temperature)
-
+        self._params = {} if params is None else params
         self._type = "categorical"
-        self._configs = {
-            "decoder": decoder,
-            "bounds": bounds,
-            "gumbel_temperature": gumbel_temperature,
-        }
+        self._configs = {"decoder": decoder, "bounds": bounds, "params": self._params}
 
         register_space(name=self._type, space_class=Categorical)
 
@@ -308,14 +303,13 @@ class Categorical(SpaceBase):
                 values.append(float_inputs[f"{key}-{choice_str}"])
 
             probabilities = softmax(values)
-
             index = int(self._rng.choice(len(choices), p=probabilities))
-
             decoded[key] = choices[index]
 
         return decoded
 
     def _decode_gumbel_softmax(self, float_inputs: dict[str, float]) -> dict[str, Any]:
+        temperature = self._params.get("temperature", 1.0)
         decoded = {}
         for key, choices in self._iter_choices():
             values = []
@@ -324,7 +318,7 @@ class Categorical(SpaceBase):
                 values.append(float_inputs[f"{key}-{choice_str}"])
 
             gumbel_gi = gumbel_r.rvs(size=len(choices), random_state=self._rng)
-            gumbel = (np.asarray(values) + gumbel_gi) / self._gumbel_temperature
+            gumbel = (np.asarray(values) + gumbel_gi) / temperature
             probabilities = softmax(gumbel)
             index = int(self._rng.choice(len(choices), p=probabilities))
             decoded[key] = choices[index]
