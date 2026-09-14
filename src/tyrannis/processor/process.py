@@ -94,6 +94,95 @@ class ProcessPool(ProcessorBase):
         maxtasksperchild: int | None = None,
         chunksize: int | None = None,
     ) -> None:
+        """
+        Process-based processor for parallel particle evaluation.
+
+        `ProcessPool` evaluates particles concurrently using a pool of worker
+        processes. Each worker process has its own memory space, while the optimization
+        algorithm and its migration system remain controlled by the main process.
+        Particle evaluation and new-particle consolidation are distributed across the
+        process pool, with the required data serialized when exchanged between the
+        main process and worker processes.
+
+        Parameters
+        ----------
+        n_jobs:
+            Number of worker processes used to evaluate particles concurrently. If
+            `None`, the number of worker processes is determined automatically from
+            the number of logical CPUs available to the system, corresponding to
+            `os.cpu_count()`.
+
+        multiprocessing_context:
+            Multiprocessing start method used to create worker processes. If `None`,
+            `"spawn"` is used on both Windows and Linux. On Windows, `"spawn"` is
+            the only available context. On Linux, if `"spawn"` cannot be used,
+            `"forkserver"` is preferred over `"fork"`.
+
+        maxtasksperchild:
+            Maximum number of tasks that a worker process can complete before it is
+            replaced with a new worker process. If `None`, worker processes are not
+            replaced based on the number of completed tasks. Setting this parameter
+            can be useful for limiting memory growth or releasing resources that are
+            not reclaimed during the lifetime of a worker process.
+
+        chunksize:
+            Number of particles grouped into each task batch during parallel
+            evaluation. If `None`, the chunk size is calculated automatically by the
+            multiprocessing pool based on the number of tasks and worker processes.
+            Smaller values provide finer workload distribution and can improve load
+            balancing when evaluation times vary, while larger values reduce task
+            scheduling and communication overhead when evaluations have similar
+            execution times.
+
+        Notes
+        -----
+        Unlike thread-based processors, worker processes do not share the same memory
+        space as the main process. Data required by particle evaluation must therefore
+        be serialized when it is transferred to worker processes, and results must be
+        serialized when they are returned to the main process. This introduces
+        serialization and inter-process communication overhead that should be
+        considered when choosing `ProcessPool`.
+
+        The cost function is executed independently in multiple worker processes and
+        must be safe to execute in separate processes. It must be serializable by
+        `cloudpickle`, including any objects captured through closures, and all data
+        required by the function must likewise be serializable. The function should
+        not depend on mutable state shared with the main process or with other worker
+        processes, since ordinary Python objects are not shared between processes.
+        Changes made to process-local state are therefore not visible to other
+        workers or to the main process unless an explicit inter-process communication
+        mechanism is used.
+
+        The cost function should be deterministic with respect to its explicit inputs
+        and its process-local state, and evaluations must not depend on the execution
+        order of other particles. If the function uses external resources such as
+        files, databases, network connections, or other system resources, those
+        resources must be safely usable from independent processes, with each process
+        managing its own process-local resources when necessary. Resources or objects
+        that cannot be safely serialized or independently initialized in worker
+        processes should not be captured by the cost function.
+
+        `ProcessPool` is generally most useful for CPU-bound cost functions, especially
+        when the function performs substantial Python-level computation. Unlike
+        threads, separate processes are not subject to the Global Interpreter Lock
+        (GIL) of the main process, allowing CPU-bound Python code to execute in
+        parallel. However, the serialization and inter-process communication overhead
+        can make a process pool inefficient for very inexpensive cost functions.
+
+        The `multiprocessing_context` defaults to `"spawn"` regardless of the
+        platform. On Windows, `"spawn"` is the only supported context. On Linux,
+        `"spawn"` is generally preferred because worker processes start with a clean
+        interpreter state. When the cost function or required objects cannot be
+        serialized for `"spawn"`, `"forkserver"` provides an alternative on systems
+        that support it and is generally preferable to `"fork"`, as it avoids
+        inheriting the full state of the main process while still allowing objects
+        that cannot be serialized for spawning to be used in the worker processes.
+
+        The `chunksize` parameter controls the trade-off between communication
+        overhead and workload distribution. Smaller values provide finer load
+        balancing when particle evaluation times vary significantly, while larger
+        values can be more efficient when evaluations have similar execution times.
+        """
         available_contexts = get_all_start_methods()
 
         if (multiprocessing_context is not None) and (
