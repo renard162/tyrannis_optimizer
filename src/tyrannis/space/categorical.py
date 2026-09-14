@@ -76,7 +76,7 @@ class Categorical(SpaceBase):
             ``"one-hot"`` selects the category with the highest encoded
             value. ``"softmax"`` interprets the encoded values as logits,
             converts them into probabilities with softmax, and samples a
-            category according to those probabilities. ``"gumbel_softmax"``
+            category according to those probabilities. ``"gumbel-softmax"``
             adds Gumbel noise to the encoded values, applies the configured
             temperature and softmax, and samples a category from the
             resulting probability distribution. ``"scalar"`` represents
@@ -89,7 +89,7 @@ class Categorical(SpaceBase):
             the remaining decoders default to ``(-1.0, 1.0)``.
 
         gumbel_temperature:
-            Temperature factor used by the ``"gumbel_softmax"`` decoder to
+            Temperature factor used by the ``"gumbel-softmax"`` decoder to
             control the concentration of the categorical probability
             distribution. Lower temperatures produce increasingly
             concentrated distributions, making the decoder more likely to
@@ -155,11 +155,11 @@ class Categorical(SpaceBase):
         elif any(not choices for choices in self._boundaries):
             raise ValueError("Each categorical variable must have at least one choice.")
 
-        if decoder not in {"one-hot", "softmax", "gumbel_softmax", "scalar"}:
+        if decoder not in {"one-hot", "softmax", "gumbel-softmax", "scalar"}:
             raise ValueError(
                 f"Invalid decoder: {decoder!r}. "
                 "Expected one of: 'one-hot', 'softmax', "
-                "'gumbel_softmax', 'scalar'."
+                "'gumbel-softmax', 'scalar'."
             )
 
         if bounds is not None:
@@ -197,7 +197,7 @@ class Categorical(SpaceBase):
             default_bounds = {
                 "one-hot": (-1.0, 1.0),
                 "softmax": (-1.0, 1.0),
-                "gumbel_softmax": (-1.0, 1.0),
+                "gumbel-softmax": (-1.0, 1.0),
                 "scalar": (0.0, 1.0),
             }
             bounds = default_bounds.get(self._decoder)
@@ -230,7 +230,7 @@ class Categorical(SpaceBase):
 
         self._rng = np.random.default_rng(seed)
 
-        if self._decoder in {"softmax", "gumbel_softmax"} and seed is None:
+        if self._decoder in {"softmax", "gumbel-softmax"} and seed is None:
             warnings.warn(
                 "A stochastic decoding method was selected without a seed. "
                 "Different evaluations may produce different results",
@@ -244,7 +244,7 @@ class Categorical(SpaceBase):
         decoders = {
             "one-hot": self._decode_one_hot,
             "softmax": self._decode_softmax,
-            "gumbel_softmax": self._decode_gumbel_softmax,
+            "gumbel-softmax": self._decode_gumbel_softmax,
             "scalar": self._decode_scalar,
         }
 
