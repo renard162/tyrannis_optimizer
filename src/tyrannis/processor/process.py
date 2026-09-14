@@ -143,12 +143,13 @@ class ProcessPool(ProcessorBase):
         (GIL) of the main process.
 
         The cost function and all objects required to evaluate it must be serializable
-        when using `"spawn"` or `"forkserver"`. The function should therefore be
-        defined at module level rather than locally, as a lambda, or in an interactive
-        interpreter. It should not depend on mutable global state: worker processes
-        may not see the same state as the parent process. Constants defined at module
-        level are safe, but data required by the evaluation should preferably be
-        passed explicitly or initialized independently in each worker.
+        by `cloudpickle` when using `"spawn"` or `"forkserver"`. Although `cloudpickle`
+        supports functions defined locally or as lambdas, objects captured by the
+        function must also be serializable. The function should not depend on mutable
+        global state: worker processes may not see the same state as the parent process.
+        Constants defined at module level are safe, but data required by the evaluation
+        should preferably be passed explicitly or initialized independently in each
+        worker.
 
         The module that starts the optimizer must be safely importable by worker
         processes. In particular, the call that creates or runs the optimizer and
