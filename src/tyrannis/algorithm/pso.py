@@ -1,3 +1,4 @@
+from collections.abc import Collection
 from copy import deepcopy
 
 import numpy as np
@@ -22,11 +23,7 @@ class PSOParticle(ParticleBase):
         personal_best_variables: dict[str, float] | None = None,
         personal_best_fitness: np.float64 = FITNESS_UNDEFINED,
     ) -> None:
-        super().__init__(
-            identifier=identifier,
-            variables=variables,
-            fitness=fitness,
-        )
+        super().__init__(identifier=identifier, variables=variables, fitness=fitness)
 
         self._velocity = velocity
         self._personal_best_variables = personal_best_variables
@@ -72,13 +69,59 @@ class PSO(AlgorithmBase):
 
     def __init__(
         self,
-        inertia: float = 0.7,
+        inertia: float | Collection[float] = 0.7,
         cognitive_coefficient: float = 1.5,
         social_coefficient: float = 1.5,
+        constriction_factor: bool = False,
     ) -> None:
-        self._inertia = inertia
+        if constriction_factor and (cognitive_coefficient + social_coefficient < 4):
+            raise ValueError(
+                "The sum of cognitive_coefficient and social_coefficient "
+                "must be greater than or equal to 4 to use the constriction "
+                "factor."
+            )
+
+        if isinstance(inertia, Collection) and not isinstance(inertia, (str, bytes)):
+            if len(inertia) != 2:
+                raise ValueError("Dynamic inertia must contain exactly two values.")
+
+            inertia_values = tuple(inertia)
+
+            if not all(
+                isinstance(value, (int, float, np.number)) and np.isfinite(value)
+                for value in inertia_values
+            ):
+                raise ValueError("Dynamic inertia values must be finite numbers.")
+
+            if inertia_values[0] >= inertia_values[1]:
+                raise ValueError(
+                    "The first dynamic inertia value must be smaller than the second."
+                )
+
+            self._inertia = float(inertia_values[1])
+            self._inertia_bounds = (float(inertia_values[0]), float(inertia_values[1]))
+        elif isinstance(inertia, (int, float, np.number)):
+            if not np.isfinite(inertia):
+                raise ValueError("Inertia must be a finite number.")
+
+            self._inertia = float(inertia)
+            self._inertia_bounds = None
+        else:
+            raise TypeError(
+                "Inertia must be a number or an ordered collection "
+                "containing two numbers."
+            )
+
         self._cognitive_coefficient = cognitive_coefficient
         self._social_coefficient = social_coefficient
+        self._constriction_factor = constriction_factor
+
+        if constriction_factor:
+            phi = cognitive_coefficient + social_coefficient
+            self._constriction = 2 / abs(2 - phi - np.sqrt(phi**2 - 4 * phi))
+            self._inertia = 1.0
+        else:
+            self._constriction = 1.0
 
     def create_particle(
         self,
@@ -100,10 +143,7 @@ class PSO(AlgorithmBase):
 
         if velocity is None:
             velocity = {
-                name: self._rng.uniform(
-                    -(upper - lower),
-                    upper - lower,
-                )
+                name: self._rng.uniform(-(upper - lower), upper - lower)
                 for name, (lower, upper) in self._boundaries.items()
             }
 
@@ -123,7 +163,15 @@ class PSO(AlgorithmBase):
         del self._population[identifier]
 
     def pre_iteration(self, actual_iter: int) -> None:
-        return
+        if self._constriction_factor or self._inertia_bounds is None:
+            return
+
+        minimum_inertia, maximum_inertia = self._inertia_bounds
+        iteration = max(actual_iter, 1)
+
+        self._inertia = maximum_inertia - (
+            (maximum_inertia - minimum_inertia) * (iteration / self._max_iterations)
+        )
 
     def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
         for particle_id in particle_ids:
@@ -149,8 +197,7 @@ class PSO(AlgorithmBase):
 
         if np.isinf(particle.fitness):
             particle.update(
-                variables=particle.variables,
-                fitness_function=self._fitness_function,
+                variables=particle.variables, fitness_function=self._fitness_function
             )
 
         return particle
@@ -197,7 +244,7 @@ class PSO(AlgorithmBase):
             cognitive_random = particle.random_cache.pop(0)
             social_random = particle.random_cache.pop(0)
 
-            velocity = (
+            velocity = self._constriction * (
                 self._inertia * current_velocity
                 + self._cognitive_coefficient
                 * cognitive_random
@@ -207,11 +254,7 @@ class PSO(AlgorithmBase):
                 * (global_best_variable - current_variable)
             )
 
-            variable = np.clip(
-                current_variable + velocity,
-                lower,
-                upper,
-            )
+            variable = np.clip(current_variable + velocity, lower, upper)
 
             new_velocity[name] = velocity
             new_variables[name] = variable
@@ -219,8 +262,7 @@ class PSO(AlgorithmBase):
         particle.velocity = new_velocity
 
         particle.update(
-            variables=new_variables,
-            fitness_function=self._fitness_function,
+            variables=new_variables, fitness_function=self._fitness_function
         )
 
         return particle
@@ -229,7 +271,8 @@ class PSO(AlgorithmBase):
         for particle in self._population.values():
             if not isinstance(particle, PSOParticle):
                 raise TypeError(
-                    f"Particle '{particle.identifier}' must be an instance of PSOParticle."
+                    f"Particle '{particle.identifier}' must be an instance of "
+                    "PSOParticle."
                 )
 
             if actual_iter == 0:
@@ -241,7 +284,7 @@ class PSO(AlgorithmBase):
                 )
 
             particle.consolidate(
-                consolidate_new=bool(particle.candidate_fitness < particle.fitness),
+                consolidate_new=bool(particle.candidate_fitness < particle.fitness)
             )
             particle.update_personal_best()
 
