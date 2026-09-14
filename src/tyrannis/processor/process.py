@@ -136,52 +136,36 @@ class ProcessPool(ProcessorBase):
 
         Notes
         -----
-        Unlike thread-based processors, worker processes do not share the same memory
-        space as the main process. Data required by particle evaluation must therefore
-        be serialized when it is transferred to worker processes, and results must be
-        serialized when they are returned to the main process. This introduces
-        serialization and inter-process communication overhead that should be
-        considered when choosing `ProcessPool`.
+        `ProcessPool` is most suitable for CPU-bound cost functions, particularly when
+        each evaluation is sufficiently expensive to amortize the serialization and
+        inter-process communication overhead. Unlike threads, worker processes have
+        independent memory spaces and are not subject to the Global Interpreter Lock
+        (GIL) of the main process.
 
-        The cost function is executed independently in multiple worker processes and
-        must be safe to execute in separate processes. It must be serializable by
-        `cloudpickle`, including any objects captured through closures, and all data
-        required by the function must likewise be serializable. The function should
-        not depend on mutable state shared with the main process or with other worker
-        processes, since ordinary Python objects are not shared between processes.
-        Changes made to process-local state are therefore not visible to other
-        workers or to the main process unless an explicit inter-process communication
-        mechanism is used.
+        The cost function and all objects required to evaluate it must be serializable
+        when using `"spawn"` or `"forkserver"`. The function should therefore be
+        defined at module level rather than locally, as a lambda, or in an interactive
+        interpreter. It should not depend on mutable global state: worker processes
+        may not see the same state as the parent process. Constants defined at module
+        level are safe, but data required by the evaluation should preferably be
+        passed explicitly or initialized independently in each worker.
 
-        The cost function should be deterministic with respect to its explicit inputs
-        and its process-local state, and evaluations must not depend on the execution
-        order of other particles. If the function uses external resources such as
-        files, databases, network connections, or other system resources, those
-        resources must be safely usable from independent processes, with each process
-        managing its own process-local resources when necessary. Resources or objects
-        that cannot be safely serialized or independently initialized in worker
-        processes should not be captured by the cost function.
+        The module that starts the optimizer must be safely importable by worker
+        processes. In particular, the call that creates or runs the optimizer and
+        therefore initializes the `ProcessPool` must be protected by
+        `if __name__ == "__main__":`. The cost function should be defined outside this
+        block so that worker processes can import it without executing the optimizer
+        again. Consequently, `ProcessPool` should normally be used from a Python
+        script rather than an interactive interpreter, where the `__main__` module
+        cannot be imported reliably.
 
-        `ProcessPool` is generally most useful for CPU-bound cost functions, especially
-        when the function performs substantial Python-level computation. Unlike
-        threads, separate processes are not subject to the Global Interpreter Lock
-        (GIL) of the main process, allowing CPU-bound Python code to execute in
-        parallel. However, the serialization and inter-process communication overhead
-        can make a process pool inefficient for very inexpensive cost functions.
-
-        The `multiprocessing_context` defaults to `"spawn"` regardless of the
-        platform. On Windows, `"spawn"` is the only supported context. On Linux,
-        `"spawn"` is generally preferred because worker processes start with a clean
-        interpreter state. When the cost function or required objects cannot be
-        serialized for `"spawn"`, `"forkserver"` provides an alternative on systems
-        that support it and is generally preferable to `"fork"`, as it avoids
-        inheriting the full state of the main process while still allowing objects
-        that cannot be serialized for spawning to be used in the worker processes.
-
-        The `chunksize` parameter controls the trade-off between communication
-        overhead and workload distribution. Smaller values provide finer load
-        balancing when particle evaluation times vary significantly, while larger
-        values can be more efficient when evaluations have similar execution times.
+        The default `"spawn"` context provides clean process initialization and is
+        supported on both Windows and Linux. On Linux, `"forkserver"` can be used when
+        the cost function or its dependencies cannot be serialized for `"spawn"` and
+        is generally preferable to `"fork"`. Regardless of the selected context,
+        large amounts of data should not be unnecessarily transferred between
+        processes, as serialization and inter-process communication can substantially
+        reduce the benefit of parallel evaluation.
         """
         available_contexts = get_all_start_methods()
 
