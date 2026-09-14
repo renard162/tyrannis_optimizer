@@ -23,6 +23,7 @@ class Permutation(SpaceBase):
     _boundaries: Boundaries
     _bounds: tuple[float, float] | None
     _decoder: str
+    _params: dict[str, Any]
     _rng: np.random.Generator
 
     def __init__(
@@ -31,6 +32,7 @@ class Permutation(SpaceBase):
         cost_function: Callable[..., float] | None = None,
         decoder: str = "random-keys",
         bounds: tuple[float, float] | None = None,
+        params: dict[str, Any] | None = None,
         use_cache: bool = False,
         cache_type: str = "lru",
         cache_size: int = 100_000,
@@ -81,6 +83,26 @@ class Permutation(SpaceBase):
         bounds:
             Continuous search interval exposed to the optimization
             algorithm. When ``None``, ``(0.0, 1.0)`` is used.
+
+        params:
+            Parameters used by the selected decoding method. Parameters are
+            provided as a dictionary where each key is the name of a parameter
+            and its value is the corresponding parameter value. Supported
+            parameters are:
+
+            ``temperature``:
+                Controls the intensity of stochasticity in the
+                ``"gumbel-random-keys"``, ``"plackett-luce"``, and
+                ``"gumbel-sinkhorn"`` decoders. Higher values increase
+                randomness, while lower values make the decoding more
+                deterministic. Defaults to ``1.0``.
+
+            ``sinkhorn_iterations``:
+                Number of normalization iterations performed by the
+                Sinkhorn algorithm in the ``"gumbel-sinkhorn"`` decoder.
+                Higher values produce a closer approximation to a
+                doubly stochastic matrix at increased computational cost.
+                Defaults to ``20``.
 
         use_cache:
             Whether cost-function evaluations should be cached. When
@@ -149,12 +171,9 @@ class Permutation(SpaceBase):
 
         self._bounds = bounds
         self._decoder = decoder
-
+        self._params = {} if params is None else params
         self._type = "permutation"
-        self._configs = {
-            "decoder": decoder,
-            "bounds": bounds,
-        }
+        self._configs = {"decoder": decoder, "bounds": bounds, "params": self._params}
 
         register_space(name=self._type, space_class=Permutation)
 
@@ -203,15 +222,11 @@ class Permutation(SpaceBase):
 
         self._rng = np.random.default_rng(seed)
 
-        if (
-            self._decoder
-            in {
-                "gumbel-random-keys",
-                "plackett-luce",
-                "gumbel-sinkhorn",
-            }
-            and seed is None
-        ):
+        if self._decoder in {
+            "gumbel-random-keys",
+            "plackett-luce",
+            "gumbel-sinkhorn",
+        } and (seed is None):
             warnings.warn(
                 "A stochastic decoding method was selected without a seed. "
                 "Different evaluations may produce different results",
@@ -276,7 +291,6 @@ class Permutation(SpaceBase):
         self, float_inputs: dict[str, float]
     ) -> dict[str, list[Any]]:
         decoded = {}
-
         for key, choices in self._iter_choices():
             values = []
             for choice in choices:
@@ -291,8 +305,8 @@ class Permutation(SpaceBase):
     def _decode_gumbel_random_keys(
         self, float_inputs: dict[str, float]
     ) -> dict[str, list[Any]]:
+        temperature = self._params.get("temperature", 1.0)
         decoded = {}
-
         for key, choices in self._iter_choices():
             values = []
             for choice in choices:
@@ -300,7 +314,8 @@ class Permutation(SpaceBase):
                 values.append(float_inputs[f"{key}-{choice_str}"])
 
             gumbel_g = gumbel_r.rvs(size=len(choices), random_state=self._rng)
-            order = np.argsort(np.asarray(values) + gumbel_g, kind="stable")
+            scores = np.asarray(values) + temperature * gumbel_g
+            order = np.argsort(scores, kind="stable")
             decoded[key] = [choices[index] for index in order]
 
         return decoded
@@ -308,8 +323,8 @@ class Permutation(SpaceBase):
     def _decode_plackett_luce(
         self, float_inputs: dict[str, float]
     ) -> dict[str, list[Any]]:
+        temperature = self._params.get("temperature", 1.0)
         decoded = {}
-
         for key, choices in self._iter_choices():
             values = []
             for choice in choices:
@@ -320,7 +335,7 @@ class Permutation(SpaceBase):
             permutation = []
             while remaining:
                 remaining_values = np.asarray([values[index] for index in remaining])
-                probabilities = softmax(remaining_values)
+                probabilities = softmax(remaining_values / temperature)
                 selected = int(self._rng.choice(len(remaining), p=probabilities))
                 permutation.append(remaining.pop(selected))
 
@@ -331,6 +346,8 @@ class Permutation(SpaceBase):
     def _decode_gumbel_sinkhorn(
         self, float_inputs: dict[str, float]
     ) -> dict[str, list[Any]]:
+        temperature = self._params.get("temperature", 1.0)
+        iterations = self._params.get("sinkhorn_iterations", 20)
         decoded = {}
 
         for key, choices in self._iter_choices():
@@ -346,8 +363,8 @@ class Permutation(SpaceBase):
                     values[row_index, column_index] = float_inputs[matrix_key]
 
             gumbel_g = gumbel_r.rvs(size=(size, size), random_state=self._rng)
-            matrix = values + gumbel_g
-            matrix = self._sinkhorn(matrix)
+            matrix = (values + gumbel_g) / temperature
+            matrix = self._sinkhorn(matrix, iterations)
             row_indices, column_indices = linear_sum_assignment(-matrix)
             order = np.argsort(column_indices, kind="stable")
             permutation = row_indices[order]
@@ -356,15 +373,12 @@ class Permutation(SpaceBase):
         return decoded
 
     @staticmethod
-    def _sinkhorn(matrix: np.ndarray) -> np.ndarray:
+    def _sinkhorn(matrix: np.ndarray, iterations: int) -> np.ndarray:
         matrix = matrix - np.max(matrix)
-
         matrix = np.exp(matrix)
-
-        for _ in range(20):
+        for _ in range(iterations):
             row_sums = matrix.sum(axis=1, keepdims=True)
             matrix /= row_sums
-
             column_sums = matrix.sum(axis=0, keepdims=True)
             matrix /= column_sums
 
