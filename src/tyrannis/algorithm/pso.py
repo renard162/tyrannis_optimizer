@@ -74,6 +74,86 @@ class PSO(AlgorithmBase):
         social_coefficient: float = 1.5,
         constriction_factor: bool = False,
     ) -> None:
+        """
+        Particle Swarm Optimization algorithm.
+
+        PSO is a population-based optimization algorithm in which each particle
+        adjusts its velocity according to its previous velocity, its own best-known
+        position, and the best-known position of the swarm. The cognitive and
+        social coefficients control the influence of the particle's personal
+        experience and the swarm's experience, respectively.
+
+        Parameters
+        ----------
+        inertia : float or Collection[float], default=0.7
+            Inertia weight applied to the particle velocity. When a single numeric
+            value is provided, the inertia weight remains constant throughout the
+            optimization. When an ordered collection containing exactly two
+            numbers is provided, the values define the minimum and maximum inertia
+            weights, respectively, and the inertia weight is decreased linearly
+            throughout the optimization.
+
+            The first value of a dynamic inertia range must be smaller than the
+            second value.
+
+        cognitive_coefficient : float, default=1.5
+            Coefficient controlling the influence of each particle's personal best
+            position on its velocity update.
+
+        social_coefficient : float, default=1.5
+            Coefficient controlling the influence of the swarm's best-known
+            position on each particle's velocity update.
+
+        constriction_factor : bool, default=False
+            Whether to use the PSO constriction factor formulation. When enabled,
+            the constriction factor is calculated from the sum of the cognitive
+            and social coefficients and applied to the velocity update. The
+            inertia weight is set to 1 and its provided value or dynamic range is
+            completely ignored.
+
+            This option requires the sum of ``cognitive_coefficient`` and
+            ``social_coefficient`` to be greater than or equal to 4.
+
+        Notes
+        -----
+        When dynamic inertia is enabled, the inertia weight is linearly decreased
+        according to the optimization progress. The current iteration is clamped
+        to a minimum of 1 because iteration 0 is reserved for environment
+        preparation. The schedule therefore uses ``max(actual_iter, 1)`` and the
+        total number of iterations provided by the optimization context.
+
+        When ``constriction_factor`` is enabled, the constriction coefficient is
+        calculated as
+
+        ``2 / abs(2 - phi - sqrt(phi**2 - 4 * phi))``
+
+        where ``phi`` is the sum of the cognitive and social coefficients. In this
+        formulation, the inertia weight is fixed at 1 and the constriction
+        coefficient controls the magnitude of the resulting velocity.
+
+        The PSO formulation is based on Kennedy and Eberhart (1995). The inertia
+        weight was introduced by Shi and Eberhart (1998), who also studied its
+        effect on PSO performance. The linear time-varying inertia strategy
+        implemented here follows the commonly used time-decreasing inertia-weight
+        approach introduced in this line of work. The constriction-factor
+        formulation is based on the stability analysis of Clerc and Kennedy
+        (2002).
+
+        References
+        ----------
+        Kennedy, J., & Eberhart, R. (1995). Particle swarm optimization.
+        Proceedings of ICNN'95 - International Conference on Neural Networks,
+        1942-1948. https://doi.org/10.1109/ICNN.1995.488968
+
+        Shi, Y., & Eberhart, R. C. (1998). A modified particle swarm optimizer.
+        Proceedings of the 1998 IEEE International Conference on Evolutionary
+        Computation, 69-73. https://doi.org/10.1109/ICEC.1998.699146
+
+        Clerc, M., & Kennedy, J. (2002). The particle swarm - explosion, stability,
+        and convergence in a multidimensional complex space. IEEE Transactions
+        on Evolutionary Computation, 6(1), 58-73.
+        https://doi.org/10.1109/4235.985692
+        """
         if constriction_factor and (cognitive_coefficient + social_coefficient < 4):
             raise ValueError(
                 "The sum of cognitive_coefficient and social_coefficient "
