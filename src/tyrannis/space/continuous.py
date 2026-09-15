@@ -91,6 +91,8 @@ class Continuous(SpaceBase):
             str(index): boundary for index, boundary in enumerate(self._boundaries)
         }
 
+        self._variable_names = list(self._encoded_boundaries.keys())
+
     def decode(self, float_inputs: dict[str, float]) -> list[float] | dict[str, float]:
         self._check_input_bounds(float_inputs)
 

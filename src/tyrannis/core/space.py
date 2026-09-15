@@ -164,6 +164,8 @@ class SpaceBase(ABC):
 
         self._validate_cache()
 
+        self._variable_names: list[str] = []
+
     @abstractmethod
     def initialize_context(self, seed: int | None = None) -> None:
         """
@@ -282,6 +284,16 @@ class SpaceBase(ABC):
             "boundaries": self._boundaries,
             "configs": self._configs,
         }
+
+    @property
+    def variable_names(self) -> list[str]:
+        """Return the names of the variables in the space."""
+        return self._variable_names
+
+    @property
+    def encoded_variable_names(self) -> list[str]:
+        """Return the names of the encoded variables in the space."""
+        return list(self._encoded_boundaries.keys())
 
     def _is_interval(self, value: object) -> bool:
         if not isinstance(value, (list, tuple, np.ndarray)):

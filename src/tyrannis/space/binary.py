@@ -188,6 +188,7 @@ class Binary(SpaceBase):
         else:
             self._encoded_boundaries = {bit: boundary for bit in self._boundaries}
 
+        self._variable_names = list(self._encoded_boundaries.keys())
         self._rng = np.random.default_rng(seed)
 
         if self._decoder in {"s-shape"} and (seed is None):

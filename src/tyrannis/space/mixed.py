@@ -154,6 +154,10 @@ class Mixed(SpaceBase):
             self._encoded_boundaries.update(encoded_boundaries)
             self._space_encoded_variables.append(list(encoded_boundaries))
 
+        self._variable_names = []
+        for variables in self._space_variables:
+            self._variable_names.extend(variables)
+
     def decode(self, float_inputs: dict[str, float]) -> dict[str, Any]:
         decoded = {}
 

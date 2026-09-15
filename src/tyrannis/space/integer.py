@@ -190,6 +190,7 @@ class Integer(SpaceBase):
         else:
             self._encoded_boundaries = self._decoded_boundaries.copy()
 
+        self._variable_names = list(self._encoded_boundaries.keys())
         self._rng = np.random.default_rng(seed)
 
         if self._decoder in {"stochastic_round"} and (seed is None):

@@ -237,6 +237,7 @@ class Categorical(SpaceBase):
                         encoded_key = f"{index}-{choice_str}"
                         self._encoded_boundaries[encoded_key] = bounds
 
+        self._variable_names = [key for key, _ in self._iter_choices()]
         self._rng = np.random.default_rng(seed)
 
         if self._decoder in {"softmax", "gumbel-softmax"} and seed is None:
