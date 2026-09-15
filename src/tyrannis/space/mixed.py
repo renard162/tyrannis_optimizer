@@ -64,6 +64,20 @@ class Mixed(SpaceBase):
             Maximum cache size for in-memory caches, expressed as the maximum
             number of cached records. This parameter has no effect when
             ``cache_type="disk"``.
+
+        Examples
+        --------
+        >>> space = Mixed(
+        ...     spaces={
+        ...         "x1": Continuous((-5.0, 5.0)),
+        ...         "i1": Integer((-8, 8)),
+        ...         "b1": Binary(),
+        ...         "c1": Categorical(["a", "b", "c", "d", "e"]),
+        ...         "p1": Permutation(["A", "B", "C", "D", "E"])
+        ...     },
+        ...     cost_function=cost_function,
+        ...     use_cache=True,
+        ... )
         """
         super().__init__(
             cost_function,
