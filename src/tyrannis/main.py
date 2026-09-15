@@ -118,8 +118,8 @@ class Optimizer:
             that event, a list of event names can be supplied to record multiple
             events, or ``"all"`` can be used to record all available events.
 
-            Available events are ``"migration"``, ``"pre_iteration"``,
-            ``"new"``, ``"error"``, ``"iteration"``, ``"status"``, and ``"best"``.
+            Available events are ``"migration"``, ``"pre_iteration"``, ``"new_particle"``,
+            ``"error"``, ``"iteration"``, ``"status"``, and ``"best"``.
 
         Methods
         -------
