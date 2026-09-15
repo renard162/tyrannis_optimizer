@@ -32,7 +32,7 @@ class Optimizer:
         processor: ProcessorBase | None = None,
         migration: MigrationDriverBase | None = None,
         seed: int | None = None,
-        fitness_failure_strategy: str = "invalidate",
+        fitness_failure_strategy: str = "raise",
         history: str | list[str] | None = None,
     ) -> None:
         """
@@ -246,7 +246,7 @@ class Optimizer:
         Optimizer(...)
         >>> optimizer.result_
         {
-            "identifier": 17,
+            "identifier": "island:0|particle:0",
             "variables": {"color": "blue", "size": "medium"},
             "fitness": 0.0
         }
@@ -268,7 +268,7 @@ class Optimizer:
         Optimizer(...)
         >>> optimizer.result_
         {
-            "identifier": 17,
+            "identifier": "island:0|particle:0",
             "variables": ["blue", "medium"],
             "fitness": 0.0
         }

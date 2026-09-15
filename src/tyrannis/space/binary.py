@@ -51,7 +51,8 @@ class Binary(SpaceBase):
         bits:
             Number of binary variables or names of keyword arguments. An
             integer creates that many positional Boolean inputs, while a list
-            of strings creates keyword inputs with the specified names.
+            of strings creates keyword inputs with the specified names. If
+            ``None``, ``bits=1`` is assumed.
 
         cost_function:
             User-defined cost function to be evaluated after decoding the

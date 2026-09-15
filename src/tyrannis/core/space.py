@@ -144,17 +144,20 @@ class SpaceBase(ABC):
         cost_function:
             User-defined cost function that receives the decoded search-space
             representation and returns its fitness value.
+
         use_cache:
-            Whether cost-function evaluations should be cached. When ``False``,
-            no cache is created or used, regardless of ``cache_type``.
+            Whether cost-function evaluations should be cached. When
+            ``False``, no cache is created or used.
+
         cache_type:
             Cache strategy to use when caching is enabled. Supported
             strategies are ``"lru"``, ``"lfu"``, ``"fifo"``, ``"rr"``, and
-            ``"disk"``. The default ``"lru"`` uses the Python standard library.
+            ``"disk"``.
+
         cache_size:
-            Maximum cache size. For in-memory caches, this represents the
-            maximum number of cached records. For the disk cache, this
-            represents the maximum size in megabytes.
+            Maximum cache size for in-memory caches, expressed as the maximum
+            number of cached records. This parameter has no effect when
+            ``cache_type="disk"``.
         """
         self._cost_function = cost_function
         self._use_cache = use_cache

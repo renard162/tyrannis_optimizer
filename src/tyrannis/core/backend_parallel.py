@@ -54,19 +54,16 @@ class ParallelBackendBase(BackendBase, ABC):
         initialize_context
         -> init_particles
         -> loop:
-            pre_iteration
+            -> pre_iteration
             -> create_random_cache (new particles)
             -> initialize new particles in parallel
             -> consolidate new particles
-            -> log new particles and errors
             -> update population
-            -> create_random_cache (entire population)
-            -> update particles in parallel
-            -> log errors
-            -> update population
+            -> [if actual_iter > 0]
+                -> create_random_cache (entire population)
+                -> update particles in parallel
+                -> update population
             -> post_iteration
-            -> log iteration
-            -> log best
         -> update_result
 
     Particle initialization and particle updates may be executed concurrently

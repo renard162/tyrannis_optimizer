@@ -195,13 +195,17 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
     The execution starts by creating the initial particles and then repeatedly
     follows this lifecycle:
 
-        create_particle
+        -> create_particle
         -> pre_iteration
         -> create_random_cache (new particles)
-        -> initialize_particle (new particles)
-        -> create_random_cache (entire population)
-        -> update_particle (entire population)
-        -> pos_iteration
+        -> initialize new particles
+        -> consolidate new particles
+        -> update population
+        -> [if actual_iter > 0]
+            -> create_random_cache
+            -> update particles
+            -> update population
+        -> post_iteration
 
     `pre_iteration` prepares the particle states and algorithm state for the
     iteration, including, but not limited to, creating or removing particles
@@ -218,7 +222,7 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
     at this stage, since consolidation may require comparisons between
     particles or other population-level decisions.
 
-    `pos_iteration` consolidates the new particle states and prepares the
+    `post_iteration` consolidates the new particle states and prepares the
     algorithm and its particles for the next execution cycle.
     """
 
@@ -309,18 +313,20 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         The signature of this method must match the signature of the particle
         constructor (`__init__`) implemented by the algorithm, including all of its
         arguments and their respective types. The only required argument of this
-        method must be `identifier`. All other arguments must have `None` as their
-        default value.
+        method must be `identifier`. All other arguments must be optional and use
+        the appropriate undefined value for their respective type. In particular,
+        fitness-related arguments must use `FITNESS_UNDEFINED` as their default
+        value.
 
         When an argument other than `identifier` is not provided, the method must
         determine its value according to the particle creation rules defined by the
         algorithm. The method must not evaluate the fitness function during particle
         creation, even when the fitness value is not provided.
 
-        If `fitness` is not provided, the particle must be created with an undefined
-        fitness. Its fitness will be evaluated subsequently by `initialize_particle`,
-        which is responsible for initializing the fitness of newly created particles
-        before they participate in the algorithm's execution.
+        If `fitness` is not provided, the particle must be created with
+        `FITNESS_UNDEFINED`. Its fitness will be evaluated subsequently by
+        `initialize_particle`, which is responsible for initializing the fitness of
+        newly created particles before they participate in the algorithm's execution.
 
         Having `identifier` as the only required argument is fundamental to the
         operation of Tyrannis, as particles may be created generically by the
@@ -456,9 +462,9 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
 
         ``initialize_particle`` and ``update_particle`` must consume the values
         from the cache rather than generating new random values themselves.
-        Each value should be removed from the cache when consumed so that the
-        cache represents only the random values that remain available to the
-        current particle-processing phase.
+        Consumed values should be removed from the cache so that the cache
+        contains only the random values that remain available to the current
+        particle-processing phase.
         """
         raise NotImplementedError
 

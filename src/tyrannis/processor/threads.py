@@ -17,7 +17,7 @@ class ThreadsPool(ProcessorBase):
     def __init__(
         self,
         n_jobs: int | None = None,
-        chunksize: int = 1,
+        chunksize: int | None = None,
     ) -> None:
         """
         Thread-based processor for parallel particle evaluation.
@@ -35,10 +35,11 @@ class ThreadsPool(ProcessorBase):
 
         chunksize:
             Number of particles grouped into each task batch during parallel
-            evaluation. If `None`, the chunk size is calculated automatically based
-            on the number of particles and worker threads. Larger values reduce
-            task-scheduling overhead, while smaller values provide finer workload
-            distribution and can improve load balancing when evaluation times vary.
+            evaluation. If `None`, the chunk size is calculated automatically by
+            the thread pool based on the number of particles and worker threads.
+            Larger values reduce task-scheduling overhead, while smaller values
+            provide finer workload distribution and can improve load balancing
+            when evaluation times vary.
 
         Notes
         -----
@@ -70,7 +71,7 @@ class ThreadsPool(ProcessorBase):
         larger values can be more efficient when evaluations have similar
         execution times.
         """
-        if chunksize <= 0:
+        if (chunksize is not None) and (chunksize <= 0):
             raise ValueError("chunksize must be greater than zero.")
 
         self._n_process = n_jobs

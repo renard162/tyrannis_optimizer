@@ -300,17 +300,22 @@ class MigrationProcessorBase(ABC):
             objective functions, so lower fitness values represent better
             solutions.
 
-            A fitness value of `None` indicates that the particle has not yet
-            received a valid fitness evaluation.
+            A fitness value of `FITNESS_UNDEFINED` indicates that the particle has
+            not yet received a valid fitness evaluation.
 
         iter_best:
-            Best particle found during the current optimization iteration.
+            Serialized representation of the best particle found during the
+            current optimization iteration.
 
             This value represents the best result of the current iteration and
             must not be confused with the algorithm's historical `local_best`.
             The latter represents the best solution accumulated over previous
             iterations, whereas `iter_best` represents the current iteration
             state used by migration control.
+
+            The particle is serialized before being passed to the migration
+            strategy and must be decoded when access to its particle data is
+            required.
 
             `None` indicates that no valid iteration-best particle is currently
             available.
