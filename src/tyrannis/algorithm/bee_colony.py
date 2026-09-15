@@ -70,7 +70,6 @@ class ABC(AlgorithmBase):
 
     def __init__(
         self,
-        colony_size: int = 40,
         limit: int | None = None,
         max_scouts: int | None = 1,
         improved_probability: bool = True,
@@ -86,16 +85,11 @@ class ABC(AlgorithmBase):
 
         Parameters
         ----------
-        colony_size : int, default=40
-            Total number of bees in the colony. Half of the colony corresponds
-            to employed bees and food sources, while the other half corresponds
-            to onlooker bees.
-
         limit : int or None, default=None
             Maximum number of unsuccessful trials allowed for a food source
             before it becomes eligible for replacement by a scout bee. When
-            ``None``, the limit is set to the number of food sources multiplied
-            by the problem dimensionality.
+            ``None``, the limit is calculated from the current number of food
+            sources and the problem dimensionality.
 
         max_scouts : int or None, default=1
             Maximum number of eligible food sources that may be replaced by
@@ -114,9 +108,10 @@ class ABC(AlgorithmBase):
 
         Notes
         -----
-        The colony follows the standard ABC convention in which the number of
-        food sources and employed bees is half the colony size, and the number
-        of onlooker bees is equal to the number of food sources.
+        The number of food sources and employed bees is equal to the number of
+        particles provided by the optimization context. The number of
+        onlooker bees is also equal to this value, resulting in a conceptual
+        colony size of twice the current number of particles.
 
         The objective function is always interpreted as a cost function to be
         minimized. The raw objective value is stored in ``fitness`` and
@@ -135,18 +130,15 @@ class ABC(AlgorithmBase):
         included in its serialized state. Consequently, a particle transferred
         to another execution environment starts with a new trial history.
 
+        The effective default value of ``limit`` is recalculated before every
+        iteration from the current number of particles. This allows the
+        parameter to adapt when the population size changes dynamically, such
+        as during migration between optimization islands.
+
         The classical ABC scout phase replaces at most one food source per
         cycle. ``max_scouts`` can be set to another positive value to allow
         multiple replacements as an explicit extension of that behavior.
         """
-        if not isinstance(colony_size, (int, np.integer)):
-            raise TypeError("colony_size must be an integer.")
-
-        if colony_size < 4 or colony_size % 2:
-            raise ValueError(
-                "colony_size must be an even integer greater than or equal to 4."
-            )
-
         if limit is not None:
             if not isinstance(limit, (int, np.integer)):
                 raise TypeError("limit must be an integer or None.")
@@ -164,19 +156,30 @@ class ABC(AlgorithmBase):
         if not isinstance(improved_probability, (bool, np.bool_)):
             raise TypeError("improved_probability must be a boolean.")
 
-        self._colony_size = int(colony_size)
-        self._food_source_count = self._colony_size // 2
         self._limit = limit
         self._max_scouts = max_scouts
         self._improved_probability = bool(improved_probability)
 
-        self._limit_value = None
         self._onlooker_counts: dict[str, int] = {}
         self._onlooker_probabilities: dict[str, float] = {}
 
+    def initialize_context(
+        self,
+        fitness_function,
+        boundaries,
+        n_iter,
+        n_particles,
+    ) -> None:
+        super().initialize_context(
+            fitness_function=fitness_function,
+            boundaries=boundaries,
+            n_iter=n_iter,
+            n_particles=n_particles,
+        )
+
     @property
     def colony_size(self) -> int:
-        return self._colony_size
+        return 2 * self._n_particles
 
     @property
     def limit(self) -> int | None:
@@ -206,7 +209,9 @@ class ABC(AlgorithmBase):
             }
 
         self._population[identifier] = ABCParticle(
-            identifier=identifier, variables=variables, fitness=fitness
+            identifier=identifier,
+            variables=variables,
+            fitness=fitness,
         )
 
     def delete_particle(self, identifier: str | None) -> None:
@@ -216,10 +221,16 @@ class ABC(AlgorithmBase):
         del self._population[identifier]
 
     def _select_scouts(self) -> list[str]:
+        limit = (
+            self._limit
+            if self._limit is not None
+            else self._n_particles * len(self._boundaries)
+        )
+
         eligible = [
             particle
             for particle in self._population.values()
-            if particle.trial_count >= self._limit_value
+            if particle.trial_count >= limit
         ]
 
         if not eligible:
@@ -234,7 +245,8 @@ class ABC(AlgorithmBase):
             selected = eligible
         else:
             trial_counts = np.asarray(
-                [particle.trial_count for particle in eligible], dtype=np.int64
+                [particle.trial_count for particle in eligible],
+                dtype=np.int64,
             )
 
             order = np.argsort(-trial_counts, kind="stable")
@@ -244,20 +256,11 @@ class ABC(AlgorithmBase):
 
     def pre_iteration(self, actual_iter: int) -> None:
         if actual_iter == 0:
-            if len(self._population) != self._food_source_count:
+            if len(self._population) != self._n_particles:
                 raise ValueError(
-                    f"ABC requires {self._food_source_count} particles for "
-                    f"colony_size={self._colony_size}, but "
+                    f"ABC requires {self._n_particles} particles, but "
                     f"{len(self._population)} particles were provided."
                 )
-
-            dimension = len(self._boundaries)
-
-            self._limit_value = (
-                self._limit
-                if self._limit is not None
-                else self._food_source_count * dimension
-            )
 
             return
 
@@ -271,36 +274,50 @@ class ABC(AlgorithmBase):
         particles = list(self._population.values())
 
         abc_fitness = np.asarray(
-            [particle.abc_fitness for particle in particles], dtype=float
+            [particle.abc_fitness for particle in particles],
+            dtype=float,
         )
 
         abc_fitness = np.where(
-            np.isfinite(abc_fitness) & (abc_fitness > 0), abc_fitness, 0.0
+            np.isfinite(abc_fitness) & (abc_fitness > 0),
+            abc_fitness,
+            0.0,
         )
 
         if self._improved_probability:
             best_fitness = np.max(abc_fitness)
 
             if not np.isfinite(best_fitness) or best_fitness <= 0:
-                probabilities = np.full(len(particles), 1.0 / len(particles))
+                probabilities = np.full(
+                    len(particles),
+                    1.0 / len(particles),
+                )
             else:
                 probabilities = 0.9 * (abc_fitness / best_fitness) + 0.1
         else:
             total_fitness = np.sum(abc_fitness)
 
             if not np.isfinite(total_fitness) or total_fitness <= 0:
-                probabilities = np.full(len(particles), 1.0 / len(particles))
+                probabilities = np.full(
+                    len(particles),
+                    1.0 / len(particles),
+                )
             else:
                 probabilities = abc_fitness / total_fitness
 
         probabilities = np.where(
-            np.isfinite(probabilities) & (probabilities >= 0), probabilities, 0.0
+            np.isfinite(probabilities) & (probabilities >= 0),
+            probabilities,
+            0.0,
         )
 
         probability_sum = np.sum(probabilities)
 
         if not np.isfinite(probability_sum) or probability_sum <= 0:
-            probabilities = np.full(len(particles), 1.0 / len(particles))
+            probabilities = np.full(
+                len(particles),
+                1.0 / len(particles),
+            )
         else:
             probabilities /= probability_sum
 
@@ -320,9 +337,13 @@ class ABC(AlgorithmBase):
         cumulative = np.cumsum(probabilities)
         cumulative[-1] = 1.0
 
-        selections = self._rng.random(self._food_source_count)
+        selections = self._rng.random(self._n_particles)
 
-        selected_indices = np.searchsorted(cumulative, selections, side="right")
+        selected_indices = np.searchsorted(
+            cumulative,
+            selections,
+            side="right",
+        )
 
         counts = dict.fromkeys(particle_ids, 0)
 
@@ -338,7 +359,11 @@ class ABC(AlgorithmBase):
 
         return particle_ids[self._rng.integers(0, len(particle_ids))]
 
-    def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
+    def create_random_cache(
+        self,
+        particle_ids: list[str],
+        initialize: bool,
+    ) -> None:
         if initialize:
             for identifier in particle_ids:
                 self._population[identifier].random_cache = {}
@@ -376,7 +401,8 @@ class ABC(AlgorithmBase):
 
         if np.isinf(particle.fitness):
             particle.update(
-                variables=particle.variables, fitness_function=self._fitness_function
+                variables=particle.variables,
+                fitness_function=self._fitness_function,
             )
 
         return particle
@@ -408,7 +434,6 @@ class ABC(AlgorithmBase):
 
     def _attempt_update(
         self,
-        particle: ABCParticle,
         variables: dict[str, float],
         fitness: np.float64,
         variable: str,
@@ -418,13 +443,15 @@ class ABC(AlgorithmBase):
         partner = self._population[partner_id]
 
         candidate_variables = self._generate_candidate(
-            variables=variables, variable=variable, partner=partner, phi=phi
+            variables=variables,
+            variable=variable,
+            partner=partner,
+            phi=phi,
         )
 
         candidate_fitness = self._fitness_function(candidate_variables)
 
         candidate_abc_fitness = ABCParticle._calculate_abc_fitness(candidate_fitness)
-
         current_abc_fitness = ABCParticle._calculate_abc_fitness(fitness)
 
         if (
@@ -432,11 +459,7 @@ class ABC(AlgorithmBase):
             and np.isfinite(current_abc_fitness)
             and candidate_abc_fitness > current_abc_fitness
         ):
-            particle.reset_trial_count()
-
             return candidate_variables, candidate_fitness
-
-        particle.increment_trial_count()
 
         return variables, fitness
 
@@ -456,7 +479,6 @@ class ABC(AlgorithmBase):
         employed_phi = particle.random_cache.pop("employed-phi")
 
         current_variables, current_fitness = self._attempt_update(
-            particle=particle,
             variables=current_variables,
             fitness=current_fitness,
             variable=employed_variable,
@@ -470,7 +492,6 @@ class ABC(AlgorithmBase):
             phi = particle.random_cache.pop(f"onlooker-{index}-phi")
 
             current_variables, current_fitness = self._attempt_update(
-                particle=particle,
                 variables=current_variables,
                 fitness=current_fitness,
                 variable=variable,
@@ -484,6 +505,10 @@ class ABC(AlgorithmBase):
         return particle
 
     def post_iteration(self, actual_iter: int) -> None:
+        if actual_iter == 0:
+            self.update_solution_state()
+            return
+
         for particle in self._population.values():
             if not isinstance(particle, ABCParticle):
                 raise TypeError(
@@ -491,18 +516,18 @@ class ABC(AlgorithmBase):
                     "ABCParticle."
                 )
 
-            if actual_iter == 0:
-                continue
-
             if particle.candidate_fitness is None:
                 raise RuntimeError(
                     f"Particle '{particle.identifier}' has no candidate fitness."
                 )
 
-            particle.consolidate(
-                consolidate_new=bool(
-                    particle.abc_candidate_fitness < particle.abc_fitness
-                )
-            )
+            improved = particle.abc_candidate_fitness < particle.abc_fitness
+
+            particle.consolidate(consolidate_new=improved)
+
+            if improved:
+                particle.reset_trial_count()
+            else:
+                particle.increment_trial_count()
 
         self.update_solution_state()
