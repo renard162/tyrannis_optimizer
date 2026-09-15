@@ -129,6 +129,20 @@ class Categorical(SpaceBase):
             Maximum cache size for in-memory caches, expressed as the maximum
             number of cached records. This parameter has no effect when
             ``cache_type="disk"``.
+
+        References
+        ----------
+        Cerda, P., Varoquaux, G., & Kégl, B. (2018). Similarity encoding for
+        learning with dirty categorical variables. Machine Learning, 107,
+        1477-1494. https://doi.org/10.1007/s10994-018-5724-2
+
+        Jang, E., Gu, S., & Poole, B. (2017). Categorical Reparameterization
+        with Gumbel-Softmax. International Conference on Learning
+        Representations. https://doi.org/10.48550/arXiv.1611.01144
+
+        Bean, J. C. (1994). Genetic algorithms and random keys for sequencing
+        and optimization. ORSA Journal on Computing, 6(2), 154-160.
+        https://doi.org/10.1287/ijoc.6.2.154
         """
         super().__init__(
             cost_function,

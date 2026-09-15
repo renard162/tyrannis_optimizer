@@ -119,6 +119,26 @@ class Permutation(SpaceBase):
             Maximum cache size for in-memory caches, expressed as the maximum
             number of cached records. This parameter has no effect when
             ``cache_type="disk"``.
+
+        References
+        ----------
+        Bean, J. C. (1994). Genetic Algorithms and Random Keys for Sequencing
+        and Optimization. ORSA Journal on Computing, 6(2), 154-160.
+        https://doi.org/10.1287/ijoc.6.2.154
+
+        Yellott, J. I., Jr. (1977). The Relationship Between Luce's Choice
+        Axiom, Thurstone's Theory of Comparative Judgment, and the Double
+        Exponential Distribution. Journal of Mathematical Psychology, 15(2),
+        109-144. https://doi.org/10.1016/0022-2496(77)90026-8
+
+        Plackett, R. L. (1975). The Analysis of Permutations. Journal of the
+        Royal Statistical Society: Series C (Applied Statistics), 24(2),
+        193-202. https://doi.org/10.2307/2346567
+
+        Mena, G., Belanger, D., Linderman, S., & Snoek, J. (2018). Learning
+        Latent Permutations with Gumbel-Sinkhorn Networks. International
+        Conference on Learning Representations.
+        https://doi.org/10.48550/arXiv.1802.08665
         """
         super().__init__(
             cost_function,

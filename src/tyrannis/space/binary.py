@@ -101,6 +101,18 @@ class Binary(SpaceBase):
             Maximum cache size for in-memory caches, expressed as the maximum
             number of cached records. This parameter has no effect when
             ``cache_type="disk"``.
+
+        References
+        ----------
+        Kennedy, J., & Eberhart, R. C. (1997). A discrete binary version of
+        the particle swarm algorithm. Proceedings of the 1997 IEEE
+        International Conference on Systems, Man, and Cybernetics,
+        4104-4108. https://doi.org/10.1109/ICSMC.1997.637339
+
+        Pampara, G., Franken, N., & Engelbrecht, A. P. (2005). Combining
+        particle swarm optimisation with angle modulation to solve binary
+        problems. Proceedings of the IEEE Congress on Evolutionary
+        Computation, 89-96. https://doi.org/10.1109/CEC.2005.1554671
         """
         super().__init__(
             cost_function,

@@ -103,6 +103,27 @@ class Integer(SpaceBase):
             Maximum cache size for in-memory caches, expressed as the maximum
             number of cached records. This parameter has no effect when
             ``cache_type="disk"``.
+
+        References
+        ----------
+        Hereford, J. M., & Gerlach, H. (2008). Integer-valued Particle Swarm
+        Optimization applied to Sudoku puzzles. Proceedings of the 2008 IEEE
+        Swarm Intelligence Symposium, 1-7.
+        https://doi.org/10.1109/SIS.2008.4668293
+
+        Pampara, G., Franken, N., & Engelbrecht, A. P. (2009). Novel
+        Mutative Particle Swarm Optimization Algorithm for Discrete
+        Optimization. Proceedings of the 2009 IEEE Congress on Evolutionary
+        Computation.
+
+        Connolly, M. P., Higham, N. J., & Mary, T. (2021). Stochastic rounding
+        and its probabilistic backward error analysis. SIAM Journal on
+        Scientific Computing, 43(5), C259-C281.
+        https://doi.org/10.1137/20M1334796
+
+        Chen, C.-H. (2010). Hierarchical Swarm Model: A New Approach to
+        Optimization. Discrete Dynamics in Nature and Society, 2010,
+        379649. https://doi.org/10.1155/2010/379649
         """
         super().__init__(
             cost_function=cost_function,
