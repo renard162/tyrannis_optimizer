@@ -28,6 +28,129 @@ class SparkDistributed(DistributedBackendBase):
         communication_port: int | None = None,
         code_archive: str | Path | None = None,
     ) -> None:
+        """
+        Spark backend for distributed island-based optimization.
+
+        `SparkDistributed` distributes the complete population among
+        independent optimization islands, with one processor and algorithm
+        instance executed by each Spark executor. Each island evolves its
+        local population independently and participates in the configured
+        migration strategy when migration is enabled.
+
+        By default, the particles within each island are processed serially.
+        A different `ProcessorBase` implementation can be supplied through the
+        backend configuration, in which case the corresponding processor is used
+        independently within each Spark island, allowing additional parallel
+        processing of particles inside each executor.
+
+        Parameters
+        ----------
+        spark:
+            Active Spark session used to distribute the optimization islands
+            across Spark executors. The session must already be configured and
+            available when the backend is created.
+
+        n_executors:
+            Number of Spark executors used as optimization islands. Each
+            executor receives an independent processor and algorithm instance,
+            and therefore maintains its own population. The value of
+            `n_particles` supplied to the optimization is applied independently
+            to every island, resulting in an initial population of
+            `n_particles * n_executors` particles across the distributed
+            optimization. Ideally, `n_executors` should match the number of
+            workers available in the Spark cluster, so that each worker can
+            execute one optimization island without unnecessarily increasing
+            resource contention or leaving available workers unused.
+
+        communication_port:
+            TCP port used by the Spark communication layer for communication
+            between the driver and the optimization islands during migration.
+            It must be an integer between 1 and 65535. If `None`, port `18081`
+            is used. The default may conflict with another service or process
+            running on the cluster, in which case an explicit port should be
+            provided.
+
+        code_archive:
+            Path to a Python archive containing the project code and any modules
+            required by the Spark executors. If provided, the archive is
+            distributed to Spark workers through the Spark context before the
+            optimization starts. If `None`, no additional Python archive is
+            distributed.
+
+        Notes
+        -----
+        `SparkDistributed` is a general distributed execution model for
+        population-based optimization. Instead of distributing individual
+        particle evaluations while keeping a single optimization state on the
+        driver, the complete optimization algorithm is replicated across
+        independent islands. Each island owns its own population, algorithm
+        state, processor, migration processor, and local optimization result.
+
+        The driver coordinates the islands through the configured migration
+        strategy. When migration is enabled, the migration driver establishes
+        the communication infrastructure and applies the migration rules
+        between islands. This allows the backend to implement island-based
+        optimization while using Spark as the distributed execution
+        environment.
+
+        The default processor executes the particles of each island serially.
+        This avoids introducing a second layer of parallelization inside each
+        Spark executor and is generally appropriate when the available Spark
+        executors already provide the required degree of parallelism. If a
+        different `ProcessorBase` is configured, that processor is replicated
+        independently for each island and controls the particle-level
+        processing within its corresponding executor. Consequently,
+        `SparkDistributed` can also be combined with local parallel processors
+        when additional parallelism inside each island is appropriate.
+
+        A key characteristic of this architecture is that the optimization
+        state is not transmitted between the driver and executors after every
+        particle operation. Each island performs its optimization iterations
+        locally, and the relevant population or state is transmitted between
+        the distributed components primarily at iteration boundaries and at
+        migration events. This drastically reduces communication and
+        serialization overhead compared with architectures that repeatedly
+        transfer particle data between the driver and workers during every
+        iteration.
+
+        The reduction in communication overhead comes at the cost of additional
+        algorithmic complexity. The population is no longer represented as a
+        single homogeneous collection: particles are associated with specific
+        islands, and the optimization must account for their relationships
+        through the configured migration strategy. The choice of migration
+        topology, frequency, selection rules, and exchanged particles can
+        therefore influence both the optimization behavior and the effective
+        communication cost of the distributed execution.
+
+        Because each island maintains an independent optimization state, the
+        algorithm and processor are serialized and replicated across the Spark
+        executors. The algorithm, processor, cost function, and all objects
+        required for their execution must therefore be compatible with Spark's
+        serialization mechanism and available in the executor environment. If
+        required project modules are not already installed on the workers,
+        `code_archive` can be used to distribute the corresponding Python
+        code.
+
+        The history logging system should be used with extreme care with
+        `SparkDistributed`. Processor histories are returned from the Spark
+        executors to the driver as part of the distributed results. Spark
+        imposes limits on the size of data that can be transmitted between
+        executors and the driver, and a sufficiently large optimization history
+        can exceed these limits. In that situation, the Spark task may fail
+        while returning its result, causing the complete optimization run to
+        fail even if the optimization itself has otherwise completed
+        successfully. Large populations, many iterations, or detailed history
+        events can cause this limit to be reached particularly quickly.
+
+        `SparkDistributed` is therefore particularly suitable when the cost of
+        maintaining independent optimization islands is outweighed by the
+        computational cost of the optimization itself. By keeping most
+        computation local to each island and communicating only at iteration
+        boundaries or migration events, the backend can scale population-based
+        optimization across distributed resources while substantially reducing
+        the communication overhead associated with fine-grained particle-level
+        distribution.
+        """
         if spark is None:
             raise ValueError("Spark session cannot be None.")
 
