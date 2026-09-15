@@ -264,15 +264,10 @@ class PSO(AlgorithmBase):
         for particle_id in particle_ids:
             particle = self._population[particle_id]
 
-            if len(particle.random_cache) >= 2 * len(self._boundaries):
-                continue
-
-            particle.random_cache = []
-            for _ in self._boundaries:
-                cognitive_random = self._rng.random()
-                social_random = self._rng.random()
-
-                particle.random_cache.extend((cognitive_random, social_random))
+            particle.random_cache = {}
+            for variable in self._boundaries:
+                particle.random_cache[f"{variable}-cognitive"] = self._rng.random()
+                particle.random_cache[f"{variable}-social"] = self._rng.random()
 
     def initialize_particle(self, identifier: str) -> PSOParticle:
         particle = self._population[identifier]
@@ -328,8 +323,8 @@ class PSO(AlgorithmBase):
             personal_best_variable = personal_best_variables[name]
             global_best_variable = global_best_variables[name]
 
-            cognitive_random = particle.random_cache.pop(0)
-            social_random = particle.random_cache.pop(0)
+            cognitive_random = particle.random_cache.pop(f"{name}-cognitive")
+            social_random = particle.random_cache.pop(f"{name}-social")
 
             velocity = self._constriction * (
                 self._inertia * current_velocity
