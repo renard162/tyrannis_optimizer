@@ -155,7 +155,7 @@ class ThreadsPool(ProcessorBase):
                         fitness_failure_strategy=self._fitness_failure_strategy,
                         initialize_particle=False,
                     )
-                    processed_particles = pool.imap_unordered(
+                    processed_particles = pool.map(
                         worker,
                         self._algorithm.population,
                         chunksize=self._chunksize,
