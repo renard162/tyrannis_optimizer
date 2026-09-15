@@ -247,6 +247,7 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         fitness_function: Callable[[dict[str, float]], np.float64],
         boundaries: dict[str, tuple[float, float]],
         n_iter: int,
+        n_particles: int,
     ) -> None:
         self._fitness_function = fitness_function
         self._boundaries = boundaries
@@ -255,6 +256,7 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         self._iter_best: str | None = None
         self._iter_worst: str | None = None
         self._max_iterations: int = n_iter
+        self._n_particles: int = n_particles
 
     def configure(
         self,

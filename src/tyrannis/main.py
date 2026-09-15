@@ -306,6 +306,7 @@ class Optimizer:
             fitness_function=self._space,
             boundaries=self._space.encoded_boundaries,
             n_iter=self._n_iterations,
+            n_particles=self._n_particles,
         )
 
         self._processor.initialize_context(
