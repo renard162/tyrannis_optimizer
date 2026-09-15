@@ -83,6 +83,10 @@ class PSO(AlgorithmBase):
         social coefficients control the influence of the particle's personal
         experience and the swarm's experience, respectively.
 
+        See the `Particle swarm optimization
+        <https://en.wikipedia.org/wiki/Particle_swarm_optimization>`_ article
+        on Wikipedia for an overview of the algorithm and its development.
+
         Parameters
         ----------
         inertia : float or Collection[float], default=0.7
@@ -129,7 +133,7 @@ class PSO(AlgorithmBase):
         When ``constriction_factor`` is enabled, the constriction coefficient is
         calculated as
 
-        ``chi =2 / abs(2 - phi - sqrt(phi**2 - 4 * phi))``
+        ``chi = 2 / abs(2 - phi - sqrt(phi**2 - 4 * phi))``
 
         where ``phi`` is the sum of the cognitive and social coefficients. The
         coefficient is then multiplied by the complete velocity update:
