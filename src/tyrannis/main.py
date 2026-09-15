@@ -35,6 +35,244 @@ class Optimizer:
         fitness_failure_strategy: str = "invalidate",
         history: str | list[str] | None = None,
     ) -> None:
+        """
+        Configure and execute a cost-function minimization problem.
+
+        `Optimizer` is the main interface for configuring and executing an
+        optimization problem in Tyrannis. The framework formulates optimization
+        as the minimization of a cost function over a defined search space,
+        combining a search space, an optimization algorithm, and an execution
+        backend with the desired population size, number of iterations, and
+        execution options.
+
+        In optimization literature, optimization may refer to either minimization
+        or maximization. Tyrannis, however, is designed specifically for
+        minimization: the objective of every optimization is to find the candidate
+        solution that minimizes the defined cost function.
+
+        Parameters
+        ----------
+        space:
+            Search space defining the domain over which the optimization is
+            performed. In optimization literature, the search space is the set of
+            candidate solutions considered by the optimization algorithm. It
+            contains the `boundaries` or available options for the variables of
+            the problem, defining the domain of the cost function, as well as the
+            cost function itself, which is minimized by the optimization
+            algorithm.
+
+        algorithm:
+            Optimization algorithm used to search for the best solution.
+
+        n_iterations:
+            Number of iterations performed by the optimization. Must be an integer
+            greater than or equal to 1.
+
+        n_particles:
+            Number of particles in the population. Must be an integer greater than
+            or equal to 1. For distributed backends, this value specifies the
+            number of particles assigned to each island.
+
+        backend:
+            Backend defining how the optimization process is distributed and
+            executed. It determines how the population, iterations, and associated
+            optimization workload are organized across the available execution
+            resources. Different backends provide different execution models,
+            including local execution in a single process and distributed
+            execution across multiple workers or islands. If ``None``, the
+            optimization is executed locally.
+
+        processor:
+            Processor defining how the iterative optimization process is executed
+            on each machine involved in the optimization. It determines whether
+            the process is executed serially or with parallel processing within
+            each machine. If ``None``, the iterations are executed serially. When
+            parallel processing is desired, :class:`~tyrannis.processor.joblib.Joblib`
+            is the recommended processor, as it is specifically designed to
+            distribute the processing of the particles across the available
+            execution resources of each machine.
+
+        migration:
+            Migration strategy defining how solutions are exchanged between
+            islands during the optimization when using a backend that supports
+            island-based optimization. If ``None`` and the selected backend uses
+            a migration-based algorithm, the islands operate independently from
+            one another, without exchanging solutions, and the final result is the
+            best solution found among all islands.
+
+        seed:
+            Optional random seed used to make the optimization reproducible.
+
+        fitness_failure_strategy:
+            Strategy used when the cost function raises an exception while
+            evaluating a particle. If ``"raise"``, the exception is propagated
+            immediately and the optimization is interrupted. If ``"invalidate"``,
+            the failed evaluation is suppressed and the particle is assigned a
+            fitness of ``inf``, causing it to be treated as an invalid solution
+            while allowing the optimization to continue. The default is
+            ``"raise"``.
+
+        history:
+            History events to record during the optimization. If ``None``, no
+            history is recorded. A single event name can be supplied to record
+            that event, a list of event names can be supplied to record multiple
+            events, or ``"all"`` can be used to record all available events.
+
+            Available events are ``"migration"``, ``"pre_iteration"``,
+            ``"new"``, ``"error"``, ``"iteration"``, ``"status"``, and ``"best"``.
+
+        Methods
+        -------
+        fit()
+            Execute the optimization and return the optimizer instance.
+
+        save_history_csv(file_location, encoding="utf-8", sep=",", internal_state=False)
+            Save the recorded optimization history to a CSV file. When
+            ``internal_state=False``, the history contains the decoded variables
+            in the representation defined by the search space. When
+            ``internal_state=True``, the CSV also contains the internal particle
+            state and the encoded variables used by the optimization algorithm.
+
+        Attributes
+        ----------
+        best_solution:
+            Best solution found by the optimization, decoded into the
+            representation expected by the cost function. The solution is
+            returned as a list when the cost function receives positional
+            arguments and as a dictionary mapping argument names to values when
+            it receives keyword arguments.
+
+        best_fitness:
+            Fitness value of the best solution found by the optimization.
+
+        result_:
+            Dictionary containing the best result found by the optimization. It
+            contains the particle `identifier`, its `fitness`, and its decoded
+            `variables`. The `variables` value is returned as a list when the
+            cost function receives positional arguments and as a dictionary
+            mapping argument names to values when the cost function receives
+            keyword arguments. The remaining keys and their meaning are unchanged
+            regardless of the cost function signature.
+
+        history_columns:
+            Column names used by the history generators and by
+            :meth:`save_history_csv`.
+
+        history_generator:
+            Iterator that generates the registered optimization history as rows of
+            tabular data, with variables represented in their decoded form.
+
+        internal_history_generator_:
+            Iterator that generates the registered optimization history as rows of
+            tabular data, including the encoded variables and the particle's
+            internal state.
+
+        Notes
+        -----
+        The default configuration uses the local backend and serial processor,
+        providing a simple sequential execution model. Computationally
+        expensive cost functions or large populations can benefit from using
+        a distributed backend together with an appropriate processor.
+
+        The returned `best_solution` always uses the representation defined by
+        the search space. The encoded representation used internally by the
+        optimization algorithm is not exposed through this property.
+
+        When ``fitness_failure_strategy="invalidate"`` is used, exceptions
+        raised by the cost function are suppressed during fitness evaluation.
+        Failed evaluations are assigned a fitness of ``inf`` and therefore
+        cannot become the best solution, allowing the optimization to continue.
+        This strategy should be used with caution, as errors in the cost
+        function may remain unnoticed while the optimization completes
+        normally. In such cases, the problem may only become apparent when the
+        resulting fitness values are inspected.
+
+        History recording is disabled by default. Enabling it can substantially
+        increase memory usage, particularly for large populations or long
+        optimizations, since multiple entries can be generated for each
+        particle and iteration. As an example, an optimization with only
+        50 particles and 300 iterations can produce more than 31_000 entries
+        in the history table when all events are recorded.
+
+        Examples
+        --------
+        >>> from tyrannis import Optimizer
+        >>> from tyrannis.algorithm import PSO
+        >>> from tyrannis.space import Continuous
+        >>>
+        >>> def cost_function(x, y):
+        ...     return x**2 + y**2
+        >>>
+        >>> space = Continuous(
+        ...     boundaries={"x": (-10, 10), "y": (-10, 10)},
+        ...     cost_function=cost_function
+        ... )
+        >>> algorithm = PSO()
+        >>> optimizer = Optimizer(
+        ...     space=space,
+        ...     algorithm=algorithm,
+        ...     n_iterations=100,
+        ...     n_particles=50
+        ... )
+        >>> optimizer.fit()
+        Optimizer(...)
+        >>> optimizer.best_solution
+        {"x": 0.0, "y": 0.0}
+        >>> optimizer.best_fitness
+        0.0
+
+        When the cost function uses keyword arguments, the categorical choices can
+        be defined with a dictionary. In this case, the `variables` value in
+        `result_` is also returned as a dictionary, with each key corresponding to
+        an argument of the cost function:
+
+        >>> def cost_function(color, size):
+        ...     return color_factor(color) + size_factor(size)
+        >>>
+        >>> space = Categorical(
+        ...     choices={
+        ...         "color": ["red", "green", "blue"],
+        ...         "size": ["small", "medium", "large"]
+        ...     },
+        ...     cost_function=cost_function
+        ... )
+        >>> optimizer = Optimizer(
+        ...     space=space,
+        ...     algorithm=algorithm,
+        ...     n_iterations=100,
+        ...     n_particles=50
+        ... )
+        >>> optimizer.fit()
+        Optimizer(...)
+        >>> optimizer.result_
+        {
+            "identifier": 17,
+            "variables": {"color": "blue", "size": "medium"},
+            "fitness": 0.0
+        }
+
+        In contrast, when the categorical choices are defined positionally, the
+        same result is returned with `variables` represented as a list:
+
+        >>> def cost_function(*data):
+        ...     return color_factor(data[0]) + size_factor(data[1])
+        >>>
+        >>> space = Categorical(
+        ...     choices=[
+        ...         ["red", "green", "blue"],
+        ...         ["small", "medium", "large"]
+        ...     ],
+        ...     cost_function=cost_function
+        ... )
+        >>> optimizer.fit()
+        Optimizer(...)
+        >>> optimizer.result_
+        {
+            "identifier": 17,
+            "variables": ["blue", "medium"],
+            "fitness": 0.0
+        }
+        """
         if not isinstance(n_iterations, int) or n_iterations < 1:
             raise ValueError(
                 "n_iterations must be an integer greater than or equal to 1."
