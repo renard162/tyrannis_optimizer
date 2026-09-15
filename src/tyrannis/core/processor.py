@@ -290,6 +290,8 @@ class ProcessorBase(ABC, Generic[SignalType]):
             departure_particle=self._departure_particle,
         )
 
+        self._algorithm.update_n_particles()
+
     def _insert_arrival_particle(self, particle_data: dict[str, Any]) -> None:
         particle_id = particle_data.get("identifier")
 

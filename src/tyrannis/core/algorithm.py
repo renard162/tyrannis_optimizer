@@ -300,6 +300,9 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
             if particle.new_particle
         ]
 
+    def update_n_particles(self) -> None:
+        self._n_particles = len(self._population)
+
     @abstractmethod
     def create_particle(
         self,
