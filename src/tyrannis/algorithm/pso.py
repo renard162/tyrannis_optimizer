@@ -177,18 +177,13 @@ class PSO(AlgorithmBase):
             if len(inertia) != 2:
                 raise ValueError("Dynamic inertia must contain exactly two values.")
 
-            inertia_values = tuple(inertia)
+            inertia_values = tuple(sorted(inertia))
 
             if not all(
                 isinstance(value, (int, float, np.number)) and np.isfinite(value)
                 for value in inertia_values
             ):
                 raise ValueError("Dynamic inertia values must be finite numbers.")
-
-            if inertia_values[0] >= inertia_values[1]:
-                raise ValueError(
-                    "The first dynamic inertia value must be smaller than the second."
-                )
 
             self._inertia = float(inertia_values[1])
             self._inertia_bounds = (float(inertia_values[0]), float(inertia_values[1]))
