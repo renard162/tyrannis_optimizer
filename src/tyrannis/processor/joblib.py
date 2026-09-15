@@ -25,6 +25,88 @@ class Joblib(ProcessorBase):
         batch_size: int | str = "auto",
         pre_dispatch: int | str = "2 * n_jobs",
     ) -> None:
+        """
+        Joblib-based processor for parallel particle evaluation.
+
+        `Joblib` evaluates particles concurrently through the Joblib parallel
+        execution framework. It is the preferred processor for parallel
+        execution because it provides the broadest compatibility with different
+        execution strategies and supports multiple parallel backends through a
+        unified interface.
+
+        Unlike `ThreadsPool` and `ProcessPool`, which are tied to a specific
+        execution model, `Joblib` can select the execution strategy through
+        `joblib_backend`. This allows the same processor to use processes,
+        threads, or other execution mechanisms supported by the installed
+        Joblib version, while also providing automatic task batching and
+        control over how many tasks are dispatched ahead of execution.
+
+        Parameters
+        ----------
+        n_jobs:
+            Number of jobs executed concurrently. The default is `-1`, which
+            uses all available CPUs. Positive values specify the exact number
+            of jobs, with `1` disabling parallel execution. A value of `-1`
+            uses all CPUs, while values below `-1` reserve CPUs from the total
+            available: `-2` uses all but one CPU, `-3` uses all but two, and so
+            on. The value `0` is invalid.
+
+        joblib_backend:
+            Joblib backend used to execute the parallel tasks. The default,
+            `"loky"`, uses separate worker processes and is generally suitable
+            for CPU-bound cost functions. `"threading"` uses worker threads and
+            can be advantageous for I/O-bound functions or computations that
+            release the Python Global Interpreter Lock (GIL). Other backends
+            available in the installed Joblib environment may also be selected.
+
+        batch_size:
+            Number of particle evaluations submitted as a single batch to each
+            worker. If `"auto"`, Joblib dynamically adjusts the batch size to
+            target batches with an execution time of approximately half a
+            second. Smaller values provide finer workload distribution and can
+            improve load balancing when evaluation times vary, while larger
+            values reduce scheduling overhead when evaluations are relatively
+            uniform. The default is `"auto"`.
+
+        pre_dispatch:
+            Number of batches that are pre-dispatched before workers begin
+            completing tasks. It may be specified as a positive integer or as a
+            string expression such as `"2 * n_jobs"`, which is the default. A
+            larger value can keep workers supplied with tasks more consistently,
+            at the cost of greater memory consumption and earlier task creation.
+            A smaller value limits the amount of work queued ahead of execution.
+
+        Notes
+        -----
+        The behavior and requirements of the cost function depend on the selected
+        Joblib backend. With process-based backends, the cost function and all
+        objects required for its evaluation must be serializable by the mechanism
+        used by Joblib. With thread-based backends, worker threads share the same
+        memory space as the main process, so serialization is not required for
+        communication between workers; however, the cost function must be
+        thread-safe and reentrant when evaluations can execute concurrently.
+
+        The cost function must be independent between particle evaluations. It
+        should not rely on execution order or modify shared mutable state in a
+        manner that allows one evaluation to affect another. Any shared resources,
+        such as files, database connections, random-number generators, caches, or
+        other mutable objects, must either support concurrent access safely or be
+        independently managed by each worker.
+
+        The `joblib_backend` therefore provides an important trade-off between
+        process-based and thread-based execution. Process-based backends avoid
+        the GIL for CPU-bound Python code but require objects involved in the
+        evaluation to be transferable to worker processes. Thread-based backends
+        avoid this serialization and can be more efficient when the workload is
+        I/O-bound or relies primarily on native code that releases the GIL.
+
+        `batch_size` and `pre_dispatch` control different aspects of Joblib's
+        scheduling behavior. `batch_size` determines how many individual tasks
+        are grouped into a batch, whereas `pre_dispatch` determines how many
+        batches are submitted ahead of execution. Their optimal values depend on
+        the relative cost of particle evaluation, variability between evaluation
+        times, and the overhead of task scheduling and serialization.
+        """
         if not isinstance(n_jobs, int) or isinstance(n_jobs, bool):
             raise TypeError("n_jobs must be an integer.")
 
