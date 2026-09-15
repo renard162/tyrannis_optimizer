@@ -40,6 +40,126 @@ class SparkParallel(ParallelBackendBase):
         aux_batch_size: int | str = "auto",
         aux_pre_dispatch: int | str = "2 * n_jobs",
     ) -> None:
+        """
+        Spark-based backend for fully parallel particle optimization.
+
+        `SparkParallel` executes the optimization loop as a single fully
+        parallelized process, without distinguishing or partitioning the
+        population into optimization islands. Particle initialization and
+        updates are distributed across Spark workers, while the complete
+        optimization state and iteration lifecycle remain coordinated by the
+        backend.
+
+        Parameters
+        ----------
+        spark:
+            Active Spark session used to distribute particle initialization and
+            update operations across Spark workers. The session must already be
+            configured and available when the backend is created.
+
+        spark_code_archive:
+            Path to a Python archive containing the project code and any modules
+            required by the Spark workers. If provided, the archive is
+            distributed to Spark workers through the Spark context before the
+            optimization starts. If `None`, no additional Python archive is
+            distributed.
+
+        n_aux_jobs:
+            Number of jobs used by the auxiliary Joblib parallel processing
+            performed locally by the driver. Positive values specify the exact
+            number of jobs, while negative values specify the number of jobs
+            relative to the available logical CPUs. For example, `-1` uses all
+            available logical CPUs, `-2` uses all CPUs except one, and `-3` uses
+            all CPUs except two. The default is `-1`.
+
+        aux_backend:
+            Joblib backend used for auxiliary parallel processing. The default
+            is `"sequential"`. Other available options are `"threading"`, which
+            uses threads and is suitable for I/O-bound or GIL-releasing tasks,
+            `"loky"`, which uses separate processes and is suitable for
+            CPU-bound tasks, and `"multiprocessing"`, which also uses separate
+            processes through Python's multiprocessing backend.
+
+        aux_batch_size:
+            Number of tasks grouped into each batch for auxiliary Joblib
+            processing. If `"auto"`, Joblib determines the batch size
+            automatically based on the observed execution time of the tasks.
+            The default is `"auto"`.
+
+        aux_pre_dispatch:
+            Number of auxiliary Joblib batches that may be dispatched ahead of
+            execution. An integer specifies the number of batches, while a
+            string expression such as `"2 * n_jobs"` is evaluated by Joblib
+            relative to the configured number of jobs. The default is
+            `"2 * n_jobs"`.
+
+        Notes
+        -----
+        `SparkParallel` executes the optimization loop in a fully parallelized
+        process without distinction between islands. The complete population
+        therefore belongs to a single optimization instance, and particle
+        initialization and updates are distributed directly across Spark
+        workers rather than being assigned to independent optimization
+        processes or migration islands.
+
+        This execution model is particularly sensitive to the communication
+        overhead introduced by transferring the optimization state between the
+        driver and Spark workers at each iteration. The algorithm is serialized
+        and distributed to the workers, while the resulting particles are
+        serialized and collected back by the driver after each parallel
+        operation. Consequently, the cost of transmitting and serializing data
+        can represent a substantial fraction of the total execution time,
+        especially when particle evaluations are inexpensive.
+
+        For this reason, `SparkParallel` is generally more appropriate when the
+        optimization uses a large number of particles and a relatively small
+        number of iterations. A large population provides enough parallel work
+        to amortize the per-iteration communication overhead, while a smaller
+        number of iterations limits how frequently the population and algorithm
+        state must be transmitted between the driver and the Spark workers.
+        Problems with few particles, many iterations, or very inexpensive cost
+        functions may obtain little benefit from this backend because the
+        communication and serialization overhead can dominate the computation.
+
+        The auxiliary Joblib processing controlled by `n_aux_jobs`,
+        `aux_backend`, `aux_batch_size`, and `aux_pre_dispatch` is independent
+        of the main Spark parallelization. It is used for auxiliary processing
+        associated with the iterations, particularly operations with lower
+        computational cost that are not suitable for distribution through the
+        main Spark particle-processing stage. Although these operations are
+        individually inexpensive, they may occur for a very large number of
+        particles, making their cumulative computational cost significant.
+
+        Using a parallel Joblib backend for the auxiliary processing can reduce
+        this cumulative cost when the number of auxiliary operations is large
+        enough to justify the additional scheduling overhead. Conversely,
+        `"sequential"` avoids creating additional local parallel workers and can
+        be preferable when the auxiliary operations are sufficiently inexpensive
+        or infrequent.
+
+        The optimization algorithm is serialized with `cloudpickle` before
+        particle processing is submitted to Spark. The algorithm and all objects
+        required to initialize or update particles must therefore be compatible
+        with `cloudpickle` serialization. Objects required by the cost function
+        should likewise be serializable and available to the Spark workers. If
+        such dependencies are defined in project modules that are not already
+        available in the worker environment, `spark_code_archive` can be used
+        to distribute the required Python code.
+
+        The cost function and particle-processing operations execute on Spark
+        workers rather than on the driver. They should therefore avoid relying
+        on mutable driver-side state, local resources, or assumptions that
+        execution occurs in the driver's process. Any state required by the
+        evaluation should be explicitly serializable and available to the
+        worker executing the particle.
+
+        Unlike `ProcessPool`, `SparkParallel` does not maintain a pool of
+        multiprocessing workers belonging to the optimization process.
+        Scheduling and distribution of the primary particle workload are
+        delegated to Spark. The Spark cluster configuration, worker
+        availability, task scheduling, serialization, and data movement
+        therefore have a direct influence on the performance of the backend.
+        """
         if spark is None:
             raise ValueError("Spark session cannot be None.")
         if not isinstance(n_aux_jobs, int) or isinstance(n_aux_jobs, bool):
