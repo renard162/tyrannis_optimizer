@@ -113,10 +113,16 @@ class ProcessPool(ProcessorBase):
             `os.cpu_count()`.
 
         multiprocessing_context:
-            Multiprocessing start method used to create worker processes. If `None`,
-            `"spawn"` is used on both Windows and Linux. On Windows, `"spawn"` is
-            the only available context. On Linux, if `"spawn"` cannot be used,
-            `"forkserver"` is preferred over `"fork"`.
+            Multiprocessing context used to create worker processes. Supported
+            contexts include:
+
+            - ``"spawn"``: Workers start in a fresh Python process. This is the the
+            only option available on Windows. (default)
+            - ``"forkserver"``: Workers are created through a dedicated server
+            process, providing isolation similar to ``"spawn"`` with lower
+            process-creation overhead.
+            - ``"fork"``: Workers inherit the parent process state. Fast, but may
+            cause issues with resources that are not fork-safe.
 
         maxtasksperchild:
             Maximum number of tasks that a worker process can complete before it is

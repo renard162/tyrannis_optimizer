@@ -62,14 +62,15 @@ class Integer(SpaceBase):
             function.
 
         decoder:
-            Method used to convert the continuous solver representation into
-            integer values. ``"round"`` rounds the continuous value to the
-            nearest integer. ``"scaling"`` maps the encoded value from
-            ``[0.0, 1.0]`` to the corresponding integer boundary range.
-            ``"stochastic_round"`` performs probabilistic rounding based on
-            the fractional part of the value. ``"transfer_function"`` uses
-            a logistic transfer function to map the encoded value to the
-            integer boundary range.
+            Method used to convert the continuous solver representation into integer
+            values. Supported methods include:
+
+            - ``"round"``: Rounds to the nearest integer. (default)
+            - ``"scaling"``: Scales values to the variable boundaries.
+            - ``"stochastic_round"``: Stochastic rounding based on the fractional
+            part of the value.
+            - ``"transfer_function"``: Logistic transfer function for integer
+            decoding.
 
         custom_bounds:
             Continuous interval used by the optimization algorithm when
@@ -97,7 +98,7 @@ class Integer(SpaceBase):
         cache_type:
             Cache strategy to use when caching is enabled. Supported strategies are:
 
-            - ``"lru"``: Least Recently Used cache.
+            - ``"lru"``: Least Recently Used cache. (default)
             - ``"disk"``: Persistent disk-based cache.
             - ``"lfu"``: Least Frequently Used cache. Requires the optional
             dependencies for advanced caching.

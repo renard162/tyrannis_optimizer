@@ -52,12 +52,16 @@ class Joblib(ProcessorBase):
             on. The value `0` is invalid.
 
         joblib_backend:
-            Joblib backend used to execute the parallel tasks. The default,
-            `"loky"`, uses separate worker processes and is generally suitable
-            for CPU-bound cost functions. `"threading"` uses worker threads and
-            can be advantageous for I/O-bound functions or computations that
-            release the Python Global Interpreter Lock (GIL). Other backends
-            available in the installed Joblib environment may also be selected.
+            Joblib backend used to execute the parallel tasks. Supported backends
+            include:
+
+            - ``"loky"``: Process-based execution, avoiding the GIL for CPU-bound
+            workloads. (default)
+            - ``"threading"``: Thread-based execution, suitable for workloads that
+            release the GIL.
+            - ``"multiprocessing"``: Process-based execution using Python's
+            multiprocessing, with broad compatibility for CPU-bound workloads.
+            - ``"serialized"``: Sequential execution without parallelism.
 
         batch_size:
             Number of particle evaluations submitted as a single batch to each

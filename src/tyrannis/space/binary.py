@@ -62,12 +62,12 @@ class Binary(SpaceBase):
             function.
 
         decoder:
-            Method used to decode the continuous solver representation into
-            binary variables. ``"angle_modulation"`` determines each bit
-            through the sign of an angle-modulation function, while
-            ``"s-shape"`` uses a sigmoid transfer function to obtain the
-            probability of each bit being ``True`` and samples the resulting
-            Boolean value.
+            Method used to decode the continuous solver representation into binary
+            variables. Supported methods include:
+
+            - ``"angle_modulation"``: Angle modulation using a trigonometric
+            generating function. (default)
+            - ``"s-shape"``: Sigmoid transfer function with stochastic sampling.
 
         bounds:
             Lower and upper limits of the continuous encoded representation.
@@ -96,7 +96,7 @@ class Binary(SpaceBase):
         cache_type:
             Cache strategy to use when caching is enabled. Supported strategies are:
 
-            - ``"lru"``: Least Recently Used cache.
+            - ``"lru"``: Least Recently Used cache. (default)
             - ``"disk"``: Persistent disk-based cache.
             - ``"lfu"``: Least Frequently Used cache. Requires the optional
             dependencies for advanced caching.

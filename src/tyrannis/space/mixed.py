@@ -58,7 +58,7 @@ class Mixed(SpaceBase):
         cache_type:
             Cache strategy to use when caching is enabled. Supported strategies are:
 
-            - ``"lru"``: Least Recently Used cache.
+            - ``"lru"``: Least Recently Used cache. (default)
             - ``"disk"``: Persistent disk-based cache.
             - ``"lfu"``: Least Frequently Used cache. Requires the optional
             dependencies for advanced caching.

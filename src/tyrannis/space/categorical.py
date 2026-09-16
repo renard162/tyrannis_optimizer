@@ -72,15 +72,17 @@ class Categorical(SpaceBase):
             ``initialize_context`` requires a valid cost function.
 
         decoder:
-            Method used to decode the continuous solver representation.
-            ``"one-hot"`` selects the category with the highest encoded
-            value. ``"softmax"`` interprets the encoded values as logits,
-            converts them into probabilities with softmax, and samples a
-            category according to those probabilities. ``"gumbel-softmax"``
-            adds Gumbel noise to the encoded values, applies the configured
-            temperature and softmax, and samples a category from the
-            resulting probability distribution. ``"scalar"`` represents
-            each categorical variable with a single continuous value.
+            Method used to decode the continuous solver representation. Supported
+            decoders include:
+
+            - ``"one-hot"``: Selects the category with the highest encoded value.
+            (default)
+            - ``"softmax"``: Stochastically samples categories according to softmax
+            probabilities.
+            - ``"gumbel-softmax"``: Stochastically samples categories using Gumbel
+            noise and softmax.
+            - ``"scalar"``: Represents each categorical variable with a single
+            continuous value.
 
         bounds:
             Continuous search interval exposed to the optimization
@@ -123,7 +125,7 @@ class Categorical(SpaceBase):
         cache_type:
             Cache strategy to use when caching is enabled. Supported strategies are:
 
-            - ``"lru"``: Least Recently Used cache.
+            - ``"lru"``: Least Recently Used cache. (default)
             - ``"disk"``: Persistent disk-based cache.
             - ``"lfu"``: Least Frequently Used cache. Requires the optional
             dependencies for advanced caching.

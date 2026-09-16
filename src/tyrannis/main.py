@@ -104,22 +104,31 @@ class Optimizer:
             Optional random seed used to make the optimization reproducible.
 
         fitness_failure_strategy:
-            Strategy used when the cost function raises an exception while
-            evaluating a particle. If ``"raise"``, the exception is propagated
-            immediately and the optimization is interrupted. If ``"invalidate"``,
-            the failed evaluation is suppressed and the particle is assigned a
-            fitness of ``inf``, causing it to be treated as an invalid solution
-            while allowing the optimization to continue. The default is
-            ``"raise"``.
+            Strategy used when the cost function raises an exception while evaluating
+            a particle. Supported strategies include:
+
+            - ``"raise"``: Propagates the exception and interrupts the optimization.
+            (default)
+            - ``"invalidate"``: Assigns ``inf`` fitness to the failed particle and
+            continues the optimization.
 
         history:
-            History events to record during the optimization. If ``None``, no
-            history is recorded. A single event name can be supplied to record
-            that event, a list of event names can be supplied to record multiple
-            events, or ``"all"`` can be used to record all available events.
+            History events to record during the optimization. Supported options include:
 
-            Available events are ``"migration"``, ``"pre_iteration"``, ``"new_particle"``,
-            ``"error"``, ``"iteration"``, ``"status"``, and ``"best"``.
+            - ``None``: Disables history recording. (default)
+            - ``"all"``: Records all available events. Cannot be used in a list.
+            - ``"migration"``: Logs all particles that undergo migration.
+            - ``"pre_iteration"``: Logs all particles before each iteration.
+            - ``"new_particle"``: Logs newly created particles immediately after their
+            fitness is calculated.
+            - ``"error"``: Records fitness evaluation errors.
+            - ``"iteration"``: Logs all particles at each iteration.
+            - ``"status"``: Logs the final state of each iteration, including its worst
+            and best particle and the historical best particle.
+            - ``"best"``: Logs the historical best particle at the end of each
+            iteration.
+
+            A list of event names can also be supplied to record multiple events.
 
         Methods
         -------

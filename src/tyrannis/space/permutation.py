@@ -76,9 +76,15 @@ class Permutation(SpaceBase):
 
         decoder:
             Method used to decode the continuous solver representation into
-            permutations. Supported methods are ``"random-keys"``,
-            ``"gumbel-random-keys"``, ``"plackett-luce"``, and
-            ``"gumbel-sinkhorn"``.
+            permutations. Supported methods include:
+
+            - ``"random-keys"``: Sorts continuous values to determine the permutation.
+            (default)
+            - ``"gumbel-random-keys"``: Stochastically perturbs values before sorting.
+            - ``"plackett-luce"``: Stochastically samples permutations using the
+            Plackett-Luce model.
+            - ``"gumbel-sinkhorn"``: Stochastically approximates permutations using
+            Gumbel noise and Sinkhorn normalization.
 
         bounds:
             Continuous search interval exposed to the optimization
@@ -113,7 +119,7 @@ class Permutation(SpaceBase):
         cache_type:
             Cache strategy to use when caching is enabled. Supported strategies are:
 
-            - ``"lru"``: Least Recently Used cache.
+            - ``"lru"``: Least Recently Used cache. (default)
             - ``"disk"``: Persistent disk-based cache.
             - ``"lfu"``: Least Frequently Used cache. Requires the optional
             dependencies for advanced caching.
