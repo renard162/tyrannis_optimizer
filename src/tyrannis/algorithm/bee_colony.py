@@ -105,36 +105,56 @@ class ArtificialBeeColony(AlgorithmBase[ABCParticle]):
 
         Notes
         -----
-        The number of food sources and employed bees is equal to the number of
-        particles provided by the optimization context. The number of
-        onlooker bees is also equal to this value, resulting in a conceptual
-        colony size of twice the current number of particles.
+        Artificial Bee Colony (ABC) is a population-based optimization
+        algorithm inspired by the foraging behavior of honey bees. Employed
+        bees explore the neighborhood of existing food sources, while
+        onlooker bees preferentially explore promising sources through
+        roulette-wheel selection. Candidate solutions are accepted only when
+        they improve the current source.
 
-        The objective function is always interpreted as a cost function to be
-        minimized. The raw objective value is stored in ``fitness`` and
-        ``candidate_fitness``. The ABC fitness transformation is exposed by
-        ``ABCParticle.abc_fitness`` and
-        ``ABCParticle.abc_candidate_fitness`` and is only used when the ABC
-        algorithm requires a maximization-oriented fitness value.
+        Scout bees replace food sources that have remained unsuccessful for
+        a predefined number of attempts, introducing new solutions and
+        preventing stagnation. By default, one scout replaces one abandoned
+        food source per iteration, as in the classical ABC algorithm.
+        ``max_scouts`` can be used to allow multiple replacements in the same
+        iteration.
 
-        Each optimization iteration performs one employed-bee neighborhood
-        evaluation for every food source. Onlooker bees then select food
-        sources through roulette-wheel selection, with replacement. If a food
-        source is selected multiple times, its neighborhood is evaluated
-        multiple times during the same particle update.
+        The classical probability assigns each food source a probability
+        proportional to its fitness relative to the population:
 
-        The trial counter is an internal property of each particle and is not
-        included in its serialized state. Consequently, a particle transferred
-        to another execution environment starts with a new trial history.
+            p_i = fitness_i / sum(fitness)
 
-        The effective default value of ``limit`` is recalculated before every
-        iteration from the current number of particles. This allows the
-        parameter to adapt when the population size changes dynamically, such
-        as during migration between optimization islands.
+        When ``improved_probability=True``, the improved formulation uses the
+        best fitness as reference:
 
-        The classical ABC scout phase replaces at most one food source per
-        cycle. ``max_scouts`` can be set to another positive value to allow
-        multiple replacements as an explicit extension of that behavior.
+            p_i = 0.9 * (fitness_i / fitness_best) + 0.1
+
+        This formulation maintains a minimum selection probability for less
+        promising sources while still favoring better ones, increasing the
+        opportunity for exploration.
+
+        References
+        ----------
+        Karaboga, D., & Basturk, B. (2007). A powerful and efficient algorithm
+        for numerical function optimization: Artificial Bee Colony (ABC)
+        algorithm. Journal of Global Optimization, 39(3), 459-471.
+        https://doi.org/10.1007/s10898-007-9149-x
+
+        Karaboga, D., & Basturk, B. (2008). On the performance of Artificial
+        Bee Colony (ABC) algorithm. Applied Soft Computing, 8(1), 687-697.
+        https://doi.org/10.1016/j.asoc.2007.05.007
+
+        Öztürk, C., Karaboga, D., & Görkemli, B. (2011). Probabilistic Dynamic
+        Deployment of Wireless Sensor Networks by Artificial Bee Colony
+        Algorithm. Sensors, 11(6), 6056-6065.
+        https://doi.org/10.3390/s110606056
+
+        Šarčević, T., Rocha, A. P. C., & Castro, A. J. M. (2018). Artificial
+        Bee Colony Algorithm for Solving the Flight Disruption Problem.
+        In Highlights of Practical Applications of Agents, Multi-Agent
+        Systems, and Complexity: The PAAMS Collection. Communications in
+        Computer and Information Science.
+        https://doi.org/10.1007/978-3-319-94779-2_7
         """
         if limit is not None:
             if not isinstance(limit, (int, np.integer)):
