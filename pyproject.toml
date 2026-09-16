@@ -1,6 +1,6 @@
 [project]
 name = "tyrannis"
-version = "0.1.0"
+version = "0.1.0a1"
 description = "Flexible optimization framework for particle-based population algorithms, supporting diverse search spaces, optimization strategies, and execution backends."
 readme = "README.md"
 license = { file = "LICENSE" }
