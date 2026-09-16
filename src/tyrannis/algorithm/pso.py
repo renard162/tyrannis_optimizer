@@ -327,8 +327,8 @@ class PSO(AlgorithmBase):
             personal_best_variable = personal_best_variables[name]
             global_best_variable = global_best_variables[name]
 
-            cognitive_random = particle.random_cache.pop(f"{name}-cognitive")
-            social_random = particle.random_cache.pop(f"{name}-social")
+            cognitive_random = particle.random_cache[(f"{name}-cognitive")]
+            social_random = particle.random_cache[(f"{name}-social")]
 
             velocity = self._constriction * (
                 self._inertia * current_velocity
