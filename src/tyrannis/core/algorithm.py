@@ -251,8 +251,8 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
     ) -> None:
         self._fitness_function = fitness_function
         self._boundaries = boundaries
-        self._population: dict[str, ParticleBase] = {}
-        self._local_best: ParticleBase | None = None
+        self._population: dict[str, ParticleType] = {}
+        self._local_best: ParticleType | None = None
         self._iter_best: str | None = None
         self._iter_worst: str | None = None
         self._max_iterations: int = n_iter
@@ -275,21 +275,21 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         return self._identifier
 
     @property
-    def population(self) -> dict[str, ParticleBase]:
+    def population(self) -> dict[str, ParticleType]:
         return self._population
 
     @property
-    def local_best(self) -> ParticleBase | None:
+    def local_best(self) -> ParticleType | None:
         return self._local_best
 
     @property
-    def iter_best(self) -> ParticleBase | None:
+    def iter_best(self) -> ParticleType | None:
         if self._iter_best is None:
             return None
         return self._population[self._iter_best]
 
     @property
-    def iter_worst(self) -> ParticleBase | None:
+    def iter_worst(self) -> ParticleType | None:
         if self._iter_worst is None:
             return None
         return self.population[self._iter_worst]
@@ -476,7 +476,7 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         raise NotImplementedError
 
     @abstractmethod
-    def initialize_particle(self, identifier: str) -> ParticleBase:
+    def initialize_particle(self, identifier: str) -> ParticleType:
         """
         Fully initialize a newly created particle.
 
@@ -546,7 +546,7 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         raise NotImplementedError
 
     @abstractmethod
-    def update_particle(self, identifier: str) -> ParticleBase:
+    def update_particle(self, identifier: str) -> ParticleType:
         """
         Update and return the particle identified by ``identifier``.
 
@@ -599,7 +599,7 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         """
         raise NotImplementedError
 
-    def update_population(self, new_population: Iterable[ParticleBase]) -> None:
+    def update_population(self, new_population: Iterable[ParticleType]) -> None:
         self._population.update(
             {particle.identifier: particle for particle in new_population}
         )

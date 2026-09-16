@@ -64,7 +64,7 @@ class PSOParticle(ParticleBase):
             self._personal_best_fitness = self.fitness
 
 
-class PSO(AlgorithmBase):
+class PSO(AlgorithmBase[PSOParticle]):
     """Classical Particle Swarm Optimization algorithm."""
 
     def __init__(
