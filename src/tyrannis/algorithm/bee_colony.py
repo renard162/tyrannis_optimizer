@@ -20,7 +20,6 @@ class ABCParticle(ParticleBase):
         fitness: np.float64 = FITNESS_UNDEFINED,
     ) -> None:
         super().__init__(identifier=identifier, variables=variables, fitness=fitness)
-
         self._trial_count = 0
 
     def __call__(self) -> dict[str, Serializable]:
@@ -34,7 +33,6 @@ class ABCParticle(ParticleBase):
     def _calculate_abc_fitness(fitness: np.float64) -> np.float64:
         if fitness < 0:
             return np.float64(1 + abs(fitness))
-
         return np.float64(1 / (1 + fitness))
 
     @property
@@ -45,7 +43,6 @@ class ABCParticle(ParticleBase):
     def abc_fitness(self) -> np.float64:
         if np.isnan(self._fitness):
             return np.float64(np.nan)
-
         return self._calculate_abc_fitness(self._fitness)
 
     @property
@@ -65,7 +62,7 @@ class ABCParticle(ParticleBase):
         self._trial_count = 0
 
 
-class ABC(AlgorithmBase):
+class ArtificialBeeColony(AlgorithmBase[ABCParticle]):
     """Classical Artificial Bee Colony algorithm."""
 
     def __init__(
@@ -163,20 +160,6 @@ class ABC(AlgorithmBase):
         self._onlooker_counts: dict[str, int] = {}
         self._onlooker_probabilities: dict[str, float] = {}
 
-    def initialize_context(
-        self,
-        fitness_function,
-        boundaries,
-        n_iter,
-        n_particles,
-    ) -> None:
-        super().initialize_context(
-            fitness_function=fitness_function,
-            boundaries=boundaries,
-            n_iter=n_iter,
-            n_particles=n_particles,
-        )
-
     @property
     def colony_size(self) -> int:
         return 2 * self._n_particles
@@ -255,20 +238,14 @@ class ABC(AlgorithmBase):
         return [particle.identifier for particle in selected]
 
     def pre_iteration(self, actual_iter: int) -> None:
-        if actual_iter == 0:
-            if len(self._population) != self._n_particles:
-                raise ValueError(
-                    f"ABC requires {self._n_particles} particles, but "
-                    f"{len(self._population)} particles were provided."
-                )
-
-            return
-
         scout_ids = self._select_scouts()
 
         for identifier in scout_ids:
             self.delete_particle(identifier)
             self.create_particle(identifier=identifier)
+
+        self._onlooker_probabilities = self._calculate_probabilities()
+        self._onlooker_counts = self._select_onlookers()
 
     def _calculate_probabilities(self) -> dict[str, float]:
         particles = list(self._population.values())
@@ -367,11 +344,7 @@ class ABC(AlgorithmBase):
         if initialize:
             for identifier in particle_ids:
                 self._population[identifier].random_cache = {}
-
             return
-
-        self._onlooker_probabilities = self._calculate_probabilities()
-        self._onlooker_counts = self._select_onlookers()
 
         variables = tuple(self._boundaries)
 
@@ -521,7 +494,10 @@ class ABC(AlgorithmBase):
                     f"Particle '{particle.identifier}' has no candidate fitness."
                 )
 
-            improved = particle.abc_candidate_fitness < particle.abc_fitness
+            if particle.abc_candidate_fitness is None:
+                raise RecursionError("particle.abc_candidate_fitness cannot be None.")
+
+            improved = bool(particle.abc_candidate_fitness < particle.abc_fitness)
 
             particle.consolidate(consolidate_new=improved)
 
