@@ -121,9 +121,16 @@ class Categorical(SpaceBase):
             ``False``, no cache is created or used.
 
         cache_type:
-            Cache strategy to use when caching is enabled. Supported
-            strategies are ``"lru"``, ``"lfu"``, ``"fifo"``, ``"rr"``, and
-            ``"disk"``.
+            Cache strategy to use when caching is enabled. Supported strategies are:
+
+            - ``"lru"``: Least Recently Used cache.
+            - ``"disk"``: Persistent disk-based cache.
+            - ``"lfu"``: Least Frequently Used cache. Requires the optional
+            dependencies for advanced caching.
+            - ``"fifo"``: First In, First Out cache. Requires the optional
+            dependencies for advanced caching.
+            - ``"rr"``: Random Replacement cache. Requires the optional dependencies
+            for advanced caching.
 
         cache_size:
             Maximum cache size for in-memory caches, expressed as the maximum
