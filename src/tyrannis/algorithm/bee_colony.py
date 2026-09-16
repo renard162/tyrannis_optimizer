@@ -63,7 +63,7 @@ class ABCParticle(ParticleBase):
 
 
 class ArtificialBeeColony(AlgorithmBase[ABCParticle]):
-    """Classical Artificial Bee Colony algorithm."""
+    """Artificial Bee Colony algorithm."""
 
     def __init__(
         self,
