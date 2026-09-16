@@ -256,6 +256,8 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         self._iter_best: str | None = None
         self._iter_worst: str | None = None
         self._max_iterations: int = n_iter
+        # Start value of n_particles to initialize algorithm.
+        # Thre real value is dinamically set after migration step
         self._n_particles: int = n_particles
 
     def configure(
