@@ -95,13 +95,6 @@ class AntColony(AlgorithmBase[ACORParticle]):
         acts as both the memory of the colony and the basis for generating subsequent
         solutions.
 
-        The initial archive is constructed from the solutions generated during the
-        algorithm initialization. When the archive is larger than the population,
-        temporary particles are created only to provide the additional solutions
-        required to initialize the archive. These particles are removed after the
-        initialization, while the official population particles retain their original
-        identifiers.
-
         References
         ----------
         Socha, K., & Dorigo, M. (2008). Ant colony optimization for continuous
