@@ -77,50 +77,97 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
         """
         Particle Swarm Optimization and Gravitational Search Algorithm (PSOGSA).
 
-        PSOGSA combines Particle Swarm Optimization with the
-        Gravitational Search Algorithm. Particle velocities are updated using
-        the previous velocity, the gravitational acceleration produced by the
-        population, and the direction toward the best solution found so far.
+        PSOGSA is a population-based hybrid optimization algorithm that combines
+        the exploitation capability of Particle Swarm Optimization with the
+        exploration capability of the Gravitational Search Algorithm. The
+        gravitational component promotes interaction between candidate solutions,
+        while the PSO component guides the search toward the best solution found
+        so far, providing a balance between exploration and exploitation.
 
         Parameters
         ----------
         c1 : float, default=0.5
             Coefficient controlling the influence of the gravitational acceleration
-            on the particle velocity.
+            on the particle velocity. Larger values increase the contribution of
+            the gravitational search to the movement of particles.
 
         c2 : float, default=1.5
-            Coefficient controlling the influence of the global best solution on the
-            particle velocity.
+            Coefficient controlling the influence of the best solution found so
+            far on the particle velocity. Larger values increase the attraction
+            toward the best-known solution.
 
         g_zero : float, default=1.0
-            Initial value of the gravitational constant.
+            Initial value of the gravitational constant. Larger values increase
+            the initial influence of gravitational interactions and promote
+            broader exploration.
 
         alpha : float, default=20.0
-            Descending coefficient of the gravitational constant.
+            Rate controlling the decrease of the gravitational constant during
+            the optimization. Larger values cause the gravitational influence
+            to decrease more rapidly.
 
         r_norm : float, default=2.0
             Order of the norm used to calculate the distance between particles.
-            The default is the Euclidean norm.
+            The default value of 2 corresponds to the Euclidean norm.
 
         r_power : float, default=1.0
-            Power applied to the inter-particle distance in the gravitational force
-            denominator.
+            Power applied to the distance in the gravitational interaction.
+            Larger values cause the influence of distant particles to decrease
+            more rapidly.
 
         k_agents_percent : float, default=0.0
             Minimum fraction of the population considered in the gravitational
-            interaction. The effective minimum is always one particle.
+            interaction. The value must be between 0 and 1. The effective minimum
+            is always one particle, so values below the fraction corresponding to
+            one particle have no additional effect. A value of 0 preserves the
+            minimum number of agents of the original PSOGSA.
 
         Notes
         -----
-        The gravitational force is calculated from the masses of the particles,
-        the gravitational constant, the distance between particles, and a random
-        factor. The resulting acceleration is combined with the previous velocity
-        and the global-best attraction to update each particle.
+        PSOGSA combines the main search mechanisms of Particle Swarm Optimization
+        and the Gravitational Search Algorithm. Each candidate solution is
+        influenced by the gravitational attraction of other solutions and by the
+        best solution found by the population.
 
-        The gravitational constant decreases exponentially during the optimization.
+        In the gravitational component, candidate solutions are assigned masses
+        according to their fitness. Better solutions receive greater mass and
+        therefore exert a stronger influence on the search. The gravitational
+        constant controls the overall strength of these interactions and
+        decreases during the optimization, reducing the gravitational influence
+        as the search progresses.
 
-        The algorithm minimizes the fitness function: lower fitness values represent
-        better solutions.
+        The velocity of each particle is updated from three components: its
+        previous velocity, the gravitational acceleration produced by the
+        population, and the direction toward the best solution found so far.
+        The coefficients ``c1`` and ``c2`` control the relative influence of the
+        gravitational and global-best components, respectively.
+
+        The parameters ``g_zero`` and ``alpha`` control the temporal behavior of
+        the gravitational search. ``g_zero`` determines its initial strength,
+        while ``alpha`` determines how rapidly that strength decreases. Larger
+        values of ``g_zero`` increase the initial gravitational influence, whereas
+        larger values of ``alpha`` shift the search more rapidly toward the
+        global-best component.
+
+        The parameters ``r_norm`` and ``r_power`` control how the distance between
+        solutions affects gravitational interactions. ``r_norm`` defines the
+        distance metric, with ``r_norm=2`` corresponding to the Euclidean distance.
+        ``r_power`` determines how strongly the interaction decreases with distance.
+        The conventional configuration uses ``r_norm=2`` and ``r_power=1``.
+
+        The number of particles contributing to the gravitational interaction
+        decreases during the optimization. This progressively concentrates the
+        gravitational search on the most relevant solutions. ``k_agents_percent``
+        can be used to impose a lower bound on this population fraction, which
+        can help preserve broader exploration during later iterations. The
+        effective lower bound is always at least one particle.
+
+        PSOGSA is designed for continuous optimization and can be applied to
+        nonlinear, non-convex, multimodal, and derivative-free objective
+        functions. Larger populations generally provide broader exploration,
+        while additional iterations allow the search to progressively refine
+        promising regions of the search space. The population size should
+        therefore be increased for higher-dimensional or more complex problems.
 
         References
         ----------
@@ -128,9 +175,27 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
         for function optimization. Proceedings of ICCIA 2010, 374-377.
         https://doi.org/10.1109/ICCIA.2010.6141614
 
-        Rashedi, E., Nezamabadi-pour, H., & Saryazdi, S. (2009). GSA:
-        A Gravitational Search Algorithm. Information Sciences, 179(13), 2232-2248.
-        https://doi.org/10.1016/j.ins.2009.03.004
+        Mirjalili, S., Hashim, S. Z. M., & Sardroudi, H. M. (2012). Training
+        feedforward neural networks using hybrid particle swarm optimization and
+        gravitational search algorithm. Applied Mathematics and Computation,
+        218(22), 11125-11137.
+        https://doi.org/10.1016/j.amc.2012.04.069
+
+        Jayaprakasam, S., Abdul Rahim, S. K., & Leow, C. Y. (2015). PSOGSA-Explore:
+        A new hybrid metaheuristic approach for beampattern optimization in
+        collaborative beamforming. Applied Soft Computing, 30, 229-237.
+        https://doi.org/10.1016/j.asoc.2015.01.024
+
+        Radosavljević, J. (2016). A solution to the combined economic and emission
+        dispatch using hybrid PSOGSA algorithm. Applied Artificial Intelligence,
+        30(5), 445-474.
+        https://doi.org/10.1080/08839514.2016.1185860
+
+        Lacerda Junior, W. R., Martins, S. A. M., & Nepomuceno, E. G. (2019).
+        Identificação de Sistemas Não Lineares Utilizando o Algoritmo Híbrido e
+        Binário de Otimização por Enxame de Partículas e Busca Gravitacional.
+        Anais do 14º Simpósio Brasileiro de Automação Inteligente.
+        https://doi.org/10.17648/sbai-2019-111317
         """
         for name, value in (
             ("c1", c1),
