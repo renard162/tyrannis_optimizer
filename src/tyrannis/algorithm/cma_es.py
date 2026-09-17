@@ -125,39 +125,40 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         if self._dimension == 0:
             raise ValueError("CMA-ES requires at least one optimization variable.")
 
-        self._mu = max(1, self._n_particles // 2)
+        mu = max(1, self._n_particles // 2)
 
-        indices = np.arange(1, self._mu + 1, dtype=float)
-        weights = np.log(self._mu + 0.5) - np.log(indices)
-        self._weights = weights / np.sum(weights)
-        self._mu_eff = 1.0 / np.sum(self._weights**2)
+        indices = np.arange(1, mu + 1, dtype=float)
+        weights = np.log(mu + 0.5) - np.log(indices)
+        weights = weights / np.sum(weights)
+        mu_eff = float(1.0 / np.sum(weights**2))
 
-        n = self._dimension
-        mu_eff = self._mu_eff
-
-        self._cc = (4.0 + mu_eff / n) / (n + 4.0 + 2.0 * mu_eff / n)
-
-        self._cs = (mu_eff + 2.0) / (n + mu_eff + 5.0)
-
-        self._c1 = 2.0 / ((n + np.sqrt(2.0)) ** 2 + mu_eff)
-
-        self._cmu = min(
-            1.0 - self._c1,
+        n = len(self._variable_names)
+        cc = (4.0 + mu_eff / n) / (n + 4.0 + 2.0 * mu_eff / n)
+        cs = (mu_eff + 2.0) / (n + mu_eff + 5.0)
+        c1 = 2.0 / ((n + np.sqrt(2.0)) ** 2 + mu_eff)
+        cmu = min(
+            1.0 - c1,
             2.0 * (mu_eff - 2.0 + 1.0 / mu_eff) / ((n + 2.0) ** 2 + mu_eff),
         )
+        damps = 1.0 + 2.0 * max(0.0, np.sqrt((mu_eff - 1.0) / (n + 1.0)) - 1.0) + cs
 
-        self._damps = (
-            1.0 + 2.0 * max(0.0, np.sqrt((mu_eff - 1.0) / (n + 1.0)) - 1.0) + self._cs
-        )
-
-        self._chi_n = np.sqrt(n) * (1.0 - 1.0 / (4.0 * n) + 1.0 / (21.0 * n**2))
+        self._mu = mu
+        self._weights = weights
+        self._mu_eff = mu_eff
+        self._cc = float(cc)
+        self._cs = float(cs)
+        self._c1 = float(c1)
+        self._cmu = float(cmu)
+        self._damps = float(damps)
+        self._chi_n = float(np.sqrt(n) * (1.0 - 1.0 / (4.0 * n) + 1.0 / (21.0 * n**2)))
 
         self._covariance = np.eye(n)
         self._p_sigma = np.zeros(n)
         self._p_c = np.zeros(n)
 
         ranges = np.asarray(
-            [upper - lower for lower, upper in self._boundaries.values()], dtype=float
+            [upper - lower for lower, upper in self._boundaries.values()],
+            dtype=float,
         )
 
         self._step_size = self._initial_sigma * float(np.mean(ranges))
@@ -287,6 +288,22 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         ):
             raise RuntimeError("CMA-ES state has not been initialized.")
 
+        mean = self._mean
+        covariance = self._covariance
+        step_size = self._step_size
+        p_sigma = self._p_sigma
+        p_c = self._p_c
+        weights = self._weights
+        mu = self._mu
+        mu_eff = self._mu_eff
+        cc = self._cc
+        cs = self._cs
+        c1 = self._c1
+        cmu = self._cmu
+        damps = self._damps
+        chi_n = self._chi_n
+        dimension = self._dimension
+
         particles = [
             particle
             for particle_id, particle in self._population.items()
@@ -299,66 +316,77 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
                     f"Particle '{particle.identifier}' has no candidate fitness."
                 )
 
-        particles.sort(key=lambda particle: particle.candidate_fitness)
-        selected = particles[: self._mu]
-        old_mean = self._mean.copy()
+        def fitness_key(particle: CMAESCandidateSolution) -> float:
+            if particle.candidate_fitness is None:
+                raise RuntimeError(
+                    f"Particle '{particle.identifier}' has no candidate fitness."
+                )
 
-        selected_candidates = np.asarray(
-            [
+            return float(particle.candidate_fitness)
+
+        particles.sort(key=fitness_key)
+        selected = particles[:mu]
+        old_mean = mean.copy()
+
+        selected_variables = []
+        for particle in selected:
+            if particle.candidate_variables is None:
+                raise RuntimeError(
+                    f"Particle '{particle.identifier}' has no candidate variables."
+                )
+
+            selected_variables.append(
                 self._variables_to_array(particle.candidate_variables)
-                for particle in selected
-            ]
-        )
+            )
 
-        new_mean = np.sum(self._weights[:, np.newaxis] * selected_candidates, axis=0)
-        y_w = (new_mean - old_mean) / self._step_size
-        eigenvalues, eigenvectors = np.linalg.eigh(self._covariance)
+        selected_candidates = np.asarray(selected_variables)
+
+        new_mean = np.sum(weights[:, np.newaxis] * selected_candidates, axis=0)
+        y_w = (new_mean - old_mean) / step_size
+        eigenvalues, eigenvectors = np.linalg.eigh(covariance)
         eigenvalues = np.maximum(eigenvalues, np.finfo(float).eps)
 
         inv_sqrt_covariance = (
             eigenvectors @ np.diag(1.0 / np.sqrt(eigenvalues)) @ eigenvectors.T
         )
 
-        self._p_sigma = (1.0 - self._cs) * self._p_sigma + np.sqrt(
-            self._cs * (2.0 - self._cs) * self._mu_eff
-        ) * (inv_sqrt_covariance @ y_w)
+        p_sigma = (1.0 - cs) * p_sigma + np.sqrt(cs * (2.0 - cs) * mu_eff) * (
+            inv_sqrt_covariance @ y_w
+        )
 
-        p_sigma_norm = np.linalg.norm(self._p_sigma)
+        p_sigma_norm = np.linalg.norm(p_sigma)
 
         h_sigma = int(
             p_sigma_norm
-            / np.sqrt(1.0 - (1.0 - self._cs) ** (2.0 * (actual_iter + 1)))
-            / self._chi_n
-            < 1.4 + 2.0 / (self._dimension + 1.0)
+            / np.sqrt(1.0 - (1.0 - cs) ** (2.0 * (actual_iter + 1)))
+            / chi_n
+            < 1.4 + 2.0 / (dimension + 1.0)
         )
 
-        self._p_c = (1.0 - self._cc) * self._p_c + h_sigma * np.sqrt(
-            self._cc * (2.0 - self._cc) * self._mu_eff
-        ) * y_w
+        p_c = (1.0 - cc) * p_c + h_sigma * np.sqrt(cc * (2.0 - cc) * mu_eff) * y_w
 
-        y_selected = (selected_candidates - old_mean) / self._step_size
-        rank_mu = np.zeros_like(self._covariance)
+        y_selected = (selected_candidates - old_mean) / step_size
+        rank_mu = np.zeros_like(covariance)
 
-        for weight, y in zip(self._weights, y_selected):
+        for weight, y in zip(weights, y_selected):
             rank_mu += weight * np.outer(y, y)
 
-        self._covariance = (
-            (1.0 - self._c1 - self._cmu) * self._covariance
-            + self._c1
-            * (
-                np.outer(self._p_c, self._p_c)
-                + (1.0 - h_sigma) * self._cc * (2.0 - self._cc) * self._covariance
-            )
-            + self._cmu * rank_mu
+        covariance = (
+            (1.0 - c1 - cmu) * covariance
+            + c1 * (np.outer(p_c, p_c) + (1.0 - h_sigma) * cc * (2.0 - cc) * covariance)
+            + cmu * rank_mu
         )
 
-        self._covariance = (self._covariance + self._covariance.T) / 2.0
+        covariance = (covariance + covariance.T) / 2.0
 
-        self._step_size *= np.exp(
-            (self._cs / self._damps) * (p_sigma_norm / self._chi_n - 1.0)
-        )
+        step_size *= np.exp((cs / damps) * (p_sigma_norm / chi_n - 1.0))
 
         self._mean = new_mean
+        self._covariance = covariance
+        self._step_size = step_size
+        self._p_sigma = p_sigma
+        self._p_c = p_c
+
         center = self._population[center_identifier]
         self._mean_particle = deepcopy(center)
         self.delete_particle(center_identifier)
