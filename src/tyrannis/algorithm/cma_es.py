@@ -1,5 +1,6 @@
-import numpy as np
 from copy import deepcopy
+
+import numpy as np
 
 from ..core.algorithm import (
     FITNESS_UNDEFINED,
