@@ -23,36 +23,90 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         """
         Covariance Matrix Adaptation Evolution Strategy algorithm.
 
-        CMA-ES is a population-based optimization algorithm for continuous
-        optimization that adapts a multivariate normal distribution to the
-        geometry of the search landscape. Candidate solutions are sampled from
-        the current distribution, and the distribution's mean, covariance
-        matrix, and step size are updated from the best candidates.
+        CMA-ES is a population-based, derivative-free optimization algorithm for
+        continuous problems that adapts a multivariate normal search distribution to
+        the objective landscape. Candidate solutions are sampled from the distribution
+        and evaluated, and the best candidates are used to update its mean, covariance
+        matrix, and step size, allowing the search to progressively adapt its location,
+        scale, and orientation to promising regions of the search space.
 
         Parameters
         ----------
         sigma : float, default=0.3
-            Initial global step size expressed as a fraction of the average
-            variable range. The value must be greater than zero.
+            Initial global step size expressed as a fraction of the average variable
+            range. Larger values produce broader initial exploration, while smaller
+            values concentrate the initial search around the initial mean.
 
         Notes
         -----
-        The population size is obtained from the optimization context and is
-        not an algorithm constructor parameter. The initial mean is calculated
-        from the initial population created by the processor. From the first
-        optimization iteration onward, new candidate solutions are sampled
-        from the adapted distribution.
+        CMA-ES maintains a multivariate normal search distribution defined by a
+        mean vector ``m``, a covariance matrix ``C``, and a global step size
+        ``sigma``. Together, these parameters determine where candidate
+        solutions are generated, the directions in which the search is
+        expanded or contracted, and the overall scale of the search:
 
-        The mean is represented by a temporary particle so that its cost can
-        be evaluated through the particle execution contract. This particle
-        does not belong to the CMA-ES population and is removed before the
-        iteration is consolidated.
+            x ~ N(m, sigma² C)
+
+        At each iteration, a population of candidate solutions is sampled from
+        the current distribution. The candidates are evaluated and ranked
+        according to their objective values, and the best ``mu`` candidates are
+        selected to update the distribution.
+
+        The new mean is calculated as a weighted combination of the selected
+        candidates, with better-ranked candidates receiving greater weights.
+        This moves the search distribution toward regions associated with
+        better objective values.
+
+        The covariance matrix is adapted from the selected candidates and the
+        accumulated search path. The rank-mu update captures the distribution
+        of the selected candidates in the current iteration, while the rank-one
+        update uses the covariance evolution path to accumulate information
+        about consistent search directions across iterations. This allows
+        CMA-ES to learn correlations between variables and orient its search
+        distribution according to the geometry of the objective function.
+
+        The global step size is adapted independently through cumulative
+        step-size adaptation. The evolution path used for this adaptation
+        measures the consistency of successive changes to the mean, allowing
+        the algorithm to increase the search scale when progress occurs in a
+        consistent direction and decrease it when the search becomes less
+        directional.
+
+        The algorithm therefore adapts three complementary aspects of the
+        search: the mean determines where to search, the covariance matrix
+        determines the shape and orientation of the search distribution, and
+        the step size determines its overall scale.
+
+        CMA-ES is designed for continuous optimization problems and is
+        particularly suitable for non-linear, non-convex, multi-modal, noisy,
+        or non-differentiable objective functions. It is also well suited to
+        problems where the optimization variables have different scales or
+        strong correlations.
+
+        The initial value of ``sigma`` controls the scale of the initial
+        search. Larger values favor broader exploration, while smaller values
+        produce a more concentrated initial search.
 
         References
         ----------
-        Hansen, N., & Ostermeier, A. (2001). Completely Derandomized Self-
-        Adaptation in Evolution Strategies. Evolutionary Computation, 9(2),
-        159-195. https://doi.org/10.1162/106365601750190398
+        Hansen, N., & Ostermeier, A. (2001). Completely derandomized self-adaptation
+        in evolution strategies. Evolutionary Computation, 9(2), 159-195.
+        https://doi.org/10.1162/106365601750190398
+
+        Hansen, N. (2006). The CMA Evolution Strategy: A Comparing Review. In
+        Towards a New Evolutionary Computation, 75-102.
+        https://doi.org/10.1007/3-540-32494-1_4
+
+        Chocat, R., Brevault, L., Balesdent, M., & Defoort, S. (2015). Modified
+        Covariance Matrix Adaptation – Evolution Strategy algorithm for constrained
+        optimization under uncertainty, application to rocket design. International
+        Journal for Simulation and Multidisciplinary Design Optimization, 6, A1.
+        https://doi.org/10.1051/smdo/2015001
+
+        Dang, V.-H., Vien, N. A., & Chung, T. (2019). A covariance matrix adaptation
+        evolution strategy in reproducing kernel Hilbert space. Genetic Programming
+        and Evolvable Machines, 20, 479-501.
+        https://doi.org/10.1007/s10710-019-09357-1
         """
         if not isinstance(sigma, (int, float, np.number)):
             raise TypeError("sigma must be a number.")
