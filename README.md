@@ -59,6 +59,7 @@ Algorithms are population-based metaheuristics used to search for a minimum with
 | `PSO` | Particle Swarm Optimization for population-based search. |
 | `BeeColony` | Artificial Bee Colony optimization inspired by the foraging behavior of honey bees. |
 | `AntColony` | Ant Colony Optimization for Continuous Domains (ACOR), which uses an archive of continuous solutions to guide the search. |
+| `CMAES`     | Covariance Matrix Adaptation Evolution Strategy for continuous optimization. |
 
 ### Spaces
 
@@ -218,7 +219,6 @@ The roadmap below lists capabilities that are **not yet part of the current publ
 * Genetic Algorithm
 * GSA — Gravitational Search Algorithm
 * Differential Evolution
-* CMA-ES — Covariance Matrix Adaptation Evolution Strategy
 * Grey Wolf Optimization
 * Whale Optimization Algorithm
 
