@@ -1,3 +1,4 @@
+from collections.abc import Collection
 from copy import deepcopy
 
 import numpy as np
@@ -81,7 +82,9 @@ class AntColony(AlgorithmBase[ACORParticle]):
 
         self._solution_archive: list[tuple[dict[str, float], np.float64]] = []
         self._archive_probabilities: np.ndarray | None = None
-        self._initial_particle_ids: list[str] = []
+
+        self._official_particle_ids: list[str] = []
+        self._temporary_particle_ids: list[str] = []
 
     @property
     def archive_size(self) -> int:
@@ -128,7 +131,7 @@ class AntColony(AlgorithmBase[ACORParticle]):
             identifier = f"{self._identifier}|acor-initial:{index}"
             index += 1
 
-            if identifier in self._population or identifier in identifiers:
+            if identifier in self._population:
                 continue
 
             identifiers.append(identifier)
@@ -137,29 +140,25 @@ class AntColony(AlgorithmBase[ACORParticle]):
 
     def pre_iteration(self, actual_iter: int) -> None:
         if actual_iter == 0:
-            missing = max(0, self._archive_size - len(self._population))
-            self._initial_particle_ids = self._create_temporary_particle_ids(missing)
+            self._official_particle_ids = list(self._population)
+            missing = max(0, self._archive_size - len(self._official_particle_ids))
+            self._temporary_particle_ids = self._create_temporary_particle_ids(missing)
 
-            for identifier in self._initial_particle_ids:
+            for identifier in self._temporary_particle_ids:
                 self.create_particle(identifier=identifier)
 
             return
 
-        if actual_iter == 1 and self._initial_particle_ids:
-            for identifier in self._initial_particle_ids:
-                if identifier not in self._population:
-                    self.create_particle(identifier=identifier)
+        if actual_iter == 1:
+            for identifier in self._official_particle_ids:
+                self.delete_particle(identifier)
+                self.create_particle(identifier=identifier)
 
-        if len(self._solution_archive) != self._archive_size:
-            raise RuntimeError("The ACOR solution archive has not been initialized.")
-
-        self._archive_probabilities = self._calculate_archive_probabilities()
+            self._archive_probabilities = self._calculate_archive_probabilities()
 
     def _calculate_archive_probabilities(self) -> np.ndarray:
         positions = np.arange(self._archive_size, dtype=float)
-
         weights = np.exp(-(positions**2) / (2 * self._q**2 * self._archive_size**2))
-
         return weights / np.sum(weights)
 
     def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
@@ -218,13 +217,13 @@ class AntColony(AlgorithmBase[ACORParticle]):
                 f"Particle '{identifier}' must be an instance of ACORParticle."
             )
 
-        archive_index = particle.random_cache.pop("archive-index")
+        archive_index = particle.random_cache["archive-index"]
         reference_variables = self._solution_archive[archive_index][0]
 
         new_variables = {}
-
         for variable in self._boundaries:
-            normal_value = particle.random_cache.pop(f"{variable}-normal")
+            normal_value = particle.random_cache[f"{variable}-normal"]
+
             sigma = self._calculate_sigma(
                 archive_index=archive_index, variable=variable
             )
@@ -239,22 +238,36 @@ class AntColony(AlgorithmBase[ACORParticle]):
 
         return particle
 
-    def _update_solution_archive(self) -> None:
+    def _initialize_solution_archive(self, particles: Collection[ACORParticle]) -> None:
+        candidates = sorted(
+            (
+                (deepcopy(particle.variables), particle.fitness)
+                for particle in particles
+            ),
+            key=lambda solution: solution[1],
+        )
+
+        self._solution_archive = candidates[: self._archive_size]
+
+    def _update_solution_archive(self, particles: Collection[ACORParticle]) -> None:
         candidates = [
-            (deepcopy(particle.variables), particle.fitness)
-            for particle in self._population.values()
+            (deepcopy(particle.variables), particle.fitness) for particle in particles
         ]
 
         candidates.extend(self._solution_archive)
         candidates.sort(key=lambda solution: solution[1])
-
         self._solution_archive = candidates[: self._archive_size]
 
     def post_iteration(self, actual_iter: int) -> None:
         if actual_iter == 0:
-            self._update_solution_archive()
+            particles = list(self._population.values())
 
-            for identifier in self._initial_particle_ids:
+            if not all(isinstance(particle, ACORParticle) for particle in particles):
+                raise TypeError("All particles must be instances of ACORParticle.")
+
+            self._initialize_solution_archive(particles)
+
+            for identifier in self._temporary_particle_ids:
                 self.delete_particle(identifier)
 
             self.update_solution_state()
@@ -263,7 +276,8 @@ class AntColony(AlgorithmBase[ACORParticle]):
         for particle in self._population.values():
             if not isinstance(particle, ACORParticle):
                 raise TypeError(
-                    f"Particle '{particle.identifier}' must be an instance of ACORParticle."
+                    f"Particle '{particle.identifier}' must be an instance of "
+                    "ACORParticle."
                 )
 
             if particle.candidate_fitness is None:
@@ -273,5 +287,5 @@ class AntColony(AlgorithmBase[ACORParticle]):
 
             particle.consolidate(consolidate_new=True)
 
-        self._update_solution_archive()
+        self._update_solution_archive(list(self._population.values()))
         self.update_solution_state()
