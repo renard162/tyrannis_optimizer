@@ -1,0 +1,277 @@
+from copy import deepcopy
+
+import numpy as np
+
+from ..core.algorithm import (
+    FITNESS_UNDEFINED,
+    AlgorithmBase,
+    ParticleBase,
+    Serializable,
+)
+
+
+class ACORParticle(ParticleBase):
+    """Particle implementation for the Ant Colony Optimization for Continuous Domain algorithm."""
+
+    def __init__(
+        self,
+        identifier: str,
+        variables: dict[str, float],
+        fitness: np.float64 = FITNESS_UNDEFINED,
+    ) -> None:
+        super().__init__(identifier=identifier, variables=variables, fitness=fitness)
+
+    def __call__(self) -> dict[str, Serializable]:
+        return {
+            "identifier": self._identifier,
+            "variables": self._variables,
+            "fitness": self._fitness,
+        }
+
+
+class AntColony(AlgorithmBase[ACORParticle]):
+    """Ant Colony Optimization for Continuous Domains."""
+
+    def __init__(
+        self, archive_size: int = 10, q: float = 0.5, xi: float = 0.85
+    ) -> None:
+        """
+        Ant Colony Optimization for Continuous Domains.
+
+        ACOR is a continuous-domain variant of Ant Colony Optimization in which
+        an archive of promising solutions is used to construct probability
+        distributions for generating new candidate solutions.
+
+        Parameters
+        ----------
+        archive_size : int, default=10
+            Number of solutions maintained in the solution archive. This value
+            must be at least 2.
+
+        q : float, default=0.5
+            Controls how strongly the solution ranking influences the probability
+            of selecting an archive solution as the reference for a new particle.
+            Smaller values concentrate the selection on the best solutions.
+
+        xi : float, default=0.85
+            Scale factor applied to the dispersion of archive solutions when
+            calculating the standard deviation used to sample each variable.
+        """
+        if not isinstance(archive_size, (int, np.integer)):
+            raise TypeError("archive_size must be an integer.")
+
+        if archive_size < 2:
+            raise ValueError("archive_size must be greater than or equal to 2.")
+
+        if not isinstance(q, (int, float, np.number)):
+            raise TypeError("q must be a number.")
+
+        if not np.isfinite(q) or q <= 0:
+            raise ValueError("q must be a finite number greater than 0.")
+
+        if not isinstance(xi, (int, float, np.number)):
+            raise TypeError("xi must be a number.")
+
+        if not np.isfinite(xi) or xi <= 0:
+            raise ValueError("xi must be a finite number greater than 0.")
+
+        self._archive_size = int(archive_size)
+        self._q = float(q)
+        self._xi = float(xi)
+
+        self._solution_archive: list[tuple[dict[str, float], np.float64]] = []
+        self._archive_probabilities: np.ndarray | None = None
+        self._initial_particle_ids: list[str] = []
+
+    @property
+    def archive_size(self) -> int:
+        return self._archive_size
+
+    @property
+    def q(self) -> float:
+        return self._q
+
+    @property
+    def xi(self) -> float:
+        return self._xi
+
+    def create_particle(
+        self,
+        identifier: str,
+        variables: dict[str, float] | None = None,
+        fitness: np.float64 = FITNESS_UNDEFINED,
+    ) -> None:
+        if identifier is None:
+            raise ValueError("Particle identifier cannot be None.")
+
+        if variables is None:
+            variables = {
+                name: self._rng.uniform(lower, upper)
+                for name, (lower, upper) in self._boundaries.items()
+            }
+
+        self._population[identifier] = ACORParticle(
+            identifier=identifier, variables=variables, fitness=fitness
+        )
+
+    def delete_particle(self, identifier: str | None) -> None:
+        if identifier is None:
+            raise ValueError("Particle identifier cannot be None.")
+
+        del self._population[identifier]
+
+    def _create_temporary_particle_ids(self, count: int) -> list[str]:
+        identifiers = []
+        index = 0
+
+        while len(identifiers) < count:
+            identifier = f"{self._identifier}|acor-initial:{index}"
+            index += 1
+
+            if identifier in self._population or identifier in identifiers:
+                continue
+
+            identifiers.append(identifier)
+
+        return identifiers
+
+    def pre_iteration(self, actual_iter: int) -> None:
+        if actual_iter == 0:
+            missing = max(0, self._archive_size - len(self._population))
+            self._initial_particle_ids = self._create_temporary_particle_ids(missing)
+
+            for identifier in self._initial_particle_ids:
+                self.create_particle(identifier=identifier)
+
+            return
+
+        if actual_iter == 1 and self._initial_particle_ids:
+            for identifier in self._initial_particle_ids:
+                if identifier not in self._population:
+                    self.create_particle(identifier=identifier)
+
+        if len(self._solution_archive) != self._archive_size:
+            raise RuntimeError("The ACOR solution archive has not been initialized.")
+
+        self._archive_probabilities = self._calculate_archive_probabilities()
+
+    def _calculate_archive_probabilities(self) -> np.ndarray:
+        positions = np.arange(self._archive_size, dtype=float)
+
+        weights = np.exp(-(positions**2) / (2 * self._q**2 * self._archive_size**2))
+
+        return weights / np.sum(weights)
+
+    def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
+        for identifier in particle_ids:
+            particle = self._population[identifier]
+            particle.random_cache = {}
+
+            if initialize:
+                continue
+
+            if self._archive_probabilities is None:
+                raise RuntimeError("Archive probabilities have not been initialized.")
+
+            particle.random_cache["archive-index"] = int(
+                self._rng.choice(self._archive_size, p=self._archive_probabilities)
+            )
+
+            for variable in self._boundaries:
+                particle.random_cache[f"{variable}-normal"] = float(self._rng.normal())
+
+    def initialize_particle(self, identifier: str) -> ACORParticle:
+        particle = self._population[identifier]
+
+        if not isinstance(particle, ACORParticle):
+            raise TypeError(
+                f"Particle '{identifier}' must be an instance of ACORParticle."
+            )
+
+        if np.isinf(particle.fitness):
+            particle.update(
+                variables=particle.variables, fitness_function=self._fitness_function
+            )
+
+        return particle
+
+    @staticmethod
+    def consolidate_new_particles(particle: ACORParticle) -> ACORParticle:
+        particle.consolidate(consolidate_new=True)
+        return particle
+
+    def _calculate_sigma(self, archive_index: int, variable: str) -> float:
+        reference_value = self._solution_archive[archive_index][0][variable]
+
+        distances = sum(
+            abs(solution[variable] - reference_value)
+            for solution, _ in self._solution_archive
+        )
+
+        return self._xi * distances / (self._archive_size - 1)
+
+    def update_particle(self, identifier: str) -> ACORParticle:
+        particle = self._population[identifier]
+
+        if not isinstance(particle, ACORParticle):
+            raise TypeError(
+                f"Particle '{identifier}' must be an instance of ACORParticle."
+            )
+
+        archive_index = particle.random_cache.pop("archive-index")
+        reference_variables = self._solution_archive[archive_index][0]
+
+        new_variables = {}
+
+        for variable in self._boundaries:
+            normal_value = particle.random_cache.pop(f"{variable}-normal")
+            sigma = self._calculate_sigma(
+                archive_index=archive_index, variable=variable
+            )
+
+            lower, upper = self._boundaries[variable]
+            value = reference_variables[variable] + sigma * normal_value
+            new_variables[variable] = float(np.clip(value, lower, upper))
+
+        particle.update(
+            variables=new_variables, fitness_function=self._fitness_function
+        )
+
+        return particle
+
+    def _update_solution_archive(self) -> None:
+        candidates = [
+            (deepcopy(particle.variables), particle.fitness)
+            for particle in self._population.values()
+        ]
+
+        candidates.extend(self._solution_archive)
+        candidates.sort(key=lambda solution: solution[1])
+
+        self._solution_archive = candidates[: self._archive_size]
+
+    def post_iteration(self, actual_iter: int) -> None:
+        if actual_iter == 0:
+            self._update_solution_archive()
+
+            for identifier in self._initial_particle_ids:
+                self.delete_particle(identifier)
+
+            self.update_solution_state()
+            return
+
+        for particle in self._population.values():
+            if not isinstance(particle, ACORParticle):
+                raise TypeError(
+                    f"Particle '{particle.identifier}' must be an instance of ACORParticle."
+                )
+
+            if particle.candidate_fitness is None:
+                raise RuntimeError(
+                    f"Particle '{particle.identifier}' has no candidate fitness."
+                )
+
+            particle.consolidate(consolidate_new=True)
+
+        self._update_solution_archive()
+        self.update_solution_state()
