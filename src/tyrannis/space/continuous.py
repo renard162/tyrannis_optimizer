@@ -92,11 +92,10 @@ class Continuous(SpaceBase):
     def initialize_context(self, seed: int | None = None) -> None:
         if isinstance(self._boundaries, dict):
             self._encoded_boundaries = self._boundaries.copy()
-            return
-
-        self._encoded_boundaries = {
-            str(index): boundary for index, boundary in enumerate(self._boundaries)
-        }
+        else:
+            self._encoded_boundaries = {
+                str(index): boundary for index, boundary in enumerate(self._boundaries)
+            }
 
         self._variable_names = list(self._encoded_boundaries.keys())
 
