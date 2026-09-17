@@ -339,8 +339,9 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
             )
 
             for name in self._variable_names:
-                acceleration[name] += force_factor * (
-                    other_particle.variables[name] - particle.variables[name]
+                acceleration[name] += float(
+                    force_factor
+                    * (other_particle.variables[name] - particle.variables[name])
                 )
 
         if particle.mass > 0:
