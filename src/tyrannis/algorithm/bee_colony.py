@@ -62,7 +62,7 @@ class ABCParticle(ParticleBase):
         self._trial_count = 0
 
 
-class ArtificialBeeColony(AlgorithmBase[ABCParticle]):
+class BeeColony(AlgorithmBase[ABCParticle]):
     """Artificial Bee Colony algorithm."""
 
     def __init__(
