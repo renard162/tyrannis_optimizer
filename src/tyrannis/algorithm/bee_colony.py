@@ -72,7 +72,7 @@ class BeeColony(AlgorithmBase[ABCParticle]):
         improved_probability: bool = True,
     ) -> None:
         """
-        Artificial Bee Colony algorithm for continuous optimization.
+        Artificial Bee Colony algorithm (ABC).
 
         ABC is a population-based optimization algorithm inspired by the
         foraging behavior of honey bees. The population represents food sources,

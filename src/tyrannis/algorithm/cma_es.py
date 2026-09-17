@@ -21,7 +21,7 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         sigma: float = 0.3,
     ) -> None:
         """
-        Covariance Matrix Adaptation Evolution Strategy algorithm.
+        Covariance Matrix Adaptation Evolution Strategy (CMA-ES).
 
         CMA-ES is a population-based, derivative-free optimization algorithm for
         continuous problems that adapts a multivariate normal search distribution to
