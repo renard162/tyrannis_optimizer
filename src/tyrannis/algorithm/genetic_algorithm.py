@@ -26,104 +26,228 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
         blx_alpha: float = 0.5,
         sbx_eta: float = 20.0,
         mutation: str = "polynomial",
+        polynomial_eta: float = 20.0,
+        gaussian_sigma: float = 0.1,
         mutation_probability: float | None = None,
         mutation_intensity: float = 1.0,
-        gaussian_sigma: float = 0.1,
-        polynomial_eta: float = 20.0,
         survival: str = "elitism",
         elite_count: int = 1,
     ) -> None:
         """
         Real-coded Genetic Algorithm for continuous optimization.
 
-        The algorithm maintains a fixed-size population of continuous candidate
-        solutions and evolves it through parent selection, crossover, mutation,
-        and survivor selection. Population evolution can use either generational
-        or steady-state replacement.
+        The Genetic Algorithm (GA) is a population-based, derivative-free optimization
+        algorithm that evolves a population of candidate solutions through parent
+        selection, crossover, mutation, and survivor selection. This implementation
+        uses a real-valued representation designed for continuous optimization
+        problems, allowing different selection, crossover, mutation, and population
+        evolution strategies to be combined according to the characteristics of the
+        optimization problem.
 
         Parameters
         ----------
         population_method : {"generational", "steady-state"}, default="steady-state"
-            Population evolution strategy. ``"generational"`` replaces the
-            population with offspring at each iteration, while ``"steady-state"``
-            progressively replaces existing individuals with offspring.
+            Defines how the population is evolved at each iteration.
+
+            - ``"generational"``: replaces the entire population with new candidates.
+            - ``"steady-state"``: progressively replaces a fraction of the population
+            defined by ``steady_state_fraction``.
 
         steady_state_fraction : float, default=0.1
-            Fraction of the population selected for modification at each
-            steady-state iteration. The value must be between 0 and 1. At least
-            one particle is always selected, regardless of the configured value.
-            Particles are selected without repetition until the whole population
-            has been iterated, after which a new selection cycle begins.
+            Defines the fraction of the population modified at each steady-state
+            iteration. The value must be between 0 and 1, with at least one particle
+            always selected. Selected particles are not repeated until the entire
+            population has been covered.
 
         selection : {"tournament", "fitness", "ranking"}, default="tournament"
-            Parent-selection strategy.
+            Defines how parents are selected from the population.
+
+            - ``"tournament"``: selects the best individual among randomly sampled
+            groups of candidates.
+            - ``"fitness"``: assigns selection probabilities according to fitness.
+            - ``"ranking"``: assigns selection probabilities according to the relative
+            ranking of individuals.
 
         tournament_size : int, default=2
-            Number of individuals participating in each tournament when
+            Defines the number of individuals competing in each tournament when
             ``selection="tournament"``.
 
         crossover : {"arithmetic", "blx", "sbx"}, default="sbx"
-            Crossover operator used to generate offspring.
+            Defines how the variables of selected parents are combined.
+
+            - ``"arithmetic"``: combines parent variables through a weighted average.
+            - ``"blx"``: samples variables from an interval surrounding the parents.
+            - ``"sbx"``: generates real-valued offspring using simulated binary
+            crossover.
 
         crossover_probability : float, default=0.9
-            Probability of applying crossover to a selected pair of parents.
+            Defines the probability of applying crossover to a selected pair of
+            parents. When crossover is not applied, the offspring inherits the
+            variables of one of the selected parents.
 
         arithmetic_alpha : float, default=0.5
-            Mixing coefficient used by arithmetic crossover.
+            Defines the mixing coefficient used by arithmetic crossover. A value of
+            0.5 gives equal influence to both parents.
 
         blx_alpha : float, default=0.5
-            Extension factor used by BLX-alpha crossover.
+            Defines the extension of the sampling interval used by BLX crossover.
+            Larger values allow offspring to explore farther beyond the range defined
+            by the parents.
 
         sbx_eta : float, default=20.0
-            Distribution index used by simulated binary crossover.
+            Defines the distribution index of simulated binary crossover. Larger values
+            concentrate offspring closer to the parents, while smaller values allow
+            broader exploration.
 
         mutation : {"gaussian", "polynomial"}, default="polynomial"
-            Mutation operator used to perturb offspring.
+            Defines how variables are perturbed after crossover.
 
-        mutation_probability : float or None, default=None
-            Probability of mutating each variable. When ``None``, the value is
-            set to ``1 / n_variables`` during context initialization.
-
-        mutation_intensity : float, default=1.0
-            Multiplicative factor controlling the magnitude of mutation.
-
-        gaussian_sigma : float, default=0.1
-            Standard deviation of Gaussian mutation relative to the range of
-            each variable.
+            - ``"gaussian"``: applies normally distributed perturbations.
+            - ``"polynomial"``: applies bounded perturbations controlled by a
+            distribution index.
 
         polynomial_eta : float, default=20.0
-            Distribution index used by polynomial mutation.
+            Defines the distribution index of polynomial mutation. Larger values
+            concentrate mutations closer to the current value, while smaller values
+            allow larger perturbations.
+
+        gaussian_sigma : float, default=0.1
+            Defines the standard deviation of Gaussian mutation relative to the range
+            of each variable.
+
+        mutation_probability : float or None, default=None
+            Defines the probability of mutating each variable. When ``None``, the
+            probability is set to ``1 / n_variables``.
+
+        mutation_intensity : float, default=1.0
+            Defines a multiplicative factor controlling the magnitude of mutation.
 
         survival : {"elitism", "replacement"}, default="elitism"
-            Survivor-selection strategy. ``"elitism"`` preserves the configured
-            number of best individuals, while ``"replacement"`` accepts generated
-            candidates.
+            Defines how generated candidates are incorporated into the population.
+
+            - ``"elitism"``: preserves the configured number of best individuals.
+            - ``"replacement"``: accepts generated candidates without elitist
+            protection.
 
         elite_count : int, default=1
-            Number of best individuals protected by elitist survival.
+            Defines the number of best individuals protected when
+            ``survival="elitism"``.
 
         Notes
         -----
-        The algorithm uses a real-valued representation directly because
-        Tyrannis operates on continuous optimization problems of the form
-        ``f: R^n -> R``.
+        The Genetic Algorithm maintains a population of real-valued candidate
+        solutions. Unlike binary genetic algorithms, the optimization variables are
+        represented directly in their continuous domain, avoiding an encoding and
+        decoding step.
 
-        Simulated binary crossover (SBX) is used as the default crossover because
-        it is a widely established crossover operator for real-coded genetic
-        algorithms. Polynomial mutation provides a corresponding real-valued
-        mutation operator whose distribution is controlled by a distribution
-        index.
+        At each iteration, parent solutions are selected from the current population.
+        The selection strategy controls the pressure applied toward better solutions.
+        Tournament selection compares randomly sampled groups of individuals and
+        selects the best one from each group. Fitness selection assigns a greater
+        probability to individuals with better objective values, while ranking
+        selection determines selection probabilities from the relative ordering of
+        the population rather than from the magnitude of the objective values.
+
+        Selected parents are combined using the configured crossover operator.
+        Arithmetic crossover generates values between the parents according to a
+        mixing coefficient. BLX-alpha samples values from an interval surrounding
+        the range defined by the parents, allowing offspring to explore beyond their
+        current values. Simulated binary crossover generates real-valued offspring
+        with a distribution controlled by ``sbx_eta`` and provides a flexible balance
+        between exploration around and exploitation of the parent solutions.
+
+        After crossover, mutation can modify each variable independently. Gaussian
+        mutation introduces normally distributed perturbations whose scale depends
+        on the variable range and ``gaussian_sigma``. Polynomial mutation produces
+        bounded perturbations whose distribution is controlled by ``polynomial_eta``.
+        The ``mutation_probability`` determines how frequently variables are changed,
+        while ``mutation_intensity`` controls the magnitude of those changes.
+
+        The population can evolve according to two different strategies. In
+        generational evolution, the entire population is replaced by newly generated
+        candidates at each iteration. In steady-state evolution, only a fraction of
+        the population is modified at a time. The fraction is controlled by
+        ``steady_state_fraction`` and at least one individual is modified per
+        iteration. The selected individuals are covered without repetition before a
+        new selection cycle begins, ensuring that the population is progressively
+        updated rather than relying on random selection that could leave individuals
+        unmodified for an arbitrarily long period.
+
+        Survivor selection determines which generated candidates become part of the
+        population. With elitist survival, the best ``elite_count`` individuals are
+        preserved, preventing the best solutions found so far from being replaced.
+        With replacement survival, generated candidates are accepted without this
+        elitist protection.
+
+        The Genetic Algorithm is a derivative-free method and does not require
+        gradient information from the objective function. Its real-valued
+        representation makes it suitable for bounded continuous optimization
+        problems, particularly when the objective function is nonlinear,
+        non-convex, multimodal, noisy, or non-differentiable.
+
+        The different selection, crossover, mutation, population evolution, and
+        survivor strategies can be combined to adjust the balance between exploration
+        and exploitation. In particular, ``crossover_probability``,
+        ``mutation_probability``, ``mutation_intensity``, and the distribution
+        indices of the selected operators provide direct control over the size and
+        frequency of changes introduced into the population.
 
         References
         ----------
-        Eshelman, L. J., & Schaffer, J. D. (1993). Real-coded genetic algorithms
-        and interval schemata. Foundations of Genetic Algorithms, 2, 187-202.
+        Eshelman, L. J., & Schaffer, J. D. (1993). Real-coded genetic algorithms and
+        interval-schemata. Foundations of Genetic Algorithms, 2, 187-202.
+        https://doi.org/10.1016/B978-0-08-094832-4.50018-0
 
-        Deb, K., & Agrawal, R. B. (1995). Simulated binary crossover for
-        continuous search space. Complex Systems, 9, 115-148.
+        García-Martínez, C., Lozano, M., Herrera, F., Molina, D., & Sánchez, A. M.
+        (2008). Global and local real-coded genetic algorithms based on parent-centric
+        crossover operators. European Journal of Operational Research, 185(3),
+        1088-1113.
+        https://doi.org/10.1016/j.ejor.2006.06.043
 
-        Deb, K. (2001). Multi-Objective Optimization using Evolutionary
-        Algorithms. Wiley.
+        Deep, K., & Thakur, M. (2007). A new crossover operator for real coded genetic
+        algorithms. Applied Mathematics and Computation, 188(1), 895-911.
+        https://doi.org/10.1016/j.amc.2006.10.047
+
+        Subbaraj, P., & Rajnarayanan, P. N. (2009). Optimal reactive power dispatch
+        using self-adaptive real coded genetic algorithm. Electric Power Systems
+        Research, 79(2), 374-381.
+        https://doi.org/10.1016/j.epsr.2008.07.008
+
+        Singh, V., Sharma, S. K., & Vaibhav, S. (2016). Transport aircraft conceptual
+        design optimization using real coded genetic algorithm. International Journal
+        of Aerospace Engineering, 2016, 2813541.
+        https://doi.org/10.1155/2016/2813541
+
+        Pal, P., Das, C. B., Panda, A., & Bhunia, A. K. (2005). An application of
+        real-coded genetic algorithm for mixed integer non-linear programming in an
+        optimal two-warehouse inventory policy for deteriorating items with a linear
+        trend in demand and a fixed planning horizon. International Journal of
+        Computer Mathematics, 82(2), 163-175.
+        https://doi.org/10.1080/00207160412331296733
+
+        Deb, K., & Agrawal, R. B. (1995). Simulated binary crossover for continuous
+        search space. Complex Systems, 9, 115-148.
+
+        Deb, K., & Deb, D. (2014). Analysing mutation schemes for real-parameter
+        genetic algorithms. International Journal of Artificial Intelligence and Soft
+        Computing, 4(1), 1-28.
+        https://doi.org/10.1504/IJAISC.2014.059280
+
+        Yang, J.-M., & Kao, C.-Y. (1996). Combined evolutionary algorithm for real
+        parameters optimization. Proceedings of the 1996 IEEE International
+        Conference on Evolutionary Computation, 732-737.
+        https://doi.org/10.1109/ICEC.1996.542693
+
+        Blanco, A., Delgado, M., & Pegalajar, M. C. (2001). A real-coded genetic
+        algorithm for training recurrent neural networks. Neural Networks, 14(1),
+        93-105.
+        https://doi.org/10.1016/S0893-6080(00)00081-2
+
+        Wang, J., Cheng, Z., Ersoy, O. K., Zhang, P., Dai, W., & Dong, Z. (2018).
+        Improvement analysis and application of real-coded genetic algorithm for
+        solving constrained optimization problems. Mathematical Problems in
+        Engineering, 2018, 5760841.
+        https://doi.org/10.1155/2018/5760841
         """
         if population_method not in ("generational", "steady-state"):
             raise ValueError(
