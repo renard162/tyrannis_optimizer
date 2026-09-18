@@ -467,9 +467,9 @@ class BeeColony(AlgorithmBase[ABCParticle]):
         current_variables = dict(particle.variables)
         current_fitness = particle.fitness
 
-        employed_variable = particle.random_cache.pop("employed-variable")
-        employed_partner = particle.random_cache.pop("employed-partner")
-        employed_phi = particle.random_cache.pop("employed-phi")
+        employed_variable = particle.random_cache["employed-variable"]
+        employed_partner = particle.random_cache["employed-partner"]
+        employed_phi = particle.random_cache["employed-phi"]
 
         current_variables, current_fitness = self._attempt_update(
             variables=current_variables,
@@ -480,9 +480,9 @@ class BeeColony(AlgorithmBase[ABCParticle]):
         )
 
         for index in range(self._onlooker_counts[identifier]):
-            variable = particle.random_cache.pop(f"onlooker-{index}-variable")
-            partner_id = particle.random_cache.pop(f"onlooker-{index}-partner")
-            phi = particle.random_cache.pop(f"onlooker-{index}-phi")
+            variable = particle.random_cache[f"onlooker-{index}-variable"]
+            partner_id = particle.random_cache[f"onlooker-{index}-partner"]
+            phi = particle.random_cache[f"onlooker-{index}-phi"]
 
             current_variables, current_fitness = self._attempt_update(
                 variables=current_variables,
