@@ -4,7 +4,6 @@ from ..core.algorithm import (
     FITNESS_UNDEFINED,
     AlgorithmBase,
     ParticleBase,
-    Serializable,
 )
 
 
@@ -52,15 +51,14 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
             Parent-selection strategy.
 
         tournament_size : int, default=2
-            Number of candidates participating in each tournament when
+            Number of individuals participating in each tournament when
             ``selection="tournament"``.
 
         crossover : {"arithmetic", "blx", "sbx"}, default="sbx"
-            Crossover operator. SBX is the default real-coded crossover used
-            in common continuous genetic algorithm configurations.
+            Crossover operator used to generate offspring.
 
         crossover_probability : float, default=0.9
-            Probability of applying crossover when generating an offspring.
+            Probability of applying crossover to a selected pair of parents.
 
         arithmetic_alpha : float, default=0.5
             Mixing coefficient used by arithmetic crossover.
@@ -72,50 +70,49 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
             Distribution index used by simulated binary crossover.
 
         mutation : {"gaussian", "polynomial"}, default="polynomial"
-            Mutation operator.
+            Mutation operator used to perturb offspring.
 
         mutation_probability : float or None, default=None
-            Per-variable probability of mutation. When ``None``, the probability
-            is set to ``1 / n_variables`` during context initialization.
+            Probability of mutating each variable. When ``None``, the value is
+            set to ``1 / n_variables`` during context initialization.
 
         mutation_intensity : float, default=1.0
-            Multiplicative factor applied to the magnitude produced by the
-            selected mutation operator.
+            Multiplicative factor controlling the magnitude of mutation.
 
         gaussian_sigma : float, default=0.1
-            Base standard deviation of Gaussian mutation expressed as a fraction
-            of each variable's search range.
+            Standard deviation of Gaussian mutation relative to the range of
+            each variable.
 
         polynomial_eta : float, default=20.0
             Distribution index used by polynomial mutation.
 
         survival : {"elitism", "replacement"}, default="elitism"
-            Survivor-selection strategy. ``"replacement"`` always accepts the
-            generated candidate, while ``"elitism"`` preserves the configured
-            number of best current individuals.
+            Survivor-selection strategy. ``"elitism"`` preserves the configured
+            number of best individuals, while ``"replacement"`` accepts generated
+            candidates.
 
         elite_count : int, default=1
-            Number of current individuals protected from replacement when
-            ``survival="elitism"``.
+            Number of best individuals protected by elitist survival.
 
         Notes
         -----
-        The real-coded representation is used directly because Tyrannis
-        optimizes continuous functions of the form ``f: R^n -> R``. The
-        implementation therefore does not perform binary chromosome encoding.
+        The algorithm uses a real-valued representation directly because
+        Tyrannis operates on continuous optimization problems of the form
+        ``f: R^n -> R``.
 
-        SBX is based on Deb and Agrawal (1995). Polynomial mutation follows the
-        real-coded mutation formulation commonly used with SBX in continuous
-        evolutionary optimization.
+        Simulated binary crossover (SBX) is used as the default crossover because
+        it is a widely established crossover operator for real-coded genetic
+        algorithms. Polynomial mutation provides a corresponding real-valued
+        mutation operator whose distribution is controlled by a distribution
+        index.
 
         References
         ----------
+        Eshelman, L. J., & Schaffer, J. D. (1993). Real-coded genetic algorithms
+        and interval schemata. Foundations of Genetic Algorithms, 2, 187-202.
+
         Deb, K., & Agrawal, R. B. (1995). Simulated binary crossover for
         continuous search space. Complex Systems, 9, 115-148.
-
-        Eshelman, L. J., & Schaffer, J. D. (1993). Real-coded genetic
-        algorithms and interval schemata. Foundations of Genetic Algorithms,
-        2, 187-202.
 
         Deb, K. (2001). Multi-Objective Optimization using Evolutionary
         Algorithms. Wiley.
@@ -138,7 +135,6 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
             raise ValueError("crossover must be 'arithmetic', 'blx', or 'sbx'.")
 
         self._validate_probability(crossover_probability, "crossover_probability")
-
         self._validate_finite_nonnegative(arithmetic_alpha, "arithmetic_alpha")
         self._validate_finite_nonnegative(blx_alpha, "blx_alpha")
         self._validate_finite_positive(sbx_eta, "sbx_eta")
@@ -165,18 +161,19 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
         self._population_method = population_method
         self._selection = selection
         self._tournament_size = int(tournament_size)
+
         self._crossover_method = crossover
         self._crossover_probability = float(crossover_probability)
         self._arithmetic_alpha = float(arithmetic_alpha)
         self._blx_alpha = float(blx_alpha)
         self._sbx_eta = float(sbx_eta)
+
         self._mutation = mutation
-        self._mutation_probability = (
-            None if mutation_probability is None else float(mutation_probability)
-        )
+        self._mutation_probability = mutation_probability
         self._mutation_intensity = float(mutation_intensity)
         self._gaussian_sigma = float(gaussian_sigma)
         self._polynomial_eta = float(polynomial_eta)
+
         self._survival = survival
         self._elite_count = int(elite_count)
 
@@ -322,48 +319,49 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
             self._active_identifier = None
 
     def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
-        if initialize:
-            for identifier in particle_ids:
-                self._population[identifier].random_cache = {}
-            return
-
-        variables = tuple(self._boundaries)
-
         for identifier in particle_ids:
+            particle = self._population[identifier]
+            particle.random_cache = {}
+
+            if initialize:
+                continue
+
             if (
                 self._population_method == "steady-state"
                 and identifier != self._active_identifier
             ):
-                self._population[identifier].random_cache = {}
                 continue
 
-            cache: dict[str, Serializable] = {"crossover": self._rng.random()}
+            particle.random_cache["crossover"] = self._rng.random()
+            particle.random_cache["crossover-parent"] = self._rng.random()
+
+            if self._crossover_method != "arithmetic":
+                for name in self._boundaries:
+                    if self._crossover_method == "blx":
+                        particle.random_cache[f"{name}-blx"] = self._rng.random()
+                    else:
+                        particle.random_cache[f"{name}-sbx"] = self._rng.random()
+                        particle.random_cache[f"{name}-sbx-child"] = self._rng.random()
 
             if self._selection == "tournament":
                 for parent_index in range(2):
                     for tournament_index in range(self._tournament_size):
-                        cache[f"tournament-{parent_index}-{tournament_index}"] = int(
-                            self._rng.integers(0, len(self._population))
-                        )
+                        particle.random_cache[
+                            f"tournament-{parent_index}-{tournament_index}"
+                        ] = int(self._rng.integers(0, len(self._population)))
             else:
-                cache["selection-0"] = self._rng.random()
-                cache["selection-1"] = self._rng.random()
+                particle.random_cache["selection-0"] = self._rng.random()
+                particle.random_cache["selection-1"] = self._rng.random()
 
-            for variable in variables:
-                if self._crossover_method == "blx":
-                    cache[f"{variable}-blx"] = self._rng.random()
-                elif self._crossover_method == "sbx":
-                    cache[f"{variable}-sbx"] = self._rng.random()
-                    cache[f"{variable}-sbx-child"] = self._rng.random()
-
-                cache[f"{variable}-mutation"] = self._rng.random()
+            for name in self._boundaries:
+                particle.random_cache[f"{name}-mutation"] = self._rng.random()
 
                 if self._mutation == "gaussian":
-                    cache[f"{variable}-gaussian"] = self._rng.standard_normal()
+                    particle.random_cache[f"{name}-gaussian"] = (
+                        self._rng.standard_normal()
+                    )
                 else:
-                    cache[f"{variable}-polynomial"] = self._rng.random()
-
-            self._population[identifier].random_cache = cache
+                    particle.random_cache[f"{name}-polynomial"] = self._rng.random()
 
     def initialize_particle(self, identifier: str) -> GAParticle:
         particle = self._population[identifier]
@@ -386,36 +384,40 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
         return particle
 
     def _select_parent(
-        self, random_value: float | None, tournament_values: list[int] | None
+        self, particle: GAParticle, selection_random_key: str, tournament_key: str
     ) -> GAParticle:
         particles = list(self._population.values())
 
         if self._selection == "tournament":
-            if tournament_values is None:
-                raise RuntimeError("Tournament selection values are missing.")
+            indices = [
+                particle.random_cache[f"{tournament_key}-{index}"]
+                for index in range(self._tournament_size)
+            ]
 
-            candidates = [particles[index] for index in tournament_values]
+            candidates = [particles[int(index)] for index in indices]
+
             return min(candidates, key=lambda candidate: candidate.fitness)
 
-        if random_value is None:
-            raise RuntimeError("Selection random value is missing.")
-
+        random_value = particle.random_cache[selection_random_key]
         probabilities = self._selection_probabilities()
+
         cumulative = np.cumsum(probabilities)
         cumulative[-1] = 1.0
+
         index = int(np.searchsorted(cumulative, random_value, side="right"))
+
         return particles[index]
 
     def _selection_probabilities(self) -> np.ndarray:
         particles = list(self._population.values())
+
         fitness = np.asarray([particle.fitness for particle in particles], dtype=float)
+
         fitness = np.where(np.isnan(fitness), np.inf, fitness)
 
         if self._selection == "fitness":
-            negative_infinity = np.isneginf(fitness)
-
-            if np.any(negative_infinity):
-                probabilities = negative_infinity.astype(float)
+            if np.any(np.isneginf(fitness)):
+                probabilities = np.isneginf(fitness).astype(float)
             else:
                 finite = np.isfinite(fitness)
 
@@ -423,21 +425,14 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
                     return np.full(len(particles), 1.0 / len(particles))
 
                 worst = np.max(fitness[finite])
-                weights = np.zeros(len(particles), dtype=float)
-                weights[finite] = worst - fitness[finite]
-                weights[finite] += np.finfo(float).eps
+                probabilities = np.zeros(len(particles), dtype=float)
 
-                total = np.sum(weights)
-
-                if not np.isfinite(total) or total <= 0:
-                    return np.full(len(particles), 1.0 / len(particles))
-
-                probabilities = weights
+                probabilities[finite] = worst - fitness[finite] + np.finfo(float).eps
         else:
             order = np.argsort(fitness, kind="stable")
+
             probabilities = np.zeros(len(particles), dtype=float)
-            ranks = np.arange(len(particles), 0, -1, dtype=float)
-            probabilities[order] = ranks
+            probabilities[order] = np.arange(len(particles), 0, -1, dtype=float)
 
         total = np.sum(probabilities)
 
@@ -447,48 +442,41 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
         return probabilities / total
 
     def _crossover(
-        self, parent_1: GAParticle, parent_2: GAParticle, particle: GAParticle
+        self, particle: GAParticle, parent_1: GAParticle, parent_2: GAParticle
     ) -> dict[str, float]:
+        if particle.random_cache["crossover"] >= self._crossover_probability:
+            if particle.random_cache["crossover-parent"] < 0.5:
+                return dict(parent_1.variables)
+
+            return dict(parent_2.variables)
+
         variables: dict[str, float] = {}
-        crossover = float(particle.random_cache.pop("crossover"))
-
-        if crossover >= self._crossover_probability:
-            for name in self._boundaries:
-                if self._crossover_method == "blx":
-                    particle.random_cache.pop(f"{name}-blx")
-                elif self._crossover_method == "sbx":
-                    particle.random_cache.pop(f"{name}-sbx")
-                    particle.random_cache.pop(f"{name}-sbx-child")
-
-            return dict(parent_1.variables)
 
         for name, (lower, upper) in self._boundaries.items():
             first = parent_1.variables[name]
             second = parent_2.variables[name]
 
             if self._crossover_method == "arithmetic":
-                alpha = self._arithmetic_alpha
-                value = alpha * first + (1.0 - alpha) * second
+                value = (
+                    self._arithmetic_alpha * first
+                    + (1.0 - self._arithmetic_alpha) * second
+                )
             elif self._crossover_method == "blx":
                 minimum = min(first, second)
                 maximum = max(first, second)
                 span = maximum - minimum
                 extension = self._blx_alpha * span
-                random_value = float(particle.random_cache.pop(f"{name}-blx"))
-                value = (
-                    random_value * (maximum + extension - minimum + extension)
-                    + minimum
-                    - extension
-                )
+                random_value = particle.random_cache[f"{name}-blx"]
+
+                value = minimum - extension + random_value * (span + 2.0 * extension)
             else:
                 value = self._sbx_value(
                     first=first,
                     second=second,
                     lower=lower,
                     upper=upper,
-                    random_value=float(particle.random_cache.pop(f"{name}-sbx")),
-                    upper_child=float(particle.random_cache.pop(f"{name}-sbx-child"))
-                    >= 0.5,
+                    random_value=particle.random_cache[f"{name}-sbx"],
+                    upper_child=(particle.random_cache[f"{name}-sbx-child"] >= 0.5),
                 )
 
             variables[name] = float(np.clip(value, lower, upper))
@@ -544,31 +532,38 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
         mutated = dict(variables)
 
         for name, (lower, upper) in self._boundaries.items():
-            mutation = particle.random_cache.pop(f"{name}-mutation")
-
-            if mutation >= self._effective_mutation_probability:
-                if self._mutation == "gaussian":
-                    particle.random_cache.pop(f"{name}-gaussian")
-                else:
-                    particle.random_cache.pop(f"{name}-polynomial")
+            if (
+                particle.random_cache[f"{name}-mutation"]
+                >= self._effective_mutation_probability
+            ):
                 continue
 
             span = upper - lower
 
             if self._mutation == "gaussian":
-                noise = particle.random_cache.pop(f"{name}-gaussian")
+                noise = particle.random_cache[f"{name}-gaussian"]
+
                 delta = self._mutation_intensity * self._gaussian_sigma * span * noise
             else:
-                random_value = particle.random_cache.pop(f"{name}-polynomial")
+                random_value = particle.random_cache[f"{name}-polynomial"]
+                current = mutated[name]
+
+                delta_1 = (current - lower) / span
+                delta_2 = (upper - current) / span
+                mut_pow = 1.0 / (self._polynomial_eta + 1.0)
 
                 if random_value <= 0.5:
-                    delta = (2.0 * random_value) ** (
-                        1.0 / (self._polynomial_eta + 1.0)
-                    ) - 1.0
-                else:
-                    delta = 1.0 - (2.0 * (1.0 - random_value)) ** (
-                        1.0 / (self._polynomial_eta + 1.0)
+                    xy = 1.0 - delta_1
+                    value = 2.0 * random_value + (1.0 - 2.0 * random_value) * xy ** (
+                        self._polynomial_eta + 1.0
                     )
+                    delta = value**mut_pow - 1.0
+                else:
+                    xy = 1.0 - delta_2
+                    value = 2.0 * (1.0 - random_value) + 2.0 * (
+                        random_value - 0.5
+                    ) * xy ** (self._polynomial_eta + 1.0)
+                    delta = 1.0 - value**mut_pow
 
                 delta *= self._mutation_intensity * span
 
@@ -592,36 +587,22 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
             particle.candidate_fitness = particle.fitness
             return particle
 
-        tournament_values_0 = None
-        tournament_values_1 = None
-
-        if self._selection == "tournament":
-            tournament_values_0 = [
-                int(particle.random_cache.pop(f"tournament-0-{index}"))
-                for index in range(self._tournament_size)
-            ]
-            tournament_values_1 = [
-                int(particle.random_cache.pop(f"tournament-1-{index}"))
-                for index in range(self._tournament_size)
-            ]
-
-        selection_random_0 = None
-        selection_random_1 = None
-
-        if self._selection != "tournament":
-            selection_random_0 = float(particle.random_cache.pop("selection-0"))
-            selection_random_1 = float(particle.random_cache.pop("selection-1"))
-
         parent_1 = self._select_parent(
-            random_value=selection_random_0, tournament_values=tournament_values_0
+            particle=particle,
+            selection_random_key="selection-0",
+            tournament_key="tournament-0",
         )
+
         parent_2 = self._select_parent(
-            random_value=selection_random_1, tournament_values=tournament_values_1
+            particle=particle,
+            selection_random_key="selection-1",
+            tournament_key="tournament-1",
         )
 
         candidate_variables = self._crossover(
-            parent_1=parent_1, parent_2=parent_2, particle=particle
+            particle=particle, parent_1=parent_1, parent_2=parent_2
         )
+
         candidate_variables = self._mutate(
             variables=candidate_variables, particle=particle
         )
@@ -637,6 +618,7 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
             return set()
 
         elite_count = min(self._elite_count, len(self._population))
+
         ordered = sorted(
             self._population.values(),
             key=lambda particle: (np.isnan(particle.fitness), particle.fitness),
@@ -663,11 +645,9 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
                     f"Particle '{particle.identifier}' has no candidate fitness."
                 )
 
-            if particle.identifier in elite_identifiers:
-                particle.candidate_variables = None
-                particle.candidate_fitness = FITNESS_UNDEFINED
-                continue
-
-            particle.consolidate(consolidate_new=True)
+            if self._survival == "elitism" and particle.identifier in elite_identifiers:
+                particle.consolidate(consolidate_new=False)
+            else:
+                particle.consolidate(consolidate_new=True)
 
         self.update_solution_state()
