@@ -17,6 +17,7 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
     def __init__(
         self,
         population_method: str = "steady-state",
+        steady_state_fraction: float = 0.1,
         selection: str = "tournament",
         tournament_size: int = 2,
         crossover: str = "sbx",
@@ -46,6 +47,13 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
             Population evolution strategy. ``"generational"`` replaces the
             population with offspring at each iteration, while ``"steady-state"``
             progressively replaces existing individuals with offspring.
+
+        steady_state_fraction : float, default=0.1
+            Fraction of the population selected for modification at each
+            steady-state iteration. The value must be between 0 and 1. At least
+            one particle is always selected, regardless of the configured value.
+            Particles are selected without repetition until the whole population
+            has been iterated, after which a new selection cycle begins.
 
         selection : {"tournament", "fitness", "ranking"}, default="tournament"
             Parent-selection strategy.
@@ -122,6 +130,8 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
                 "population_method must be either 'generational' or 'steady-state'."
             )
 
+        self._validate_probability(steady_state_fraction, "steady_state_fraction")
+
         if selection not in ("tournament", "fitness", "ranking"):
             raise ValueError("selection must be 'tournament', 'fitness', or 'ranking'.")
 
@@ -159,6 +169,7 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
             raise ValueError("elite_count must be greater than 0.")
 
         self._population_method = population_method
+        self._steady_state_fraction = float(steady_state_fraction)
         self._selection = selection
         self._tournament_size = int(tournament_size)
 
@@ -178,7 +189,8 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
         self._elite_count = int(elite_count)
 
         self._effective_mutation_probability: float | None = None
-        self._active_identifier: str | None = None
+        self._active_identifiers: set[str] = set()
+        self._steady_state_queue: list[str] = []
 
     @staticmethod
     def _validate_probability(value: float, name: str) -> None:
@@ -209,6 +221,10 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
     @property
     def population_method(self) -> str:
         return self._population_method
+
+    @property
+    def steady_state_fraction(self) -> float:
+        return self._steady_state_fraction
 
     @property
     def selection(self) -> str:
@@ -303,20 +319,40 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
             else:
                 self._effective_mutation_probability = self._mutation_probability
 
-            self._active_identifier = None
+            self._active_identifiers = set()
+
+            if self._population_method == "steady-state":
+                particle_ids = list(self._population)
+                self._rng.shuffle(particle_ids)
+                self._steady_state_queue = particle_ids
+            else:
+                self._steady_state_queue = []
+
             return
 
         if self._population_method == "steady-state":
-            particle_ids = tuple(self._population)
+            particle_ids = set(self._population)
 
-            if not particle_ids:
-                raise RuntimeError("GeneticAlgorithm population cannot be empty.")
-
-            self._active_identifier = particle_ids[
-                self._rng.integers(0, len(particle_ids))
+            self._steady_state_queue = [
+                identifier
+                for identifier in self._steady_state_queue
+                if identifier in particle_ids
             ]
+
+            if not self._steady_state_queue:
+                self._steady_state_queue = list(particle_ids)
+                self._rng.shuffle(self._steady_state_queue)
+
+            n_updates = max(
+                1, int(np.ceil(self._steady_state_fraction * len(particle_ids)))
+            )
+
+            n_updates = min(n_updates, len(self._steady_state_queue))
+
+            self._active_identifiers = set(self._steady_state_queue[:n_updates])
+            self._steady_state_queue = self._steady_state_queue[n_updates:]
         else:
-            self._active_identifier = None
+            self._active_identifiers = set()
 
     def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
         for identifier in particle_ids:
@@ -328,7 +364,7 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
 
             if (
                 self._population_method == "steady-state"
-                and identifier != self._active_identifier
+                and identifier not in self._active_identifiers
             ):
                 continue
 
@@ -581,7 +617,7 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
 
         if (
             self._population_method == "steady-state"
-            and identifier != self._active_identifier
+            and identifier not in self._active_identifiers
         ):
             particle.candidate_variables = dict(particle.variables)
             particle.candidate_fitness = particle.fitness
