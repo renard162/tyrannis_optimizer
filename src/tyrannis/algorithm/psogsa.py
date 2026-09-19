@@ -237,6 +237,7 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
 
         self._gravitational_constant: float | None = None
         self._variable_names: tuple[str, ...] = ()
+        self._k_best: tuple[str, ...] = ()
 
     @property
     def c1(self) -> float:
@@ -335,8 +336,8 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
             cache: dict[str, Serializable] = {}
 
             if not initialize:
-                for other_id in self._population:
-                    if other_id != particle_id:
+                for other_id in self._k_best:
+                    if other_id != particle_id and other_id in self._population:
                         cache[f"force-{other_id}"] = float(self._rng.random())
 
                 cache["inertia"] = float(self._rng.random())
@@ -374,13 +375,13 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
             raise RuntimeError("The gravitational constant has not been initialized.")
 
         acceleration = {name: 0.0 for name in self._variable_names}
-
         epsilon = np.finfo(float).eps
 
-        for other_id, other_particle in self._population.items():
-            if other_id == particle.identifier:
+        for other_id in self._k_best:
+            if other_id == particle.identifier or other_id not in self._population:
                 continue
 
+            other_particle = self._population[other_id]
             distance = np.linalg.norm(
                 np.asarray(
                     [
@@ -394,10 +395,8 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
 
             denominator = distance**self._r_power + epsilon
             random_factor = float(particle.random_cache[f"force-{other_id}"])
-
-            force_factor = (
+            acceleration_factor = (
                 self._gravitational_constant
-                * particle.mass
                 * other_particle.mass
                 * random_factor
                 / denominator
@@ -405,13 +404,9 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
 
             for name in self._variable_names:
                 acceleration[name] += float(
-                    force_factor
+                    acceleration_factor
                     * (other_particle.variables[name] - particle.variables[name])
                 )
-
-        if particle.mass > 0:
-            for name in self._variable_names:
-                acceleration[name] /= particle.mass
 
         return acceleration
 
@@ -525,25 +520,46 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
         for particle, mass in zip(particles, masses):
             particle.mass = float(mass)
 
-    def post_iteration(self, actual_iter: int) -> None:
-        if actual_iter == 0:
-            self._update_masses()
-            self.update_solution_state()
+    def _update_k_best(self, next_iter: int) -> None:
+        if not self._population:
+            self._k_best = ()
             return
 
-        for particle in self._population.values():
-            if not isinstance(particle, PSOGSAParticle):
-                raise TypeError(
-                    f"Particle '{particle.identifier}' must be an instance of "
-                    "PSOGSAParticle."
-                )
+        population_size = len(self._population)
+        minimum_agents = max(
+            1,
+            int(np.ceil(population_size * self._k_agents_percent)),
+        )
+        progress = min(next_iter, self._max_iterations) / self._max_iterations
+        n_agents = int(
+            np.ceil(population_size - (population_size - minimum_agents) * progress)
+        )
+        n_agents = max(minimum_agents, min(population_size, n_agents))
 
-            if particle.candidate_fitness is None:
-                raise RuntimeError(
-                    f"Particle '{particle.identifier}' has no candidate fitness."
-                )
+        ranked_particles = sorted(
+            self._population.values(),
+            key=lambda particle: particle.fitness,
+        )
+        self._k_best = tuple(
+            particle.identifier for particle in ranked_particles[:n_agents]
+        )
 
-            particle.consolidate(consolidate_new=True)
+    def post_iteration(self, actual_iter: int) -> None:
+        if actual_iter > 0:
+            for particle in self._population.values():
+                if not isinstance(particle, PSOGSAParticle):
+                    raise TypeError(
+                        f"Particle '{particle.identifier}' must be an instance of "
+                        "PSOGSAParticle."
+                    )
+
+                if particle.candidate_fitness is None:
+                    raise RuntimeError(
+                        f"Particle '{particle.identifier}' has no candidate fitness."
+                    )
+
+                particle.consolidate(consolidate_new=True)
 
         self._update_masses()
+        self._update_k_best(actual_iter + 1)
         self.update_solution_state()
