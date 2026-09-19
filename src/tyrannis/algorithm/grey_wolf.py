@@ -18,38 +18,44 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
     def __init__(
         self,
         convergence_exponent: float = 1,
-        exploration_enhanced: bool = True,
+        exploration_enhanced: bool = False,
     ) -> None:
         """
         Grey Wolf Optimization (GWO).
 
-        GWO is a population-based optimization algorithm inspired by the
-        social hierarchy and hunting behavior of grey wolves. The three best
-        solutions in the population are represented by alpha, beta, and delta
-        wolves and guide the remaining wolves during the search.
+        GWO is a population-based, derivative-free optimization algorithm inspired
+        by the social hierarchy and hunting behavior of grey wolves. The search is
+        guided by the three best solutions in the population, represented by the
+        alpha, beta, and delta wolves, which collectively direct the remaining wolves
+        toward promising regions of the search space. The algorithm uses a
+        time-varying convergence parameter to progressively transition from
+        exploration to exploitation and is designed for continuous optimization
+        problems.
 
         Parameters
         ----------
         convergence_exponent : float, default=1
-            Exponent controlling the nonlinear convergence schedule of the
-            parameter ``a``. The parameter is calculated as
+            Exponent controlling the nonlinear decay of the convergence parameter
+            ``a``. A value of ``1`` produces the linear decay used by the original
+            GWO. Values greater than ``1`` maintain larger values of ``a`` for a
+            greater portion of the optimization, favoring exploration for longer,
+            while values between ``0`` and ``1`` accelerate the initial decay of
+            ``a``, favoring exploitation earlier in the search.
 
-                a = 2 * (1 - (t / T) ** convergence_exponent)
-
-            where ``t`` is the current iteration and ``T`` is the maximum
-            number of iterations. A value of ``1`` produces the linear
-            convergence schedule of the original GWO.
-
-        exploration_enhanced : bool, default=True
-            Whether to use the exploration-enhanced position update proposed
-            by EEGWO. When ``False``, the original GWO position update based
-            exclusively on alpha, beta, and delta wolves is used.
+        exploration_enhanced : bool, default=False
+            Whether to use the exploration-enhanced position update proposed by
+            EEGWO. When ``False``, the original GWO position update is used. When
+            ``True``, the search is changed to the EEGWO model, in which an
+            additional randomly selected individual contributes to the movement of
+            each wolf, increasing the influence of population members outside the
+            three leading wolves.
 
         Notes
         -----
-        The original GWO uses the positions of the alpha, beta, and delta
-        wolves to generate the next position of every wolf. For each leader,
-        the distance between the current wolf and the leader is calculated as
+        GWO models the hunting behavior of a grey wolf pack through a hierarchy in
+        which the alpha, beta, and delta wolves represent the three best solutions
+        and guide the remaining wolves. For each leading wolf, the distance from the
+        current wolf is calculated as
 
             D = |C * X_leader - X|
 
@@ -57,26 +63,90 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
 
             X_leader - A * D
 
-        where ``A = 2 * a * r1 - a`` and ``C = 2 * r2``.
+        where
 
-        When ``exploration_enhanced`` is enabled, the position update is
-        replaced by the exploration-enhanced equation proposed by EEGWO. An
-        additional individual is randomly selected from the population and
-        contributes a direction based on the difference between its position
-        and the current wolf position. The published EEGWO coefficients are
-        ``b1 = 0.1`` and ``b2 = 0.9``.
+            A = 2 * a * r1 - a
+            C = 2 * r2
+
+        with ``r1`` and ``r2`` uniformly distributed random values in ``[0, 1]``.
+
+        The parameter ``a`` controls the transition between exploration and
+        exploitation. In the original GWO, it decreases linearly from 2 to 0 as the
+        optimization progresses. This implementation generalizes that schedule using
+        the convergence exponent:
+
+            a = 2 * (1 - (t / T) ** convergence_exponent)
+
+        where ``t`` is the current iteration and ``T`` is the maximum number of
+        iterations.
+
+        When ``convergence_exponent = 1``, the expression becomes
+
+            a = 2 * (1 - t / T)
+
+        which is the convergence schedule of the original GWO. Increasing the
+        exponent above 1 slows the decay of ``a`` during the early and intermediate
+        stages of the optimization, preserving larger movement coefficients and
+        therefore extending the exploratory phase. Values between 0 and 1 produce
+        the opposite effect, causing ``a`` to decrease more rapidly at the beginning
+        of the optimization and shifting the search toward exploitation earlier.
+
+        For each wolf, the three candidate positions generated from the alpha, beta,
+        and delta wolves are combined to obtain the next position. The resulting
+        position is constrained to the configured search boundaries.
+
+        When ``exploration_enhanced`` is enabled, the algorithm uses the
+        exploration-enhanced grey wolf optimizer (EEGWO) position update instead of
+        the original GWO update. In addition to the information provided by the
+        alpha, beta, and delta wolves, an individual randomly selected from the
+        population contributes a search direction based on its position relative to
+        the current wolf. This introduces information from other regions of the
+        population and increases the diversity of the search directions.
+
+        The GWO and EEGWO variants therefore share the same grey-wolf hierarchy and
+        convergence mechanism, while differing in how the next position is generated.
+        The standard GWO should be used when the original formulation is desired,
+        whereas enabling ``exploration_enhanced`` changes the position-update model
+        to EEGWO.
+
+        GWO is intended for continuous optimization and can be applied to
+        non-linear, non-convex, multi-modal, noisy, and non-differentiable objective
+        functions. The ``convergence_exponent`` should be selected according to the
+        desired exploration-exploitation schedule rather than the dimensionality of
+        the optimization problem, while ``exploration_enhanced`` is a structural
+        choice between the original GWO and the EEGWO position-update strategy.
 
         References
         ----------
-        Mirjalili, S., Mirjalili, S. M., & Lewis, A. (2014). Grey Wolf
-        Optimizer. Advances in Engineering Software, 69, 46-61.
+        Mirjalili, S., Mirjalili, S. M., & Lewis, A. (2014). Grey Wolf Optimizer.
+        Advances in Engineering Software, 69, 46-61.
         https://doi.org/10.1016/j.advengsoft.2013.12.007
 
-        Long, W., Jiao, J., Liang, X., & Cai, S. (2018). An
-        exploration-enhanced grey wolf optimizer to solve high-dimensional
-        numerical optimization. Engineering Applications of Artificial
-        Intelligence, 68, 63-80.
+        Huang, Y., Liu, Q., Song, H., Han, T., & Li, T. (2024). CMGWO: Grey wolf
+        optimizer for fusion cell-like P systems. Heliyon, 10(14), e34496.
+        https://doi.org/10.1016/j.heliyon.2024.e34496
+
+        Long, W., Jiao, J., Liang, X., & Cai, S. (2018). An exploration-enhanced
+        grey wolf optimizer to solve high-dimensional numerical optimization.
+        Engineering Applications of Artificial Intelligence, 68, 63-80.
         https://doi.org/10.1016/j.engappai.2017.10.024
+
+        Faris, H., Aljarah, I., Al-Betar, M. A., & Mirjalili, S. (2018). Grey wolf
+        optimizer: a review of recent variants and applications. Neural Computing
+        and Applications, 30, 413-435.
+        https://doi.org/10.1007/s00521-017-3272-5
+
+        Nadimi-Shahraki, M. H., Taghian, S., & Mirjalili, S. (2021). An improved
+        grey wolf optimizer for solving engineering problems. Expert Systems with
+        Applications, 166, 113917.
+        https://doi.org/10.1016/j.eswa.2020.113917
+
+        Khan, A. S., et al. (2018). A new Non-Dominated Sorting Grey Wolf Optimizer
+        (NS-GWO) algorithm: Development and application to solve engineering
+        designs and economic constrained emission dispatch problem with integration
+        of wind power. Engineering Applications of Artificial Intelligence, 72,
+        449-467.
+        https://doi.org/10.1016/j.engappai.2018.04.018
         """
         if convergence_exponent <= 0:
             raise ValueError("convergence_exponent must be greater than zero.")
