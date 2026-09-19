@@ -2,6 +2,7 @@ from .ant_colony import AntColony
 from .bee_colony import BeeColony
 from .cma_es import CMAES
 from .genetic_algorithm import GeneticAlgorithm
+from .grey_wolf import GreyWolf
 from .pso import PSO
 from .psogsa import PSOGSA
 
@@ -12,4 +13,5 @@ __all__ = [
     "AntColony",
     "BeeColony",
     "GeneticAlgorithm",
+    "GreyWolf",
 ]
