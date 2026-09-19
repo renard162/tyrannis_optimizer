@@ -36,7 +36,8 @@ class DifferentialEvolution(AlgorithmBase[DEParticle]):
             Scaling factor applied to the differential variation between individuals.
             Larger values increase the magnitude of the generated variations and
             generally favor exploration, while smaller values produce more conservative
-            movements and favor exploitation. The value must be greater than 0.
+            movements and favor exploitation. The value must be greater than 0 and
+            less than or equal to 2.
 
         crossover_rate : float, default=0.9
             Probability of selecting each variable from the mutant vector during
@@ -120,8 +121,8 @@ class DifferentialEvolution(AlgorithmBase[DEParticle]):
         if not np.isfinite(mutation_factor):
             raise ValueError("mutation_factor must be finite.")
 
-        if mutation_factor <= 0:
-            raise ValueError("mutation_factor must be greater than 0.")
+        if not 0 < mutation_factor <= 2:
+            raise ValueError("mutation_factor must be greater than 0 and at most 2.")
 
         if not isinstance(crossover_rate, (int, float, np.number)):
             raise TypeError("crossover_rate must be a number.")
@@ -159,9 +160,7 @@ class DifferentialEvolution(AlgorithmBase[DEParticle]):
             }
 
         self._population[identifier] = DEParticle(
-            identifier=identifier,
-            variables=variables,
-            fitness=fitness,
+            identifier=identifier, variables=variables, fitness=fitness
         )
 
     def delete_particle(self, identifier: str | None) -> None:
@@ -174,11 +173,7 @@ class DifferentialEvolution(AlgorithmBase[DEParticle]):
         if len(self._population) < 4:
             raise ValueError("Differential Evolution requires at least 4 particles.")
 
-    def create_random_cache(
-        self,
-        particle_ids: list[str],
-        initialize: bool,
-    ) -> None:
+    def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
         if initialize:
             for identifier in particle_ids:
                 self._population[identifier].random_cache = {}
@@ -193,11 +188,7 @@ class DifferentialEvolution(AlgorithmBase[DEParticle]):
                 if particle_id != identifier
             ]
 
-            selected_donors = self._rng.choice(
-                donor_ids,
-                size=3,
-                replace=False,
-            )
+            selected_donors = self._rng.choice(donor_ids, size=3, replace=False)
 
             forced_variable = variables[self._rng.integers(0, len(variables))]
 
@@ -223,8 +214,7 @@ class DifferentialEvolution(AlgorithmBase[DEParticle]):
 
         if np.isinf(particle.fitness):
             particle.update(
-                variables=particle.variables,
-                fitness_function=self._fitness_function,
+                variables=particle.variables, fitness_function=self._fitness_function
             )
 
         return particle
@@ -262,19 +252,14 @@ class DifferentialEvolution(AlgorithmBase[DEParticle]):
                     * (donor_2.variables[variable] - donor_3.variables[variable])
                 )
 
-                candidate_variable = np.clip(
-                    candidate_variable,
-                    lower,
-                    upper,
-                )
+                candidate_variable = np.clip(candidate_variable, lower, upper)
             else:
                 candidate_variable = particle.variables[variable]
 
             candidate_variables[variable] = candidate_variable
 
         particle.update(
-            variables=candidate_variables,
-            fitness_function=self._fitness_function,
+            variables=candidate_variables, fitness_function=self._fitness_function
         )
 
         return particle
