@@ -92,13 +92,10 @@ class PSO(AlgorithmBase[PSOParticle]):
         inertia : float or Collection[float], default=0.7
             Inertia weight applied to the particle velocity. When a single numeric
             value is provided, the inertia weight remains constant throughout the
-            optimization. When an ordered collection containing exactly two
-            numbers is provided, the values define the minimum and maximum inertia
-            weights, respectively, and the inertia weight is decreased linearly
-            throughout the optimization.
-
-            The first value of a dynamic inertia range must be smaller than the
-            second value.
+            optimization. When a collection containing exactly two numbers is
+            provided, the smaller and larger values define the minimum and maximum
+            inertia weights, respectively, and the inertia weight is decreased
+            linearly throughout the optimization.
 
         cognitive_coefficient : float, default=1.5
             Coefficient controlling the influence of each particle's personal best
@@ -117,26 +114,43 @@ class PSO(AlgorithmBase[PSOParticle]):
             the contraction of the velocity update in this formulation.
 
             This option requires the sum of ``cognitive_coefficient`` and
-            ``social_coefficient`` to be greater than or equal to 4. A commonly
+            ``social_coefficient`` to be strictly greater than 4. A commonly
             used configuration is ``cognitive_coefficient=2.05`` and
             ``social_coefficient=2.05``, resulting in ``phi=4.10`` and a
             constriction factor of approximately 0.7298.
 
         Notes
         -----
-        When dynamic inertia is enabled, the inertia weight is linearly decreased
-        according to the optimization progress. The current iteration is clamped
-        to a minimum of 1 because iteration 0 is reserved for environment
-        preparation. The schedule therefore uses ``max(actual_iter, 1)`` and the
-        total number of iterations provided by the optimization context.
+        In the standard PSO formulation, each particle updates its velocity from
+        three components: its previous velocity, the displacement toward its own
+        best-known position, and the displacement toward the best-known position
+        of the swarm. The resulting velocity is then used to update the particle
+        position:
+
+        ``v(t+1) = w*v(t) + c1*r1*(p(t)-x(t)) + c2*r2*(g(t)-x(t))``
+
+        ``x(t+1) = x(t) + v(t+1)``
+
+        where ``w`` is the inertia weight, ``c1`` and ``c2`` are the cognitive and
+        social coefficients, ``r1`` and ``r2`` are random values, ``p(t)`` is the
+        particle's best-known position, and ``g(t)`` is the best-known position of
+        the swarm. The personal best is updated only when the particle reaches a
+        position with a better objective value.
+
+        When dynamic inertia is used, the inertia weight decreases linearly from
+        the maximum specified value at the beginning of the optimization to the
+        minimum specified value at the final iteration. Larger inertia values
+        generally favor broader exploration of the search space, while smaller
+        values progressively emphasize local refinement.
 
         When ``constriction_factor`` is enabled, the constriction coefficient is
         calculated as
 
         ``chi = 2 / abs(2 - phi - sqrt(phi**2 - 4 * phi))``
 
-        where ``phi`` is the sum of the cognitive and social coefficients. The
-        coefficient is then multiplied by the complete velocity update:
+        where ``phi`` is the sum of the cognitive and social coefficients and must
+        be strictly greater than 4. The coefficient is then applied to the complete
+        velocity update:
 
         ``v(t+1) = chi * [v(t) + c1*r1*(p(t)-x(t)) + c2*r2*(g(t)-x(t))]``
 
@@ -170,11 +184,10 @@ class PSO(AlgorithmBase[PSOParticle]):
         on Evolutionary Computation, 6(1), 58-73.
         https://doi.org/10.1109/4235.985692
         """
-        if constriction_factor and (cognitive_coefficient + social_coefficient < 4):
+        if constriction_factor and (cognitive_coefficient + social_coefficient <= 4):
             raise ValueError(
                 "The sum of cognitive_coefficient and social_coefficient "
-                "must be greater than or equal to 4 to use the constriction "
-                "factor."
+                "must be greater than 4 to use the constriction factor."
             )
 
         if isinstance(inertia, Collection) and not isinstance(inertia, (str, bytes)):
@@ -258,10 +271,14 @@ class PSO(AlgorithmBase[PSOParticle]):
             return
 
         minimum_inertia, maximum_inertia = self._inertia_bounds
-        iteration = max(actual_iter, 1)
 
+        if actual_iter == 0 or self._max_iterations == 1:
+            self._inertia = maximum_inertia
+            return
+
+        progress = (actual_iter - 1) / (self._max_iterations - 1)
         self._inertia = maximum_inertia - (
-            (maximum_inertia - minimum_inertia) * (iteration / self._max_iterations)
+            (maximum_inertia - minimum_inertia) * progress
         )
 
     def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
@@ -369,9 +386,7 @@ class PSO(AlgorithmBase[PSOParticle]):
                     f"Particle '{particle.identifier}' has no candidate fitness."
                 )
 
-            particle.consolidate(
-                consolidate_new=bool(particle.candidate_fitness < particle.fitness)
-            )
+            particle.consolidate(consolidate_new=True)
             particle.update_personal_best()
 
         self.update_solution_state()
