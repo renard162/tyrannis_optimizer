@@ -23,71 +23,148 @@ class WhaleAlgorithm(AlgorithmBase[WhaleParticle]):
         """
         Whale Optimization Algorithm.
 
-        WOA is a population-based, derivative-free optimization algorithm inspired
-        by the hunting behavior of humpback whales. The search alternates between
-        exploration around randomly selected whales, exploitation around the best
-        solution, and a spiral-shaped movement that models the bubble-net feeding
-        strategy.
+        WOA is a population-based, derivative-free optimization algorithm inspired by
+        the bubble-net hunting behavior of humpback whales. The algorithm combines
+        global exploration through searches around randomly selected solutions with
+        local exploitation around the best solution found so far, while also using a
+        spiral movement to model the bubble-net feeding strategy. A nonlinear
+        convergence factor controls the transition between exploration and exploitation,
+        allowing the duration of the exploratory phase to be adjusted through a
+        convergence exponent.
 
         Parameters
         ----------
         spiral_coefficient : float, default=1.0
-            Positive coefficient controlling the shape of the spiral movement used
-            during the bubble-net feeding phase.
+            Positive coefficient controlling the shape of the logarithmic spiral used
+            during the bubble-net feeding phase. Larger values produce stronger radial
+            expansion or contraction around the best solution, while smaller values
+            produce a tighter spiral. A value of 1.0 is the conventional choice in WOA
+            formulations.
+
         convergence_exponent : float, default=1.0
-            Positive exponent controlling the nonlinear convergence of the search.
-            A value of 1.0 produces the linear convergence factor of the original
-            WOA. Values greater than 1.0 maintain a higher exploration pressure
-            for longer, while values between 0 and 1.0 accelerate convergence
-            toward exploitation.
+            Positive exponent controlling the nonlinear decrease of the convergence
+            factor. A value of 1.0 reproduces the linear convergence schedule of the
+            original WOA. Values greater than 1.0 keep the convergence factor larger
+            for a greater portion of the optimization, extending the exploratory phase
+            before stronger exploitation begins. Values between 0 and 1.0 cause the
+            convergence factor to decrease more rapidly, favoring exploitation earlier
+            in the optimization.
 
         Notes
         -----
-        WOA maintains the best solution found by the population as the reference
-        position of the prey. For each whale, a random value ``p`` selects between
-        the shrinking-encircling/search behavior and the spiral movement.
+        WOA models each candidate solution as a whale and treats the best solution
+        found by the population as the estimated position of the prey. At each
+        iteration, whales update their positions according to one of three hunting
+        behaviors: shrinking encircling, spiral bubble-net feeding, or search for prey.
 
-        When ``p < 0.5``, the coefficient
+        The balance between exploration and exploitation is controlled by the
+        convergence factor ``a`` and the coefficient
 
             A = 2 * a * r1 - a
 
-        determines whether the whale performs exploitation or exploration. When
-        ``|A| < 1``, the whale moves toward the best solution according to
+        where ``r1`` is a random value in ``[0, 1]``. The coefficient therefore lies
+        in ``[-a, a]``. A second random coefficient is defined as
+
+            C = 2 * r2
+
+        where ``r2`` is independently sampled from ``[0, 1]``.
+
+        When the randomly selected probability ``p`` is smaller than 0.5, the whale
+        uses the encircling or search behavior. If ``|A| < 1``, the current whale
+        moves toward the best solution according to
 
             D = |C * X_best - X|
 
             X(t + 1) = X_best - A * D
 
-        where ``C = 2 * r2``. When ``|A| >= 1``, a randomly selected whale is used
-        instead of the best solution:
+        This shrinking-encircling behavior progressively concentrates the population
+        around promising regions of the search space as ``a`` decreases.
+
+        When ``p < 0.5`` and ``|A| >= 1``, the whale instead uses a randomly selected
+        solution as its reference:
 
             D = |C * X_random - X|
 
             X(t + 1) = X_random - A * D
 
-        When ``p >= 0.5``, the whale follows the spiral movement:
+        Using a randomly selected whale prevents the search from being restricted to
+        the current best solution and provides the main exploration mechanism of WOA.
+        The condition ``|A| >= 1`` is progressively less likely as the convergence
+        factor decreases.
 
-            D = |X_best - X|
+        When ``p >= 0.5``, the whale performs the spiral bubble-net movement around
+        the best solution. The distance to the best solution is calculated as
 
-            X(t + 1) = D * exp(b * l) * cos(2 * pi * l) + X_best
+            D' = |X_best - X|
+
+        and the new position is obtained from
+
+            X(t + 1) = D' * exp(b * l) * cos(2 * pi * l) + X_best
 
         where ``b`` is ``spiral_coefficient`` and ``l`` is uniformly sampled from
-        ``[-1, 1]``.
+        ``[-1, 1]``. The spiral movement provides a local search mechanism around the
+        current best solution while allowing the search trajectory to vary between
+        iterations.
 
-        The convergence parameter ``a`` decreases nonlinearly from 2 to 0 according
-        to
+        The convergence factor is defined by the nonlinear schedule
 
             a(t) = 2 * (1 - (t / T) ** p)
 
-        where ``p`` is ``convergence_exponent`` and ``T`` is the maximum number of
-        iterations. Iteration 0 is reserved for initialization and therefore uses
-        ``a = 2``.
+        where ``T`` is the total number of optimization iterations and ``p`` is
+        ``convergence_exponent``. The factor starts at 2 and decreases to 0 as the
+        optimization progresses. With ``p = 1``, the schedule is linear and corresponds
+        to the original WOA formulation. With ``p > 1``, the factor remains relatively
+        large during the early and middle stages of the optimization and decreases
+        more sharply toward the end, extending the exploratory regime. With
+        ``0 < p < 1``, the factor decreases more rapidly at the beginning and remains
+        closer to zero later, shifting the exploration-exploitation transition toward
+        earlier iterations.
+
+        The choice of ``convergence_exponent`` therefore affects the temporal
+        distribution of the search effort rather than the dimensional scale of the
+        decision variables. Values greater than 1 can be useful when maintaining
+        population diversity and global exploration for longer is desirable, whereas
+        values below 1 can be used when faster concentration around promising
+        solutions is preferred. The default ``p = 1`` preserves the behavior of the
+        classical WOA and provides a natural baseline for tuning the nonlinear
+        schedule.
+
+        The algorithm is intended for continuous optimization problems and does not
+        require gradient information. The population size determines the diversity
+        available to the exploration mechanism, while the number of iterations
+        determines the duration over which the convergence factor transitions from
+        exploration toward exploitation. Larger populations can provide broader
+        coverage of high-dimensional or multimodal search spaces, while additional
+        iterations allow the nonlinear convergence schedule to complete its transition.
 
         References
         ----------
         Mirjalili, S., & Lewis, A. (2016). The Whale Optimization Algorithm.
         Advances in Engineering Software, 95, 51-67.
         https://doi.org/10.1016/j.advengsoft.2016.01.008
+
+        Yang, Q., Li, X., Yang, T., Wu, H., & Zhang, L. (2025). An Improved Whale
+        Optimization Algorithm for the Clean Production Transformation of Automotive
+        Body Painting. Biomimetics, 10(5), 273.
+        https://doi.org/10.3390/biomimetics10050273
+
+        Zhong, M., & Long, W. (2017). Whale optimization algorithm with nonlinear
+        control parameter. MATEC Web of Conferences, 139, 00157.
+        https://doi.org/10.1051/matecconf/201713900157
+
+        Hussien, A. G., et al. (2019). A comprehensive survey: Whale Optimization
+        Algorithm and its applications. Swarm and Evolutionary Computation, 48, 1-24.
+        https://doi.org/10.1016/j.swevo.2019.03.004
+
+        Yuan, X., Miao, Z., Liu, Z., Yan, Z., & Zhou, F. (2020). Multi-Strategy
+        Ensemble Whale Optimization Algorithm and Its Application to Analog Circuits
+        Intelligent Fault Diagnosis. Applied Sciences, 10(11), 3667.
+        https://doi.org/10.3390/app10113667
+
+        Liu, L., & Zhang, R. (2022). Multistrategy Improved Whale Optimization
+        Algorithm and Its Application. Computational Intelligence and Neuroscience,
+        2022, 3418269.
+        https://doi.org/10.1155/2022/3418269
         """
         if not isinstance(spiral_coefficient, (int, float, np.number)):
             raise TypeError("spiral_coefficient must be a number.")
