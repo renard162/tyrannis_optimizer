@@ -296,8 +296,9 @@ class GSA(AlgorithmBase[GSAParticle]):
             self._gravitational_constant = self._g_zero
             return
 
+        algorithm_iter = actual_iter - 1
         self._gravitational_constant = self._g_zero * np.exp(
-            -self._alpha * actual_iter / self._max_iterations
+            -self._alpha * algorithm_iter / self._max_iterations
         )
 
     def create_random_cache(
@@ -496,5 +497,5 @@ class GSA(AlgorithmBase[GSAParticle]):
                 particle.consolidate(consolidate_new=True)
 
         self._update_masses()
-        self._update_k_best(actual_iter + 1)
+        self._update_k_best(actual_iter)
         self.update_solution_state()
