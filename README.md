@@ -57,6 +57,7 @@ Algorithms are population-based metaheuristics used to search for a minimum with
 | Import | Description |
 | --- | --- |
 | `PSO` | Particle Swarm Optimization for population-based search. |
+| `GSA` | Gravitational Search Algorithm using gravitational interactions between candidate solutions to guide population-based search. |
 | `PSOGSA` | Particle Swarm Optimization and Gravitational Search Algorithm for hybrid population-based search. |
 | `GeneticAlgorithm` | Real-coded Genetic Algorithm for continuous optimization. |
 | `AntColony` | Ant Colony Optimization for Continuous Domains (ACOR), which uses an archive of continuous solutions to guide the search. |
@@ -217,10 +218,6 @@ Tyrannis is currently in the **alpha stage of development**. The core architectu
 The roadmap below lists capabilities that are **not yet part of the current public API** and are planned for future releases.
 
 ### Roadmap
-
-#### Algorithms
-
-* GSA — Gravitational Search Algorithm
 
 #### Spaces
 
