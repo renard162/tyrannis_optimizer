@@ -15,7 +15,11 @@ class GreyWolfParticle(ParticleBase):
 class GreyWolf(AlgorithmBase[GreyWolfParticle]):
     """Grey Wolf Optimization algorithm."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        convergence_exponent: float = 1,
+        exploration_enhanced: bool = True,
+    ) -> None:
         """
         Grey Wolf Optimization (GWO).
 
@@ -24,11 +28,28 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
         solutions in the population are represented by alpha, beta, and delta
         wolves and guide the remaining wolves during the search.
 
+        Parameters
+        ----------
+        convergence_exponent : float, default=1
+            Exponent controlling the nonlinear convergence schedule of the
+            parameter ``a``. The parameter is calculated as
+
+                a = 2 * (1 - (t / T) ** convergence_exponent)
+
+            where ``t`` is the current iteration and ``T`` is the maximum
+            number of iterations. A value of ``1`` produces the linear
+            convergence schedule of the original GWO.
+
+        exploration_enhanced : bool, default=True
+            Whether to use the exploration-enhanced position update proposed
+            by EEGWO. When ``False``, the original GWO position update based
+            exclusively on alpha, beta, and delta wolves is used.
+
         Notes
         -----
-        The algorithm uses the positions of the alpha, beta, and delta wolves
-        to generate the next position of every wolf. For each leader, the
-        distance between the current wolf and the leader is calculated as
+        The original GWO uses the positions of the alpha, beta, and delta
+        wolves to generate the next position of every wolf. For each leader,
+        the distance between the current wolf and the leader is calculated as
 
             D = |C * X_leader - X|
 
@@ -36,21 +57,33 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
 
             X_leader - A * D
 
-        where ``A = 2 * a * r1 - a`` and ``C = 2 * r2``. The parameter ``a``
-        decreases linearly from 2 to 0 throughout the optimization, causing
-        the search to transition from exploration to exploitation.
+        where ``A = 2 * a * r1 - a`` and ``C = 2 * r2``.
 
-        The final candidate position is the arithmetic mean of the three
-        positions generated from alpha, beta, and delta. Candidate variables
-        are clipped to the configured search boundaries before their fitness
-        is evaluated.
+        When ``exploration_enhanced`` is enabled, the position update is
+        replaced by the exploration-enhanced equation proposed by EEGWO. An
+        additional individual is randomly selected from the population and
+        contributes a direction based on the difference between its position
+        and the current wolf position. The published EEGWO coefficients are
+        ``b1 = 0.1`` and ``b2 = 0.9``.
 
         References
         ----------
         Mirjalili, S., Mirjalili, S. M., & Lewis, A. (2014). Grey Wolf
         Optimizer. Advances in Engineering Software, 69, 46-61.
         https://doi.org/10.1016/j.advengsoft.2013.12.007
+
+        Long, W., Jiao, J., Liang, X., & Cai, S. (2018). An
+        exploration-enhanced grey wolf optimizer to solve high-dimensional
+        numerical optimization. Engineering Applications of Artificial
+        Intelligence, 68, 63-80.
+        https://doi.org/10.1016/j.engappai.2017.10.024
         """
+        if convergence_exponent <= 0:
+            raise ValueError("convergence_exponent must be greater than zero.")
+
+        self._convergence_exponent = convergence_exponent
+        self._exploration_enhanced = exploration_enhanced
+
         self._a = 0.0
         self._alpha: str | None = None
         self._beta: str | None = None
@@ -105,8 +138,9 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
             return
 
         iteration = min(max(actual_iter, 0), self._max_iterations)
+        progress = iteration / self._max_iterations
 
-        self._a = 2.0 - (2.0 * iteration / self._max_iterations)
+        self._a = 2.0 * (1.0 - progress**self._convergence_exponent)
 
     def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
         for identifier in particle_ids:
@@ -117,6 +151,14 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
                     for leader in ("alpha", "beta", "delta"):
                         cache[f"{variable}-{leader}-r1"] = self._rng.random()
                         cache[f"{variable}-{leader}-r2"] = self._rng.random()
+
+                if self._exploration_enhanced:
+                    cache["r3"] = self._rng.random()
+                    cache["r4"] = self._rng.random()
+                    cache["random_particle"] = self._rng.integers(
+                        0,
+                        len(self._population),
+                    )
 
             self._population[identifier].random_cache = cache
 
@@ -158,6 +200,13 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
             "delta": self._population[self._delta],
         }
 
+        random_particle = None
+
+        if self._exploration_enhanced:
+            random_index = int(particle.random_cache["random_particle"])
+            random_identifier = list(self._population)[random_index]
+            random_particle = self._population[random_identifier]
+
         new_variables: dict[str, float] = {}
 
         for variable, (lower, upper) in self._boundaries.items():
@@ -179,7 +228,24 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
 
                 leader_positions.append(leader_position)
 
-            variable_value = float(np.mean(leader_positions))
+            leader_position = float(np.mean(leader_positions))
+
+            if self._exploration_enhanced:
+                if random_particle is None:
+                    raise RuntimeError("Random particle has not been initialized.")
+
+                random_direction = (
+                    random_particle.variables[variable] - current_variable
+                )
+
+                r3 = particle.random_cache["r3"]
+                r4 = particle.random_cache["r4"]
+
+                variable_value = (
+                    0.1 * r3 * leader_position + 0.9 * r4 * random_direction
+                )
+            else:
+                variable_value = leader_position
 
             new_variables[variable] = float(np.clip(variable_value, lower, upper))
 
