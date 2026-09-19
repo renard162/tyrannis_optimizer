@@ -72,7 +72,7 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
         alpha: float = 20.0,
         r_norm: float = 2.0,
         r_power: float = 1.0,
-        k_agents_percent: float = 0.0,
+        k_agents_percent: float = 1.0,
     ) -> None:
         """
         Particle Swarm Optimization and Gravitational Search Algorithm (PSOGSA).
@@ -115,12 +115,13 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
             Larger values cause the influence of distant particles to decrease
             more rapidly.
 
-        k_agents_percent : float, default=0.0
-            Minimum fraction of the population considered in the gravitational
-            interaction. The value must be between 0 and 1. The effective minimum
-            is always one particle, so values below the fraction corresponding to
-            one particle have no additional effect. A value of 0 preserves the
-            minimum number of agents of the original PSOGSA.
+        k_agents_percent : float, default=1.0
+            Minimum fraction of the population retained as gravitational attractors
+            as the search progresses. The value must be between 0 and 1. The
+            default value of 1 keeps the entire population participating in the
+            gravitational interaction, reproducing the original PSOGSA formulation.
+            Lower values progressively restrict the interaction to the best agents,
+            extending the original formulation with the Kbest strategy of GSA.
 
         Notes
         -----
@@ -155,12 +156,12 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
         ``r_power`` determines how strongly the interaction decreases with distance.
         The conventional configuration uses ``r_norm=2`` and ``r_power=1``.
 
-        The number of particles contributing to the gravitational interaction
-        decreases during the optimization. This progressively concentrates the
-        gravitational search on the most relevant solutions. ``k_agents_percent``
-        can be used to impose a lower bound on this population fraction, which
-        can help preserve broader exploration during later iterations. The
-        effective lower bound is always at least one particle.
+        In the original PSOGSA formulation, all particles contribute to the
+        gravitational interaction throughout the optimization. This behavior is
+        preserved by the default ``k_agents_percent=1``. Lower values enable a
+        GSA-inspired Kbest strategy in which the set of gravitational attractors
+        progressively decreases toward the specified minimum population fraction,
+        concentrating the gravitational interaction on the best solutions.
 
         PSOGSA is designed for continuous optimization and can be applied to
         nonlinear, non-convex, multimodal, and derivative-free objective
@@ -218,8 +219,8 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
         if alpha < 0:
             raise ValueError("alpha must be greater than or equal to 0.")
 
-        if r_norm == 0:
-            raise ValueError("r_norm cannot be zero.")
+        if r_norm < 1:
+            raise ValueError("r_norm must be greater than or equal to 1.")
 
         if r_power <= 0:
             raise ValueError("r_power must be greater than 0.")
@@ -323,15 +324,12 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
             self._gravitational_constant = self._g_zero
             return
 
+        algorithm_iter = actual_iter - 1
         self._gravitational_constant = self._g_zero * np.exp(
-            -self._alpha * actual_iter / self._max_iterations
+            -self._alpha * algorithm_iter / self._max_iterations
         )
 
-    def create_random_cache(
-        self,
-        particle_ids: list[str],
-        initialize: bool,
-    ) -> None:
+    def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
         for particle_id in particle_ids:
             cache: dict[str, Serializable] = {}
 
@@ -356,8 +354,7 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
 
         if np.isinf(particle.fitness):
             particle.update(
-                variables=particle.variables,
-                fitness_function=self._fitness_function,
+                variables=particle.variables, fitness_function=self._fitness_function
             )
 
         return particle
@@ -367,10 +364,7 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
         particle.consolidate(consolidate_new=True)
         return particle
 
-    def _calculate_acceleration(
-        self,
-        particle: PSOGSAParticle,
-    ) -> dict[str, float]:
+    def _calculate_acceleration(self, particle: PSOGSAParticle) -> dict[str, float]:
         if self._gravitational_constant is None:
             raise RuntimeError("The gravitational constant has not been initialized.")
 
@@ -456,8 +450,7 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
         particle.acceleration = acceleration
 
         particle.update(
-            variables=new_variables,
-            fitness_function=self._fitness_function,
+            variables=new_variables, fitness_function=self._fitness_function
         )
 
         return particle
@@ -468,36 +461,23 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
         if not particles:
             return
 
-        fitness = np.asarray(
-            [particle.fitness for particle in particles],
-            dtype=float,
-        )
+        fitness = np.asarray([particle.fitness for particle in particles], dtype=float)
 
         finite = np.isfinite(fitness)
 
         if not np.any(finite):
-            masses = np.full(
-                len(particles),
-                1.0 / len(particles),
-            )
+            masses = np.full(len(particles), 1.0 / len(particles))
         else:
             finite_fitness = fitness[finite]
             best_fitness = np.min(finite_fitness)
             worst_fitness = np.max(finite_fitness)
 
             if np.isclose(best_fitness, worst_fitness):
-                masses = np.full(
-                    len(particles),
-                    1.0 / len(particles),
-                )
+                masses = np.full(len(particles), 1.0 / len(particles))
             else:
                 adjusted_fitness = fitness.copy()
 
-                scale = max(
-                    abs(worst_fitness),
-                    abs(best_fitness),
-                    1.0,
-                )
+                scale = max(abs(worst_fitness), abs(best_fitness), 1.0)
 
                 adjusted_fitness[~finite] = worst_fitness + scale
 
@@ -510,10 +490,7 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
                 total_mass = np.sum(masses)
 
                 if not np.isfinite(total_mass) or total_mass <= 0:
-                    masses = np.full(
-                        len(particles),
-                        1.0 / len(particles),
-                    )
+                    masses = np.full(len(particles), 1.0 / len(particles))
                 else:
                     masses /= total_mass
 
@@ -526,10 +503,7 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
             return
 
         population_size = len(self._population)
-        minimum_agents = max(
-            1,
-            int(np.ceil(population_size * self._k_agents_percent)),
-        )
+        minimum_agents = max(1, int(np.ceil(population_size * self._k_agents_percent)))
         progress = min(next_iter, self._max_iterations) / self._max_iterations
         n_agents = int(
             np.ceil(population_size - (population_size - minimum_agents) * progress)
@@ -537,8 +511,7 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
         n_agents = max(minimum_agents, min(population_size, n_agents))
 
         ranked_particles = sorted(
-            self._population.values(),
-            key=lambda particle: particle.fitness,
+            self._population.values(), key=lambda particle: particle.fitness
         )
         self._k_best = tuple(
             particle.identifier for particle in ranked_particles[:n_agents]
@@ -561,5 +534,5 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
                 particle.consolidate(consolidate_new=True)
 
         self._update_masses()
-        self._update_k_best(actual_iter + 1)
+        self._update_k_best(actual_iter)
         self.update_solution_state()
