@@ -18,6 +18,7 @@ class WhaleAlgorithm(AlgorithmBase[WhaleParticle]):
     def __init__(
         self,
         spiral_coefficient: float = 1.0,
+        convergence_exponent: float = 1.0,
     ) -> None:
         """
         Whale Optimization Algorithm.
@@ -33,6 +34,12 @@ class WhaleAlgorithm(AlgorithmBase[WhaleParticle]):
         spiral_coefficient : float, default=1.0
             Positive coefficient controlling the shape of the spiral movement used
             during the bubble-net feeding phase.
+        convergence_exponent : float, default=1.0
+            Positive exponent controlling the nonlinear convergence of the search.
+            A value of 1.0 produces the linear convergence factor of the original
+            WOA. Values greater than 1.0 maintain a higher exploration pressure
+            for longer, while values between 0 and 1.0 accelerate convergence
+            toward exploitation.
 
         Notes
         -----
@@ -67,10 +74,14 @@ class WhaleAlgorithm(AlgorithmBase[WhaleParticle]):
         where ``b`` is ``spiral_coefficient`` and ``l`` is uniformly sampled from
         ``[-1, 1]``.
 
-        The convergence parameter ``a`` decreases linearly from 2 to 0 over the
-        optimization iterations. Iteration 0 is reserved for initialization and
-        therefore uses ``a = 2``; the first optimization iteration uses the first
-        point of the decreasing schedule.
+        The convergence parameter ``a`` decreases nonlinearly from 2 to 0 according
+        to
+
+            a(t) = 2 * (1 - (t / T) ** p)
+
+        where ``p`` is ``convergence_exponent`` and ``T`` is the maximum number of
+        iterations. Iteration 0 is reserved for initialization and therefore uses
+        ``a = 2``.
 
         References
         ----------
@@ -86,12 +97,25 @@ class WhaleAlgorithm(AlgorithmBase[WhaleParticle]):
                 "spiral_coefficient must be a finite number greater than 0."
             )
 
+        if not isinstance(convergence_exponent, (int, float, np.number)):
+            raise TypeError("convergence_exponent must be a number.")
+
+        if not np.isfinite(convergence_exponent) or convergence_exponent <= 0:
+            raise ValueError(
+                "convergence_exponent must be a finite number greater than 0."
+            )
+
         self._spiral_coefficient = float(spiral_coefficient)
+        self._convergence_exponent = float(convergence_exponent)
         self._a = 2.0
 
     @property
     def spiral_coefficient(self) -> float:
         return self._spiral_coefficient
+
+    @property
+    def convergence_exponent(self) -> float:
+        return self._convergence_exponent
 
     @property
     def a(self) -> float:
@@ -132,8 +156,9 @@ class WhaleAlgorithm(AlgorithmBase[WhaleParticle]):
             return
 
         iteration = min(actual_iter, self._max_iterations)
+        progress = iteration / self._max_iterations
 
-        self._a = 2.0 * (1.0 - iteration / self._max_iterations)
+        self._a = 2.0 * (1.0 - progress**self._convergence_exponent)
 
     def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
         for identifier in particle_ids:
