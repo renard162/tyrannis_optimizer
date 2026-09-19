@@ -21,7 +21,7 @@ class WhaleAlgorithm(AlgorithmBase[WhaleParticle]):
         convergence_exponent: float = 1.0,
     ) -> None:
         """
-        Whale Optimization Algorithm.
+        Whale Optimization Algorithm (WOA).
 
         WOA is a population-based, derivative-free optimization algorithm inspired by
         the bubble-net hunting behavior of humpback whales. The algorithm combines
