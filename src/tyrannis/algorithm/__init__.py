@@ -5,6 +5,7 @@ from .genetic_algorithm import GeneticAlgorithm
 from .grey_wolf import GreyWolf
 from .pso import PSO
 from .psogsa import PSOGSA
+from .whale_algorithm import WhaleAlgorithm
 
 __all__ = [
     "CMAES",
@@ -14,4 +15,5 @@ __all__ = [
     "BeeColony",
     "GeneticAlgorithm",
     "GreyWolf",
+    "WhaleAlgorithm",
 ]
