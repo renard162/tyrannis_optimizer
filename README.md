@@ -62,6 +62,7 @@ Algorithms are population-based metaheuristics used to search for a minimum with
 | `AntColony` | Ant Colony Optimization for Continuous Domains (ACOR), which uses an archive of continuous solutions to guide the search. |
 | `BeeColony` | Artificial Bee Colony optimization inspired by the foraging behavior of honey bees. |
 | `GreyWolf` | Grey Wolf Optimization inspired by the social hierarchy and hunting behavior of grey wolves, with optional exploration enhancement through EEGWO. |
+| `WhaleAlgorithm` | Whale Optimization Algorithm inspired by the bubble-net hunting behavior of humpback whales, with nonlinear control of the exploration-exploitation transition. |
 | `CMAES`     | Covariance Matrix Adaptation Evolution Strategy for continuous optimization. |
 
 ### Spaces
@@ -220,7 +221,6 @@ The roadmap below lists capabilities that are **not yet part of the current publ
 
 * GSA — Gravitational Search Algorithm
 * Differential Evolution
-* Whale Optimization Algorithm
 
 #### Spaces
 
