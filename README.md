@@ -63,6 +63,7 @@ Algorithms are population-based metaheuristics used to search for a minimum with
 | `BeeColony` | Artificial Bee Colony optimization inspired by the foraging behavior of honey bees. |
 | `GreyWolf` | Grey Wolf Optimization inspired by the social hierarchy and hunting behavior of grey wolves, with optional exploration enhancement through EEGWO. |
 | `WhaleAlgorithm` | Whale Optimization Algorithm inspired by the bubble-net hunting behavior of humpback whales, with nonlinear control of the exploration-exploitation transition. |
+| `DifferentialEvolution` | Differential Evolution using differential mutation and crossover for continuous optimization. |
 | `CMAES`     | Covariance Matrix Adaptation Evolution Strategy for continuous optimization. |
 
 ### Spaces
@@ -220,7 +221,6 @@ The roadmap below lists capabilities that are **not yet part of the current publ
 #### Algorithms
 
 * GSA — Gravitational Search Algorithm
-* Differential Evolution
 
 #### Spaces
 
