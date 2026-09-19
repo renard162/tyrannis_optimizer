@@ -2,11 +2,7 @@ from copy import deepcopy
 
 import numpy as np
 
-from ..core.algorithm import (
-    FITNESS_UNDEFINED,
-    AlgorithmBase,
-    ParticleBase,
-)
+from ..core.algorithm import FITNESS_UNDEFINED, AlgorithmBase, ParticleBase
 
 
 class CMAESCandidateSolution(ParticleBase):
@@ -50,7 +46,8 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         At each iteration, a population of candidate solutions is sampled from
         the current distribution. The candidates are evaluated and ranked
         according to their objective values, and the best ``mu`` candidates are
-        selected to update the distribution.
+        selected to update the distribution. CMA-ES requires at least two
+        particles, including after population changes during optimization.
 
         The new mean is calculated as a weighted combination of the selected
         candidates, with better-ranked candidates receiving greater weights.
@@ -89,6 +86,10 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
 
         References
         ----------
+        Akimoto, Y., & Hansen, N. (2020). Diagonal Acceleration for Covariance Matrix
+        Adaptation Evolution Strategies. Evolutionary Computation, 28(3), 405-435.
+        https://doi.org/10.1162/evco_a_00260
+
         Hansen, N., & Ostermeier, A. (2001). Completely derandomized self-adaptation
         in evolution strategies. Evolutionary Computation, 9(2), 159-195.
         https://doi.org/10.1162/106365601750190398
@@ -122,6 +123,8 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         self._step_size: float | None = None
         self._p_sigma: np.ndarray | None = None
         self._p_c: np.ndarray | None = None
+        self._gamma_sigma: float = 0.0
+        self._gamma_c: float = 0.0
         self._weights: np.ndarray | None = None
         self._mu: int | None = None
         self._mu_eff: float | None = None
@@ -133,6 +136,7 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         self._chi_n: float | None = None
         self._dimension: int | None = None
         self._variable_names: tuple[str, ...] = ()
+        self._injected_particle_ids: set[str] = set()
 
     @property
     def sigma(self) -> float:
@@ -180,22 +184,53 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         if self._dimension == 0:
             raise ValueError("CMA-ES requires at least one optimization variable.")
 
-        mu = max(1, self._n_particles // 2)
+        n = self._dimension
 
+        self._chi_n = float(np.sqrt(n) * (1.0 - 1.0 / (4.0 * n) + 1.0 / (21.0 * n**2)))
+        self._covariance = np.eye(n)
+        self._p_sigma = np.zeros(n)
+        self._p_c = np.zeros(n)
+        self._gamma_sigma = 0.0
+        self._gamma_c = 0.0
+
+        ranges = np.asarray(
+            [upper - lower for lower, upper in self._boundaries.values()], dtype=float
+        )
+
+        self._step_size = self._initial_sigma * float(np.mean(ranges))
+
+    def _update_strategy_parameters(self) -> None:
+        if self._dimension is None:
+            raise RuntimeError("CMA-ES dimension has not been initialized.")
+
+        population_size = len(self._population)
+
+        if population_size < 2:
+            raise ValueError("CMA-ES requires at least 2 particles.")
+
+        mu = population_size // 2
         indices = np.arange(1, mu + 1, dtype=float)
-        weights = np.log(mu + 0.5) - np.log(indices)
+        weights = np.log((population_size + 1.0) / 2.0) - np.log(indices)
         weights = weights / np.sum(weights)
         mu_eff = float(1.0 / np.sum(weights**2))
 
-        n = len(self._variable_names)
-        cc = (4.0 + mu_eff / n) / (n + 4.0 + 2.0 * mu_eff / n)
+        n = self._dimension
+        matrix_degrees = n * (n + 1.0) / 2.0
+
         cs = (mu_eff + 2.0) / (n + mu_eff + 5.0)
-        c1 = 2.0 / ((n + np.sqrt(2.0)) ** 2 + mu_eff)
-        cmu = min(
-            1.0 - c1,
-            2.0 * (mu_eff - 2.0 + 1.0 / mu_eff) / ((n + 2.0) ** 2 + mu_eff),
+        damps = 1.0 + cs + 2.0 * max(0.0, np.sqrt((mu_eff - 1.0) / (n + 1.0)) - 1.0)
+
+        c1 = 1.0 / (2.0 * (matrix_degrees / n + 1.0) * (n + 1.0) ** 0.75 + mu_eff / 2.0)
+
+        mu_prime = (
+            mu_eff
+            + 1.0 / mu_eff
+            - 2.0
+            + 0.5 * population_size / (population_size + 5.0)
         )
-        damps = 1.0 + 2.0 * max(0.0, np.sqrt((mu_eff - 1.0) / (n + 1.0)) - 1.0) + cs
+
+        cmu = min(mu_prime * c1, 1.0 - c1)
+        cc = np.sqrt(mu_eff * c1) / 2.0
 
         self._mu = mu
         self._weights = weights
@@ -205,18 +240,6 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         self._c1 = float(c1)
         self._cmu = float(cmu)
         self._damps = float(damps)
-        self._chi_n = float(np.sqrt(n) * (1.0 - 1.0 / (4.0 * n) + 1.0 / (21.0 * n**2)))
-
-        self._covariance = np.eye(n)
-        self._p_sigma = np.zeros(n)
-        self._p_c = np.zeros(n)
-
-        ranges = np.asarray(
-            [upper - lower for lower, upper in self._boundaries.values()],
-            dtype=float,
-        )
-
-        self._step_size = self._initial_sigma * float(np.mean(ranges))
 
     def _variables_to_array(self, variables: dict[str, float]) -> np.ndarray:
         return np.asarray(
@@ -227,6 +250,9 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         return {name: float(value) for name, value in zip(self._variable_names, values)}
 
     def pre_iteration(self, actual_iter: int) -> None:
+        if len(self._population) < 2:
+            raise ValueError("CMA-ES requires at least 2 particles.")
+
         center_identifier = self._center_identifier
 
         if actual_iter == 0:
@@ -240,6 +266,11 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
             )
 
             self._mean = np.mean(initial_values, axis=0)
+            self._injected_particle_ids = set()
+        else:
+            self._injected_particle_ids = set(self.new_particles_id)
+
+        self._update_strategy_parameters()
 
         if self._mean is None:
             raise RuntimeError("CMA-ES mean has not been initialized.")
@@ -252,7 +283,11 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         for particle_id in particle_ids:
             cache = {}
 
-            if not initialize and particle_id != self._center_identifier:
+            if (
+                not initialize
+                and particle_id != self._center_identifier
+                and particle_id not in self._injected_particle_ids
+            ):
                 cache["cmaes-z"] = self._rng.standard_normal(self._dimension)
 
             self._population[particle_id].random_cache = cache
@@ -290,6 +325,15 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
             )
 
         if identifier == self._center_identifier:
+            return particle
+
+        if identifier in self._injected_particle_ids:
+            if particle.candidate_variables is None:
+                particle.candidate_variables = dict(particle.variables)
+
+            if particle.candidate_fitness is None:
+                particle.candidate_fitness = particle.fitness
+
             return particle
 
         if self._mean is None or self._covariance is None or self._step_size is None:
@@ -348,6 +392,8 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         step_size = self._step_size
         p_sigma = self._p_sigma
         p_c = self._p_c
+        gamma_sigma = self._gamma_sigma
+        gamma_c = self._gamma_c
         weights = self._weights
         mu = self._mu
         mu_eff = self._mu_eff
@@ -384,6 +430,7 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         old_mean = mean.copy()
 
         selected_variables = []
+
         for particle in selected:
             if particle.candidate_variables is None:
                 raise RuntimeError(
@@ -395,9 +442,8 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
             )
 
         selected_candidates = np.asarray(selected_variables)
+        y_selected = (selected_candidates - old_mean) / step_size
 
-        new_mean = np.sum(weights[:, np.newaxis] * selected_candidates, axis=0)
-        y_w = (new_mean - old_mean) / step_size
         eigenvalues, eigenvectors = np.linalg.eigh(covariance)
         eigenvalues = np.maximum(eigenvalues, np.finfo(float).eps)
 
@@ -405,42 +451,60 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
             eigenvectors @ np.diag(1.0 / np.sqrt(eigenvalues)) @ eigenvectors.T
         )
 
+        injection_limit = np.sqrt(dimension) + 2.0 * dimension / (dimension + 2.0)
+
+        for index, particle in enumerate(selected):
+            if particle.identifier not in self._injected_particle_ids:
+                continue
+
+            mahalanobis_norm = np.linalg.norm(inv_sqrt_covariance @ y_selected[index])
+
+            if mahalanobis_norm > injection_limit:
+                y_selected[index] *= injection_limit / mahalanobis_norm
+
+        y_w = np.sum(weights[:, np.newaxis] * y_selected, axis=0)
+        new_mean = old_mean + step_size * y_w
+
         p_sigma = (1.0 - cs) * p_sigma + np.sqrt(cs * (2.0 - cs) * mu_eff) * (
             inv_sqrt_covariance @ y_w
         )
 
+        gamma_sigma = (1.0 - cs) ** 2 * gamma_sigma + cs * (2.0 - cs)
+
         p_sigma_norm = np.linalg.norm(p_sigma)
 
         h_sigma = int(
-            p_sigma_norm
-            / np.sqrt(1.0 - (1.0 - cs) ** (2.0 * (actual_iter + 1)))
-            / chi_n
-            < 1.4 + 2.0 / (dimension + 1.0)
+            p_sigma_norm**2 / gamma_sigma < (2.0 + 4.0 / (dimension + 1.0)) * dimension
         )
 
         p_c = (1.0 - cc) * p_c + h_sigma * np.sqrt(cc * (2.0 - cc) * mu_eff) * y_w
 
-        y_selected = (selected_candidates - old_mean) / step_size
+        gamma_c = (1.0 - cc) ** 2 * gamma_c + h_sigma * cc * (2.0 - cc)
+
         rank_mu = np.zeros_like(covariance)
 
         for weight, y in zip(weights, y_selected):
             rank_mu += weight * np.outer(y, y)
 
         covariance = (
-            (1.0 - c1 - cmu) * covariance
-            + c1 * (np.outer(p_c, p_c) + (1.0 - h_sigma) * cc * (2.0 - cc) * covariance)
+            (1.0 - c1 * gamma_c - cmu) * covariance
+            + c1 * np.outer(p_c, p_c)
             + cmu * rank_mu
         )
 
         covariance = (covariance + covariance.T) / 2.0
 
-        step_size *= np.exp((cs / damps) * (p_sigma_norm / chi_n - 1.0))
+        step_size *= np.exp(
+            (cs / damps) * (p_sigma_norm / chi_n - np.sqrt(gamma_sigma))
+        )
 
         self._mean = new_mean
         self._covariance = covariance
         self._step_size = step_size
         self._p_sigma = p_sigma
         self._p_c = p_c
+        self._gamma_sigma = gamma_sigma
+        self._gamma_c = gamma_c
 
         center = self._population[center_identifier]
         self._mean_particle = deepcopy(center)
@@ -449,4 +513,5 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         for particle in particles:
             particle.consolidate(consolidate_new=True)
 
+        self._injected_particle_ids = set()
         self.update_solution_state()
