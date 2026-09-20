@@ -169,8 +169,11 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
                 "convergence_exponent must be a finite number greater than 0."
             )
 
+        if not isinstance(exploration_enhanced, (bool, np.bool_)):
+            raise TypeError("exploration_enhanced must be a boolean.")
+
         self._convergence_exponent = float(convergence_exponent)
-        self._exploration_enhanced = exploration_enhanced
+        self._exploration_enhanced = bool(exploration_enhanced)
 
         if self._exploration_enhanced and self._convergence_exponent != 1.5:
             warnings.warn(
