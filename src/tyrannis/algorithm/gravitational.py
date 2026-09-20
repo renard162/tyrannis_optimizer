@@ -96,9 +96,10 @@ class GSA(AlgorithmBase[GSAParticle]):
             while smaller values preserve stronger interactions for more iterations.
 
         r_norm : float, default=2.0
-            Norm used to measure the distance between agents. The default value uses
-            Euclidean distance, while other values change how separation between
-            solutions is measured across the search dimensions.
+            Norm used to measure the distance between agents. It must be greater than
+            or equal to 1. The default value uses Euclidean distance, while other valid
+            values change how separation between solutions is measured across the
+            search dimensions.
 
         r_power : float, default=1.0
             Exponent applied to the distance in the gravitational interaction. Larger
@@ -204,8 +205,8 @@ class GSA(AlgorithmBase[GSAParticle]):
         if alpha < 0:
             raise ValueError("alpha must be greater than or equal to 0.")
 
-        if r_norm == 0:
-            raise ValueError("r_norm cannot be zero.")
+        if r_norm < 1:
+            raise ValueError("r_norm must be greater than or equal to 1.")
 
         if r_power <= 0:
             raise ValueError("r_power must be greater than 0.")
@@ -466,7 +467,10 @@ class GSA(AlgorithmBase[GSAParticle]):
             1,
             int(np.ceil(population_size * self._k_agents_percent)),
         )
-        progress = min(next_iter, self._max_iterations) / self._max_iterations
+
+        last_algorithm_iter = max(self._max_iterations - 1, 1)
+        progress = min(next_iter, self._max_iterations - 1) / last_algorithm_iter
+
         n_agents = int(
             np.ceil(population_size - (population_size - minimum_agents) * progress)
         )
