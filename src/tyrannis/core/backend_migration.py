@@ -507,8 +507,8 @@ class MigrationDriverBase(ABC):
 
         __init__
         -> initialize_context
-        -> start
         -> create_processor_module (for each processor)
+        -> start
         -> [processor execution]
         -> stop
 
