@@ -1,3 +1,6 @@
+import warnings
+from copy import deepcopy
+
 import numpy as np
 
 from ..core.algorithm import (
@@ -16,46 +19,46 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
     """Grey Wolf Optimization algorithm."""
 
     def __init__(
-        self,
-        convergence_exponent: float = 1,
-        exploration_enhanced: bool = False,
+        self, convergence_exponent: float = 1, exploration_enhanced: bool = False
     ) -> None:
         """
         Grey Wolf Optimization (GWO).
 
         GWO is a population-based, derivative-free optimization algorithm inspired
         by the social hierarchy and hunting behavior of grey wolves. The search is
-        guided by the three best solutions in the population, represented by the
-        alpha, beta, and delta wolves, which collectively direct the remaining wolves
-        toward promising regions of the search space. The algorithm uses a
-        time-varying convergence parameter to progressively transition from
-        exploration to exploitation and is designed for continuous optimization
-        problems.
+        guided by the three best solutions found during the optimization, represented
+        by the alpha, beta, and delta wolves, which collectively direct the remaining
+        wolves toward promising regions of the search space. The algorithm uses a
+        time-varying convergence parameter to control the balance between exploration
+        and exploitation and is designed for continuous optimization problems.
 
         Parameters
         ----------
         convergence_exponent : float, default=1
-            Exponent controlling the nonlinear decay of the convergence parameter
-            ``a``. A value of ``1`` produces the linear decay used by the original
-            GWO. Values greater than ``1`` maintain larger values of ``a`` for a
-            greater portion of the optimization, favoring exploration for longer,
-            while values between ``0`` and ``1`` accelerate the initial decay of
-            ``a``, favoring exploitation earlier in the search.
+            Positive finite exponent controlling the nonlinear schedule of the
+            convergence parameter ``a``. With ``exploration_enhanced=False``, a value
+            of ``1`` produces the linear decay used by the original GWO. Values greater
+            than ``1`` maintain larger values of ``a`` for a greater portion of the
+            optimization, while values between ``0`` and ``1`` accelerate the initial
+            decay. With ``exploration_enhanced=True``, the EEGWO convergence schedule
+            is used instead. The published EEGWO formulation uses
+            ``convergence_exponent=1.5``; other values are accepted as configurable
+            extensions and produce a warning indicating the published value.
 
         exploration_enhanced : bool, default=False
-            Whether to use the exploration-enhanced position update proposed by
-            EEGWO. When ``False``, the original GWO position update is used. When
-            ``True``, the search is changed to the EEGWO model, in which an
-            additional randomly selected individual contributes to the movement of
-            each wolf, increasing the influence of population members outside the
-            three leading wolves.
+            Whether to use the exploration-enhanced grey wolf optimizer (EEGWO).
+            When ``False``, the original GWO convergence schedule and position update
+            are used. When ``True``, both the nonlinear EEGWO convergence schedule and
+            its exploration-enhanced position update are enabled. The EEGWO update
+            introduces a randomly selected individual distinct from the current wolf
+            in addition to the alpha, beta, and delta guidance.
 
         Notes
         -----
         GWO models the hunting behavior of a grey wolf pack through a hierarchy in
-        which the alpha, beta, and delta wolves represent the three best solutions
-        and guide the remaining wolves. For each leading wolf, the distance from the
-        current wolf is calculated as
+        which the alpha, beta, and delta wolves represent the three best historical
+        solutions and guide the remaining wolves. For each leading wolf, the distance
+        from the current wolf is calculated as
 
             D = |C * X_leader - X|
 
@@ -68,53 +71,63 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
             A = 2 * a * r1 - a
             C = 2 * r2
 
-        with ``r1`` and ``r2`` uniformly distributed random values in ``[0, 1]``.
+        with ``r1`` and ``r2`` uniformly distributed random values in ``[0, 1]`` for
+        each search dimension and leader.
 
         The parameter ``a`` controls the transition between exploration and
-        exploitation. In the original GWO, it decreases linearly from 2 to 0 as the
-        optimization progresses. This implementation generalizes that schedule using
-        the convergence exponent:
+        exploitation. For the standard GWO mode, this implementation generalizes the
+        original linear schedule using
 
             a = 2 * (1 - (t / T) ** convergence_exponent)
 
-        where ``t`` is the current iteration and ``T`` is the maximum number of
-        iterations.
+        where ``t`` is the zero-based optimization-update index and ``T`` is the
+        maximum number of optimization updates. Thus, the first actual particle
+        update uses ``t = 0`` even though Tyrannis reserves ``actual_iter = 0`` for
+        particle initialization. With ``convergence_exponent = 1``, this reproduces
+        the linear convergence schedule of the original GWO implementation.
 
-        When ``convergence_exponent = 1``, the expression becomes
-
-            a = 2 * (1 - t / T)
-
-        which is the convergence schedule of the original GWO. Increasing the
-        exponent above 1 slows the decay of ``a`` during the early and intermediate
-        stages of the optimization, preserving larger movement coefficients and
-        therefore extending the exploratory phase. Values between 0 and 1 produce
-        the opposite effect, causing ``a`` to decrease more rapidly at the beginning
-        of the optimization and shifting the search toward exploitation earlier.
+        Increasing the exponent above 1 slows the decay of ``a`` during the early and
+        intermediate stages of the GWO optimization, preserving larger movement
+        coefficients and extending the exploratory phase. Values between 0 and 1
+        produce the opposite effect, causing ``a`` to decrease more rapidly at the
+        beginning of the optimization.
 
         For each wolf, the three candidate positions generated from the alpha, beta,
-        and delta wolves are combined to obtain the next position. The resulting
-        position is constrained to the configured search boundaries.
+        and delta wolves are combined to obtain the next position. The three leaders
+        are maintained as historical snapshots independently from the active
+        population, so movement or migration of the particles that originated those
+        solutions does not discard the leadership information. The resulting position
+        is constrained to the configured search boundaries.
 
-        When ``exploration_enhanced`` is enabled, the algorithm uses the
-        exploration-enhanced grey wolf optimizer (EEGWO) position update instead of
-        the original GWO update. In addition to the information provided by the
-        alpha, beta, and delta wolves, an individual randomly selected from the
-        population contributes a search direction based on its position relative to
-        the current wolf. This introduces information from other regions of the
-        population and increases the diversity of the search directions.
+        When ``exploration_enhanced`` is enabled, the algorithm uses EEGWO. Its
+        convergence parameter follows
 
-        The GWO and EEGWO variants therefore share the same grey-wolf hierarchy and
-        convergence mechanism, while differing in how the next position is generated.
-        The standard GWO should be used when the original formulation is desired,
-        whereas enabling ``exploration_enhanced`` changes the position-update model
-        to EEGWO.
+            a = 2 * (1 - ((T - t) / T) ** convergence_exponent)
 
-        GWO is intended for continuous optimization and can be applied to
-        non-linear, non-convex, multi-modal, noisy, and non-differentiable objective
-        functions. The ``convergence_exponent`` should be selected according to the
-        desired exploration-exploitation schedule rather than the dimensionality of
-        the optimization problem, while ``exploration_enhanced`` is a structural
-        choice between the original GWO and the EEGWO position-update strategy.
+        and its published formulation uses ``convergence_exponent = 1.5``. The next
+        position is calculated from the mean of the three GWO candidate positions and
+        a direction defined by another randomly selected wolf:
+
+            X(t + 1) = b1 * r3 * X_mean + b2 * r4 * (X_random - X)
+
+        where ``b1 = 0.1``, ``b2 = 0.9``, ``r3`` and ``r4`` are independently sampled
+        in ``[0, 1]`` for each search dimension, and ``X_random`` is different from
+        the wolf being updated. This additional direction introduces information from
+        outside the three historical leaders and increases population diversity.
+
+        This Tyrannis implementation requires at least five active particles. The
+        original GWO formulation is structurally defined by three distinct leaders;
+        the higher minimum used here is an architectural constraint of Tyrannis that
+        guarantees the three leaders together with at least two additional population
+        members, providing a fixed minimum compatible with population migration and
+        the EEGWO extension.
+
+        GWO is intended for continuous optimization and can be applied to non-linear,
+        non-convex, multi-modal, noisy, and non-differentiable objective functions.
+        The ``convergence_exponent`` should be selected according to the desired
+        exploration-exploitation schedule rather than the dimensionality of the
+        optimization problem, while ``exploration_enhanced`` is a structural choice
+        between the original GWO and EEGWO formulations.
 
         References
         ----------
@@ -148,28 +161,48 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
         449-467.
         https://doi.org/10.1016/j.engappai.2018.04.018
         """
-        if convergence_exponent <= 0:
-            raise ValueError("convergence_exponent must be greater than zero.")
+        if not isinstance(convergence_exponent, (int, float, np.number)):
+            raise TypeError("convergence_exponent must be a number.")
 
-        self._convergence_exponent = convergence_exponent
+        if not np.isfinite(convergence_exponent) or convergence_exponent <= 0:
+            raise ValueError(
+                "convergence_exponent must be a finite number greater than 0."
+            )
+
+        self._convergence_exponent = float(convergence_exponent)
         self._exploration_enhanced = exploration_enhanced
 
+        if self._exploration_enhanced and self._convergence_exponent != 1.5:
+            warnings.warn(
+                "exploration_enhanced=True enables EEGWO mode, whose published "
+                "formulation uses convergence_exponent=1.5; received "
+                f"convergence_exponent={self._convergence_exponent}.",
+                category=UserWarning,
+                stacklevel=2,
+            )
+
         self._a = 0.0
-        self._alpha: str | None = None
-        self._beta: str | None = None
-        self._delta: str | None = None
+        self._alpha: GreyWolfParticle | None = None
+        self._beta: GreyWolfParticle | None = None
+        self._delta: GreyWolfParticle | None = None
 
     @property
     def alpha(self) -> str | None:
-        return self._alpha
+        if self._alpha is None:
+            return None
+        return self._alpha.identifier
 
     @property
     def beta(self) -> str | None:
-        return self._beta
+        if self._beta is None:
+            return None
+        return self._beta.identifier
 
     @property
     def delta(self) -> str | None:
-        return self._delta
+        if self._delta is None:
+            return None
+        return self._delta.identifier
 
     @property
     def a(self) -> float:
@@ -191,9 +224,7 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
             }
 
         self._population[identifier] = GreyWolfParticle(
-            identifier=identifier,
-            variables=variables,
-            fitness=fitness,
+            identifier=identifier, variables=variables, fitness=fitness
         )
 
     def delete_particle(self, identifier: str | None) -> None:
@@ -202,15 +233,62 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
 
         del self._population[identifier]
 
+    def _update_leaders(self) -> None:
+        candidates: dict[str, GreyWolfParticle] = {}
+
+        for leader in (self._alpha, self._beta, self._delta):
+            if leader is not None:
+                candidates[leader.identifier] = deepcopy(leader)
+
+        for particle in self._population.values():
+            if not isinstance(particle, GreyWolfParticle):
+                raise TypeError(
+                    f"Particle '{particle.identifier}' must be an instance "
+                    "of GreyWolfParticle."
+                )
+
+            historical_particle = candidates.get(particle.identifier)
+            if (
+                historical_particle is None
+                or particle.fitness < historical_particle.fitness
+            ):
+                candidates[particle.identifier] = deepcopy(particle)
+
+        leaders = sorted(candidates.values(), key=lambda particle: particle.fitness)
+
+        if len(leaders) < 3:
+            raise RuntimeError(
+                "Grey Wolf Optimization requires three distinct leaders."
+            )
+
+        self._alpha = leaders[0]
+        self._beta = leaders[1]
+        self._delta = leaders[2]
+
     def pre_iteration(self, actual_iter: int) -> None:
+        if len(self._population) < 5:
+            raise ValueError(
+                "Grey Wolf Optimization requires at least 5 active particles "
+                "in Tyrannis."
+            )
+
+        if actual_iter == 0:
+            self._a = 0.0
+            return
+
+        self._update_leaders()
+
         if self._max_iterations <= 0:
             self._a = 0.0
             return
 
-        iteration = min(max(actual_iter, 0), self._max_iterations)
+        iteration = min(max(actual_iter - 1, 0), self._max_iterations - 1)
         progress = iteration / self._max_iterations
 
-        self._a = 2.0 * (1.0 - progress**self._convergence_exponent)
+        if self._exploration_enhanced:
+            self._a = 2.0 * (1.0 - (1.0 - progress) ** self._convergence_exponent)
+        else:
+            self._a = 2.0 * (1.0 - progress**self._convergence_exponent)
 
     def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
         for identifier in particle_ids:
@@ -222,13 +300,18 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
                         cache[f"{variable}-{leader}-r1"] = self._rng.random()
                         cache[f"{variable}-{leader}-r2"] = self._rng.random()
 
+                    if self._exploration_enhanced:
+                        cache[f"{variable}-r3"] = self._rng.random()
+                        cache[f"{variable}-r4"] = self._rng.random()
+
                 if self._exploration_enhanced:
-                    cache["r3"] = self._rng.random()
-                    cache["r4"] = self._rng.random()
-                    cache["random_particle"] = self._rng.integers(
-                        0,
-                        len(self._population),
-                    )
+                    random_identifiers = [
+                        particle_id
+                        for particle_id in self._population
+                        if particle_id != identifier
+                    ]
+                    random_index = int(self._rng.integers(0, len(random_identifiers)))
+                    cache["random_particle"] = random_identifiers[random_index]
 
             self._population[identifier].random_cache = cache
 
@@ -242,8 +325,7 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
 
         if np.isinf(particle.fitness):
             particle.update(
-                variables=particle.variables,
-                fitness_function=self._fitness_function,
+                variables=particle.variables, fitness_function=self._fitness_function
             )
 
         return particle
@@ -265,16 +347,21 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
             raise RuntimeError("Grey wolf leaders have not been initialized.")
 
         leaders = {
-            "alpha": self._population[self._alpha],
-            "beta": self._population[self._beta],
-            "delta": self._population[self._delta],
+            "alpha": self._alpha,
+            "beta": self._beta,
+            "delta": self._delta,
         }
 
         random_particle = None
 
         if self._exploration_enhanced:
-            random_index = int(particle.random_cache["random_particle"])
-            random_identifier = list(self._population)[random_index]
+            random_identifier = str(particle.random_cache["random_particle"])
+
+            if random_identifier == identifier:
+                raise RuntimeError(
+                    "EEGWO random particle must differ from the particle being updated."
+                )
+
             random_particle = self._population[random_identifier]
 
         new_variables: dict[str, float] = {}
@@ -308,8 +395,8 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
                     random_particle.variables[variable] - current_variable
                 )
 
-                r3 = particle.random_cache["r3"]
-                r4 = particle.random_cache["r4"]
+                r3 = particle.random_cache[f"{variable}-r3"]
+                r4 = particle.random_cache[f"{variable}-r4"]
 
                 variable_value = (
                     0.1 * r3 * leader_position + 0.9 * r4 * random_direction
@@ -320,8 +407,7 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
             new_variables[variable] = float(np.clip(variable_value, lower, upper))
 
         particle.update(
-            variables=new_variables,
-            fitness_function=self._fitness_function,
+            variables=new_variables, fitness_function=self._fitness_function
         )
 
         return particle
@@ -343,17 +429,3 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
                 particle.consolidate(consolidate_new=True)
 
         self.update_solution_state()
-
-        particles = sorted(
-            self._population.values(),
-            key=lambda particle: particle.fitness,
-        )
-
-        if len(particles) < 3:
-            raise RuntimeError(
-                "Grey Wolf Optimization requires at least three particles."
-            )
-
-        self._alpha = particles[0].identifier
-        self._beta = particles[1].identifier
-        self._delta = particles[2].identifier
