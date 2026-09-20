@@ -99,11 +99,13 @@ class PSO(AlgorithmBase[PSOParticle]):
 
         cognitive_coefficient : float, default=1.5
             Coefficient controlling the influence of each particle's personal best
-            position on its velocity update.
+            position on its velocity update. It must be a finite number greater
+            than 0.
 
         social_coefficient : float, default=1.5
             Coefficient controlling the influence of the swarm's best-known
-            position on each particle's velocity update.
+            position on each particle's velocity update. It must be a finite
+            number greater than 0.
 
         constriction_factor : bool, default=False
             Whether to use the PSO constriction factor formulation. When enabled,
@@ -184,6 +186,19 @@ class PSO(AlgorithmBase[PSOParticle]):
         on Evolutionary Computation, 6(1), 58-73.
         https://doi.org/10.1109/4235.985692
         """
+        for name, value in (
+            ("cognitive_coefficient", cognitive_coefficient),
+            ("social_coefficient", social_coefficient),
+        ):
+            if not isinstance(value, (int, float, np.number)):
+                raise TypeError(f"{name} must be a number.")
+
+            if not np.isfinite(value):
+                raise ValueError(f"{name} must be finite.")
+
+            if value <= 0:
+                raise ValueError(f"{name} must be greater than 0.")
+
         if constriction_factor and (cognitive_coefficient + social_coefficient <= 4):
             raise ValueError(
                 "The sum of cognitive_coefficient and social_coefficient "
