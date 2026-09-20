@@ -1,33 +1,19 @@
 from collections.abc import Collection
 from copy import deepcopy
+from typing import cast
 
 import numpy as np
+from scipy.linalg import qr
 
 from ..core.algorithm import (
     FITNESS_UNDEFINED,
     AlgorithmBase,
     ParticleBase,
-    Serializable,
 )
 
 
 class ACORParticle(ParticleBase):
     """Particle implementation for the Ant Colony Optimization for Continuous Domain algorithm."""
-
-    def __init__(
-        self,
-        identifier: str,
-        variables: dict[str, float],
-        fitness: np.float64 = FITNESS_UNDEFINED,
-    ) -> None:
-        super().__init__(identifier=identifier, variables=variables, fitness=fitness)
-
-    def __call__(self) -> dict[str, Serializable]:
-        return {
-            "identifier": self._identifier,
-            "variables": self._variables,
-            "fitness": self._fitness,
-        }
 
 
 class AntColony(AlgorithmBase[ACORParticle]):
@@ -38,6 +24,7 @@ class AntColony(AlgorithmBase[ACORParticle]):
         archive_size: int = 10,
         q: float = 0.5,
         xi: float = 0.85,
+        separable: bool = True,
     ) -> None:
         """
         Ant Colony Optimization for Continuous Domains (ACOR).
@@ -47,14 +34,17 @@ class AntColony(AlgorithmBase[ACORParticle]):
         using pheromone values associated with discrete solution components, ACOR
         represents pheromone information through an archive of promising continuous
         solutions and generates new candidate solutions by sampling probability
-        distributions around them.
+        distributions around them. The original formulation can adapt its coordinate
+        system to correlations between decision variables, while Sep-ACOR omits this
+        correlation-handling mechanism for lower computational cost.
 
         Parameters
         ----------
         archive_size : int, default=10
             Number of solutions maintained in the solution archive. The archive stores
             the best solutions found by the colony and provides the probability model
-            used to generate new solutions.
+            used to generate new solutions. ACOR requires at least as many archive
+            solutions as decision variables, while Sep-ACOR requires at least two.
 
         q : float, default=0.5
             Controls the concentration of the probability assigned to solutions in the
@@ -67,6 +57,13 @@ class AntColony(AlgorithmBase[ACORParticle]):
             generate new solutions. Larger values increase the search range around
             archive solutions, while smaller values concentrate the search around them.
 
+        separable : bool, default=True
+            Whether to use the separable ACOR variant (Sep-ACOR). When ``False``, the
+            original ACOR formulation adapts an orthonormal coordinate system to the
+            correlations represented by the solution archive. When ``True``, Sep-ACOR
+            samples the decision variables independently in the original coordinate
+            system, reducing computational cost while ignoring variable correlations.
+
         Notes
         -----
         Ant Colony Optimization for Continuous Domains (ACOR) adapts the main
@@ -76,14 +73,19 @@ class AntColony(AlgorithmBase[ACORParticle]):
         according to solution quality, with better solutions receiving greater
         probability of being selected as references for generating new solutions.
 
-        For each new solution, a solution is selected from the archive according to
-        its rank-based probability. Each decision variable is then sampled from a
-        normal distribution centered on the corresponding variable of the selected
-        solution. The standard deviation of each distribution is calculated from the
-        dispersion of that variable among the solutions in the archive and scaled by
-        ``xi``. Consequently, the search distribution adapts to the concentration of
-        the solutions: dispersed archive solutions produce broader exploration, while
-        concentrated solutions produce more localized search.
+        For each new solution, one archive solution is selected according to its
+        rank-based probability. In the original ACOR formulation, the coordinate
+        system is progressively adapted to the distribution of the archive so that
+        correlations between variables can influence the search. At each construction
+        step, directions farther from the selected reference in the remaining search
+        subspace are more likely to define the next coordinate direction. Gaussian
+        sampling is then performed in the resulting temporary coordinate system.
+
+        When ``separable=True``, Sep-ACOR omits the variable-correlation mechanism.
+        Each decision variable is sampled independently from a normal distribution
+        centered on the corresponding variable of the selected archive solution. The
+        standard deviation is calculated from the dispersion of that variable among
+        the solutions in the archive and scaled by ``xi``.
 
         The parameter ``q`` controls the selection pressure applied to the archive.
         Values that concentrate probability on the best-ranked solutions increase
@@ -91,7 +93,8 @@ class AntColony(AlgorithmBase[ACORParticle]):
         exploration of the solutions stored in the archive.
 
         After new solutions are evaluated, they are combined with the existing archive
-        and the best ``archive_size`` solutions are retained. The archive therefore
+        and the best ``archive_size`` solutions are retained. Ties between solutions
+        with the same objective value are resolved randomly. The archive therefore
         acts as both the memory of the colony and the basis for generating subsequent
         solutions.
 
@@ -101,10 +104,11 @@ class AntColony(AlgorithmBase[ACORParticle]):
         domains. European Journal of Operational Research, 185(3), 1155-1173.
         https://doi.org/10.1016/j.ejor.2006.06.046
 
-        Dorigo, M., & Gambardella, L. M. (1997). Ant colony system: A cooperative
-        learning approach to the traveling salesman problem. IEEE Transactions on
-        Evolutionary Computation, 1(1), 53-66.
-        https://doi.org/10.1109/4235.585892
+        Liao, T., Molina, D., Stützle, T., Montes de Oca, M. A., & Dorigo, M. (2012).
+        An ACO algorithm benchmarked on the BBOB noiseless function testbed.
+        Proceedings of the 14th Annual Conference Companion on Genetic and
+        Evolutionary Computation, 159-166.
+        https://doi.org/10.1145/2330784.2330809
 
         Afshar, A., & Madadgar, S. (2008). Ant Colony Optimization for Continuous
         Domains: Application to Reservoir Operation Problems. 2008 Eighth
@@ -135,14 +139,18 @@ class AntColony(AlgorithmBase[ACORParticle]):
         if not np.isfinite(xi) or xi <= 0:
             raise ValueError("xi must be a finite number greater than 0.")
 
+        if not isinstance(separable, (bool, np.bool_)):
+            raise TypeError("separable must be a boolean.")
+
         self._archive_size = int(archive_size)
         self._q = float(q)
         self._xi = float(xi)
+        self._separable = bool(separable)
 
         self._solution_archive: list[tuple[dict[str, float], np.float64]] = []
         self._archive_probabilities: np.ndarray | None = None
 
-        self._official_particle_ids: list[str] = []
+        self._initial_archive_particle_ids: list[str] = []
         self._temporary_particle_ids: list[str] = []
 
     @property
@@ -156,6 +164,10 @@ class AntColony(AlgorithmBase[ACORParticle]):
     @property
     def xi(self) -> float:
         return self._xi
+
+    @property
+    def separable(self) -> bool:
+        return self._separable
 
     def create_particle(
         self,
@@ -197,30 +209,72 @@ class AntColony(AlgorithmBase[ACORParticle]):
 
         return identifiers
 
-    def pre_iteration(self, actual_iter: int) -> None:
-        if actual_iter == 0:
-            self._official_particle_ids = list(self._population)
-            missing = max(0, self._archive_size - len(self._official_particle_ids))
-            self._temporary_particle_ids = self._create_temporary_particle_ids(missing)
+    def _validate_archive_size(self) -> None:
+        if self._separable:
+            return
 
-            for identifier in self._temporary_particle_ids:
-                self.create_particle(identifier=identifier)
+        n_dimensions = len(self._boundaries)
+
+        if self._archive_size < n_dimensions:
+            raise ValueError(
+                "archive_size must be greater than or equal to the number of "
+                "decision variables when separable=False."
+            )
+
+    def pre_iteration(self, actual_iter: int) -> None:
+        self._validate_archive_size()
+
+        if actual_iter == 0:
+            population_ids = list(self._population)
+
+            if len(population_ids) >= self._archive_size:
+                selected = self._rng.choice(
+                    population_ids, size=self._archive_size, replace=False
+                )
+
+                self._initial_archive_particle_ids = [
+                    str(identifier) for identifier in selected
+                ]
+                self._temporary_particle_ids = []
+            else:
+                missing = self._archive_size - len(population_ids)
+
+                self._temporary_particle_ids = self._create_temporary_particle_ids(
+                    missing
+                )
+                self._initial_archive_particle_ids = [
+                    *population_ids,
+                    *self._temporary_particle_ids,
+                ]
+
+                for identifier in self._temporary_particle_ids:
+                    self.create_particle(identifier=identifier)
 
             return
 
-        if actual_iter == 1:
-            for identifier in self._official_particle_ids:
-                self.delete_particle(identifier)
-                self.create_particle(identifier=identifier)
+        migrated_particles = [
+            particle
+            for particle in self._population.values()
+            if particle.new_particle and np.isfinite(particle.fitness)
+        ]
 
+        if migrated_particles:
+            self._update_solution_archive(migrated_particles)
+            self.update_solution_state()
+
+        if self._archive_probabilities is None:
             self._archive_probabilities = self._calculate_archive_probabilities()
 
     def _calculate_archive_probabilities(self) -> np.ndarray:
         positions = np.arange(self._archive_size, dtype=float)
+
         weights = np.exp(-(positions**2) / (2 * self._q**2 * self._archive_size**2))
+
         return weights / np.sum(weights)
 
     def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
+        variables = tuple(self._boundaries)
+
         for identifier in particle_ids:
             particle = self._population[identifier]
             particle.random_cache = {}
@@ -235,8 +289,21 @@ class AntColony(AlgorithmBase[ACORParticle]):
                 self._rng.choice(self._archive_size, p=self._archive_probabilities)
             )
 
-            for variable in self._boundaries:
+            for variable in variables:
                 particle.random_cache[f"{variable}-normal"] = float(self._rng.normal())
+
+            if self._separable:
+                continue
+
+            for step in range(len(variables)):
+                particle.random_cache[f"direction-{step}-uniform"] = float(
+                    self._rng.random()
+                )
+
+                for variable in variables:
+                    particle.random_cache[f"fallback-{step}-{variable}"] = float(
+                        self._rng.normal()
+                    )
 
     def initialize_particle(self, identifier: str) -> ACORParticle:
         particle = self._population[identifier]
@@ -268,6 +335,180 @@ class AntColony(AlgorithmBase[ACORParticle]):
 
         return self._xi * distances / (self._archive_size - 1)
 
+    def _generate_separable_solution(self, particle: ACORParticle) -> dict[str, float]:
+        archive_index = particle.random_cache["archive-index"]
+        reference_variables = self._solution_archive[archive_index][0]
+
+        new_variables = {}
+
+        for variable, (lower, upper) in self._boundaries.items():
+            normal_value = particle.random_cache[f"{variable}-normal"]
+
+            sigma = self._calculate_sigma(
+                archive_index=archive_index, variable=variable
+            )
+
+            value = reference_variables[variable] + sigma * normal_value
+
+            new_variables[variable] = float(np.clip(value, lower, upper))
+
+        return new_variables
+
+    @staticmethod
+    def _project_to_remaining_subspace(
+        vectors: np.ndarray, basis: np.ndarray
+    ) -> np.ndarray:
+        if basis.shape[1] == 0:
+            return vectors.copy()
+
+        return vectors - (vectors @ basis) @ basis.T
+
+    @staticmethod
+    def _orthonormalize(basis: np.ndarray, direction: np.ndarray) -> np.ndarray:
+        if basis.shape[1] == 0:
+            input_matrix = direction[:, np.newaxis]
+        else:
+            input_matrix = np.column_stack((basis, direction))
+
+        q_matrix, r_matrix = cast(
+            tuple[np.ndarray, np.ndarray],
+            qr(input_matrix, mode="economic", pivoting=False, check_finite=False),
+        )
+
+        diagonal = np.diag(r_matrix)
+        signs = np.where(diagonal < 0, -1.0, 1.0)
+
+        return q_matrix * signs[np.newaxis, :]
+
+    def _fallback_direction(
+        self,
+        particle: ACORParticle,
+        step: int,
+        variables: tuple[str, ...],
+        basis: np.ndarray,
+    ) -> np.ndarray:
+        random_direction = np.asarray(
+            [
+                particle.random_cache[f"fallback-{step}-{variable}"]
+                for variable in variables
+            ],
+            dtype=float,
+        )
+
+        projected = self._project_to_remaining_subspace(
+            random_direction[np.newaxis, :], basis
+        )[0]
+
+        tolerance = np.finfo(float).eps * max(1, len(variables)) * 100
+
+        if np.linalg.norm(projected) > tolerance:
+            return projected
+
+        for index in range(len(variables)):
+            canonical = np.zeros(len(variables), dtype=float)
+            canonical[index] = 1.0
+
+            projected = self._project_to_remaining_subspace(
+                canonical[np.newaxis, :], basis
+            )[0]
+
+            if np.linalg.norm(projected) > tolerance:
+                return projected
+
+        raise RuntimeError("Unable to construct an ACOR coordinate direction.")
+
+    @staticmethod
+    def _select_direction_index(
+        distances: np.ndarray, random_value: float
+    ) -> int | None:
+        max_distance = float(np.max(distances))
+
+        if max_distance <= 0 or not np.isfinite(max_distance):
+            return None
+
+        scaled_distances = distances / max_distance
+        weights = scaled_distances**4
+        total_weight = float(np.sum(weights))
+
+        if total_weight <= 0 or not np.isfinite(total_weight):
+            return None
+
+        cumulative = np.cumsum(weights / total_weight)
+
+        index = int(np.searchsorted(cumulative, random_value, side="right"))
+
+        return min(index, len(distances) - 1)
+
+    def _generate_correlated_solution(self, particle: ACORParticle) -> dict[str, float]:
+        variables = tuple(self._boundaries)
+        n_dimensions = len(variables)
+
+        archive_index = particle.random_cache["archive-index"]
+
+        archive = np.asarray(
+            [
+                [solution[variable] for variable in variables]
+                for solution, _ in self._solution_archive
+            ],
+            dtype=float,
+        )
+
+        reference = archive[archive_index]
+        differences = archive - reference
+
+        basis = np.empty((n_dimensions, 0), dtype=float)
+
+        sampled_coordinates = np.empty(n_dimensions, dtype=float)
+
+        tolerance = np.finfo(float).eps * max(1, n_dimensions) * 100
+
+        for step, variable in enumerate(variables):
+            residuals = self._project_to_remaining_subspace(differences, basis)
+
+            distances = np.linalg.norm(residuals, axis=1)
+
+            direction_index = self._select_direction_index(
+                distances=distances,
+                random_value=particle.random_cache[f"direction-{step}-uniform"],
+            )
+
+            if direction_index is None:
+                direction = self._fallback_direction(
+                    particle=particle, step=step, variables=variables, basis=basis
+                )
+            else:
+                direction = residuals[direction_index]
+
+            if np.linalg.norm(direction) <= tolerance:
+                direction = self._fallback_direction(
+                    particle=particle, step=step, variables=variables, basis=basis
+                )
+
+            basis = self._orthonormalize(basis=basis, direction=direction)
+
+            axis = basis[:, step]
+
+            archive_coordinates = archive @ axis
+            reference_coordinate = float(reference @ axis)
+
+            sigma = (
+                self._xi
+                * float(np.sum(np.abs(archive_coordinates - reference_coordinate)))
+                / (self._archive_size - 1)
+            )
+
+            sampled_coordinates[step] = (
+                reference_coordinate
+                + sigma * particle.random_cache[f"{variable}-normal"]
+            )
+
+        new_position = basis @ sampled_coordinates
+
+        return {
+            variable: float(np.clip(new_position[index], lower, upper))
+            for index, (variable, (lower, upper)) in enumerate(self._boundaries.items())
+        }
+
     def update_particle(self, identifier: str) -> ACORParticle:
         particle = self._population[identifier]
 
@@ -276,20 +517,10 @@ class AntColony(AlgorithmBase[ACORParticle]):
                 f"Particle '{identifier}' must be an instance of ACORParticle."
             )
 
-        archive_index = particle.random_cache["archive-index"]
-        reference_variables = self._solution_archive[archive_index][0]
-
-        new_variables = {}
-        for variable in self._boundaries:
-            normal_value = particle.random_cache[f"{variable}-normal"]
-
-            sigma = self._calculate_sigma(
-                archive_index=archive_index, variable=variable
-            )
-
-            lower, upper = self._boundaries[variable]
-            value = reference_variables[variable] + sigma * normal_value
-            new_variables[variable] = float(np.clip(value, lower, upper))
+        if self._separable:
+            new_variables = self._generate_separable_solution(particle)
+        else:
+            new_variables = self._generate_correlated_solution(particle)
 
         particle.update(
             variables=new_variables, fitness_function=self._fitness_function
@@ -297,16 +528,41 @@ class AntColony(AlgorithmBase[ACORParticle]):
 
         return particle
 
-    def _initialize_solution_archive(self, particles: Collection[ACORParticle]) -> None:
-        candidates = sorted(
-            (
-                (deepcopy(particle.variables), particle.fitness)
-                for particle in particles
-            ),
-            key=lambda solution: solution[1],
-        )
+    @staticmethod
+    def _fitness_sort_key(solution: tuple[dict[str, float], np.float64]) -> float:
+        fitness = solution[1]
 
-        self._solution_archive = candidates[: self._archive_size]
+        if np.isnan(fitness):
+            return np.inf
+
+        return float(fitness)
+
+    def _rank_solutions(
+        self, candidates: list[tuple[dict[str, float], np.float64]]
+    ) -> list[tuple[dict[str, float], np.float64]]:
+        if not candidates:
+            return []
+
+        permutation = self._rng.permutation(len(candidates))
+
+        randomized = [candidates[index] for index in permutation]
+
+        randomized.sort(key=self._fitness_sort_key)
+
+        return randomized
+
+    def _initialize_solution_archive(self, particles: Collection[ACORParticle]) -> None:
+        candidates = [
+            (deepcopy(particle.variables), particle.fitness) for particle in particles
+        ]
+
+        if len(candidates) != self._archive_size:
+            raise RuntimeError(
+                "Initial ACOR solution archive must contain exactly "
+                f"{self._archive_size} solutions."
+            )
+
+        self._solution_archive = self._rank_solutions(candidates)
 
     def _update_solution_archive(self, particles: Collection[ACORParticle]) -> None:
         candidates = [
@@ -314,22 +570,32 @@ class AntColony(AlgorithmBase[ACORParticle]):
         ]
 
         candidates.extend(self._solution_archive)
-        candidates.sort(key=lambda solution: solution[1])
-        self._solution_archive = candidates[: self._archive_size]
+
+        self._solution_archive = self._rank_solutions(candidates)[: self._archive_size]
 
     def post_iteration(self, actual_iter: int) -> None:
         if actual_iter == 0:
-            particles = list(self._population.values())
+            particles = [
+                self._population[identifier]
+                for identifier in self._initial_archive_particle_ids
+            ]
 
             if not all(isinstance(particle, ACORParticle) for particle in particles):
                 raise TypeError("All particles must be instances of ACORParticle.")
 
             self._initialize_solution_archive(particles)
 
+            self._archive_probabilities = self._calculate_archive_probabilities()
+
+            self.update_solution_state()
+
             for identifier in self._temporary_particle_ids:
                 self.delete_particle(identifier)
 
-            self.update_solution_state()
+            if self._temporary_particle_ids:
+                self.update_solution_state()
+
+            self._temporary_particle_ids = []
             return
 
         for particle in self._population.values():
@@ -347,4 +613,5 @@ class AntColony(AlgorithmBase[ACORParticle]):
             particle.consolidate(consolidate_new=True)
 
         self._update_solution_archive(list(self._population.values()))
+
         self.update_solution_state()
