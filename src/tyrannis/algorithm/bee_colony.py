@@ -95,10 +95,11 @@ class BeeColony(AlgorithmBase[ABCParticle]):
         Parameters
         ----------
         limit : int or None, default=None
-            Maximum number of unsuccessful trials allowed for a food source
-            before it becomes eligible for replacement by a scout bee. When
-            ``None``, the limit is calculated from the current number of food
-            sources and the problem dimensionality.
+            Maximum number of unsuccessful trials allowed for a food source.
+            A source becomes eligible for replacement by a scout bee only when
+            its trial count exceeds this limit. When ``None``, the limit is
+            calculated from the current number of food sources and the problem
+            dimensionality.
 
         max_scouts : int or None, default=1
             Maximum number of eligible food sources that may be replaced by
@@ -250,7 +251,7 @@ class BeeColony(AlgorithmBase[ABCParticle]):
         eligible = [
             particle
             for particle in self._population.values()
-            if particle.trial_count >= limit
+            if particle.trial_count > limit
         ]
 
         if not eligible:
