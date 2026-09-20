@@ -21,6 +21,7 @@ class ABCParticle(ParticleBase):
     ) -> None:
         super().__init__(identifier=identifier, variables=variables, fitness=fitness)
         self._trial_count = 0
+        self._onlooker_count = 0
 
     def __call__(self) -> dict[str, Serializable]:
         return {
@@ -38,6 +39,14 @@ class ABCParticle(ParticleBase):
     @property
     def trial_count(self) -> int:
         return self._trial_count
+
+    @property
+    def onlooker_count(self) -> int:
+        return self._onlooker_count
+
+    @property
+    def second_update_required(self) -> bool:
+        return self._onlooker_count > 0
 
     @property
     def abc_fitness(self) -> np.float64:
@@ -60,6 +69,9 @@ class ABCParticle(ParticleBase):
 
     def reset_trial_count(self) -> None:
         self._trial_count = 0
+
+    def set_onlooker_count(self, onlooker_count: int) -> None:
+        self._onlooker_count = onlooker_count
 
 
 class BeeColony(AlgorithmBase[ABCParticle]):
@@ -177,7 +189,6 @@ class BeeColony(AlgorithmBase[ABCParticle]):
         self._max_scouts = max_scouts
         self._improved_probability = bool(improved_probability)
 
-        self._onlooker_counts: dict[str, int] = {}
         self._onlooker_probabilities: dict[str, float] = {}
 
     @property
@@ -212,9 +223,7 @@ class BeeColony(AlgorithmBase[ABCParticle]):
             }
 
         self._population[identifier] = ABCParticle(
-            identifier=identifier,
-            variables=variables,
-            fitness=fitness,
+            identifier=identifier, variables=variables, fitness=fitness
         )
 
     def delete_particle(self, identifier: str | None) -> None:
@@ -222,6 +231,13 @@ class BeeColony(AlgorithmBase[ABCParticle]):
             raise ValueError("Particle identifier cannot be None.")
 
         del self._population[identifier]
+
+    def _validate_population_size(self) -> None:
+        if len(self._population) < 2:
+            raise ValueError(
+                "BeeColony requires at least 2 particles so each food source "
+                "can select a distinct partner."
+            )
 
     def _select_scouts(self) -> list[str]:
         limit = (
@@ -248,8 +264,7 @@ class BeeColony(AlgorithmBase[ABCParticle]):
             selected = eligible
         else:
             trial_counts = np.asarray(
-                [particle.trial_count for particle in eligible],
-                dtype=np.int64,
+                [particle.trial_count for particle in eligible], dtype=np.int64
             )
 
             order = np.argsort(-trial_counts, kind="stable")
@@ -258,65 +273,57 @@ class BeeColony(AlgorithmBase[ABCParticle]):
         return [particle.identifier for particle in selected]
 
     def pre_iteration(self, actual_iter: int) -> None:
+        self._validate_population_size()
+
+        for particle in self._population.values():
+            if not isinstance(particle, ABCParticle):
+                raise TypeError(
+                    f"Particle '{particle.identifier}' must be an instance of "
+                    "ABCParticle."
+                )
+
+            particle.set_onlooker_count(0)
+
+        if actual_iter == 0:
+            self._double_particle_check = True
+            return
+
         scout_ids = self._select_scouts()
 
         for identifier in scout_ids:
             self.delete_particle(identifier)
             self.create_particle(identifier=identifier)
 
-        self._onlooker_probabilities = self._calculate_probabilities()
-        self._onlooker_counts = self._select_onlookers()
-
     def _calculate_probabilities(self) -> dict[str, float]:
         particles = list(self._population.values())
 
         abc_fitness = np.asarray(
-            [particle.abc_fitness for particle in particles],
-            dtype=float,
+            [particle.abc_fitness for particle in particles], dtype=float
         )
 
         abc_fitness = np.where(
-            np.isfinite(abc_fitness) & (abc_fitness > 0),
-            abc_fitness,
-            0.0,
+            np.isfinite(abc_fitness) & (abc_fitness > 0), abc_fitness, 0.0
         )
 
         if self._improved_probability:
             best_fitness = np.max(abc_fitness)
 
             if not np.isfinite(best_fitness) or best_fitness <= 0:
-                probabilities = np.full(
-                    len(particles),
-                    1.0 / len(particles),
-                )
+                probabilities = np.ones(len(particles), dtype=float)
             else:
                 probabilities = 0.9 * (abc_fitness / best_fitness) + 0.1
         else:
             total_fitness = np.sum(abc_fitness)
 
             if not np.isfinite(total_fitness) or total_fitness <= 0:
-                probabilities = np.full(
-                    len(particles),
-                    1.0 / len(particles),
-                )
+                probabilities = np.full(len(particles), 1.0 / len(particles))
             else:
                 probabilities = abc_fitness / total_fitness
 
         probabilities = np.where(
-            np.isfinite(probabilities) & (probabilities >= 0),
-            probabilities,
-            0.0,
+            np.isfinite(probabilities) & (probabilities >= 0), probabilities, 0.0
         )
-
-        probability_sum = np.sum(probabilities)
-
-        if not np.isfinite(probability_sum) or probability_sum <= 0:
-            probabilities = np.full(
-                len(particles),
-                1.0 / len(particles),
-            )
-        else:
-            probabilities /= probability_sum
+        probabilities = np.clip(probabilities, 0.0, 1.0)
 
         return {
             particle.identifier: float(probability)
@@ -325,27 +332,24 @@ class BeeColony(AlgorithmBase[ABCParticle]):
 
     def _select_onlookers(self) -> dict[str, int]:
         particle_ids = list(self._population)
-
-        probabilities = np.asarray(
-            [self._onlooker_probabilities[identifier] for identifier in particle_ids],
-            dtype=float,
-        )
-
-        cumulative = np.cumsum(probabilities)
-        cumulative[-1] = 1.0
-
-        selections = self._rng.random(self._n_particles)
-
-        selected_indices = np.searchsorted(
-            cumulative,
-            selections,
-            side="right",
-        )
-
         counts = dict.fromkeys(particle_ids, 0)
 
-        for index in selected_indices:
-            counts[particle_ids[index]] += 1
+        selected_count = 0
+        particle_index = 0
+        target_count = len(particle_ids)
+
+        while selected_count < target_count:
+            identifier = particle_ids[particle_index]
+            probability = self._onlooker_probabilities[identifier]
+
+            if self._rng.random() < probability:
+                counts[identifier] += 1
+                selected_count += 1
+
+            particle_index += 1
+
+            if particle_index == len(particle_ids):
+                particle_index = 0
 
         return counts
 
@@ -356,33 +360,37 @@ class BeeColony(AlgorithmBase[ABCParticle]):
 
         return particle_ids[self._rng.integers(0, len(particle_ids))]
 
-    def create_random_cache(
-        self,
-        particle_ids: list[str],
-        initialize: bool,
-    ) -> None:
+    def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
         if initialize:
             for identifier in particle_ids:
                 self._population[identifier].random_cache = {}
+
             return
 
         variables = tuple(self._boundaries)
 
         for identifier in particle_ids:
+            particle = self._population[identifier]
+
+            if not isinstance(particle, ABCParticle):
+                raise TypeError(
+                    f"Particle '{identifier}' must be an instance of ABCParticle."
+                )
+
             cache: dict[str, Serializable] = {
                 "employed-variable": variables[self._rng.integers(0, len(variables))],
                 "employed-partner": self._select_partner(identifier),
                 "employed-phi": float(self._rng.uniform(-1.0, 1.0)),
             }
 
-            for index in range(self._onlooker_counts[identifier]):
+            for index in range(particle.onlooker_count):
                 cache[f"onlooker-{index}-variable"] = variables[
                     self._rng.integers(0, len(variables))
                 ]
                 cache[f"onlooker-{index}-partner"] = self._select_partner(identifier)
                 cache[f"onlooker-{index}-phi"] = float(self._rng.uniform(-1.0, 1.0))
 
-            self._population[identifier].random_cache = cache
+            particle.random_cache = cache
 
     def initialize_particle(self, identifier: str) -> ABCParticle:
         particle = self._population[identifier]
@@ -394,8 +402,7 @@ class BeeColony(AlgorithmBase[ABCParticle]):
 
         if np.isinf(particle.fitness):
             particle.update(
-                variables=particle.variables,
-                fitness_function=self._fitness_function,
+                variables=particle.variables, fitness_function=self._fitness_function
             )
 
         return particle
@@ -425,36 +432,18 @@ class BeeColony(AlgorithmBase[ABCParticle]):
 
         return candidate_variables
 
-    def _attempt_update(
-        self,
-        variables: dict[str, float],
-        fitness: np.float64,
-        variable: str,
-        partner_id: str,
-        phi: float,
-    ) -> tuple[dict[str, float], np.float64]:
-        partner = self._population[partner_id]
-
-        candidate_variables = self._generate_candidate(
-            variables=variables,
-            variable=variable,
-            partner=partner,
-            phi=phi,
-        )
-
-        candidate_fitness = self._fitness_function(candidate_variables)
-
+    @staticmethod
+    def _is_improvement(
+        candidate_fitness: np.float64, current_fitness: np.float64
+    ) -> bool:
         candidate_abc_fitness = ABCParticle._calculate_abc_fitness(candidate_fitness)
-        current_abc_fitness = ABCParticle._calculate_abc_fitness(fitness)
+        current_abc_fitness = ABCParticle._calculate_abc_fitness(current_fitness)
 
-        if (
+        return bool(
             np.isfinite(candidate_abc_fitness)
             and np.isfinite(current_abc_fitness)
             and candidate_abc_fitness > current_abc_fitness
-        ):
-            return candidate_variables, candidate_fitness
-
-        return variables, fitness
+        )
 
     def update_particle(self, identifier: str) -> ABCParticle:
         particle = self._population[identifier]
@@ -464,36 +453,122 @@ class BeeColony(AlgorithmBase[ABCParticle]):
                 f"Particle '{identifier}' must be an instance of ABCParticle."
             )
 
+        variable = particle.random_cache["employed-variable"]
+        partner_id = particle.random_cache["employed-partner"]
+        phi = particle.random_cache["employed-phi"]
+        partner = self._population[partner_id]
+
+        if not isinstance(partner, ABCParticle):
+            raise TypeError(
+                f"Particle '{partner_id}' must be an instance of ABCParticle."
+            )
+
+        candidate_variables = self._generate_candidate(
+            variables=particle.variables, variable=variable, partner=partner, phi=phi
+        )
+
+        particle.increment_trial_count()
+        particle.update(
+            variables=candidate_variables, fitness_function=self._fitness_function
+        )
+
+        if particle.candidate_fitness is None:
+            raise RuntimeError(
+                f"Particle '{identifier}' has no candidate fitness after update."
+            )
+
+        if self._is_improvement(
+            candidate_fitness=particle.candidate_fitness,
+            current_fitness=particle.fitness,
+        ):
+            particle.reset_trial_count()
+
+        return particle
+
+    def inter_iteration(self, actual_iter: int) -> None:
+        for particle in self._population.values():
+            if not isinstance(particle, ABCParticle):
+                raise TypeError(
+                    f"Particle '{particle.identifier}' must be an instance of "
+                    "ABCParticle."
+                )
+
+            if particle.candidate_fitness is None:
+                raise RuntimeError(
+                    f"Particle '{particle.identifier}' has no candidate fitness."
+                )
+
+            improved = self._is_improvement(
+                candidate_fitness=particle.candidate_fitness,
+                current_fitness=particle.fitness,
+            )
+
+            particle.consolidate(consolidate_new=improved)
+
+        self.update_solution_state()
+
+        self._onlooker_probabilities = self._calculate_probabilities()
+        onlooker_counts = self._select_onlookers()
+
+        for identifier, onlooker_count in onlooker_counts.items():
+            particle = self._population[identifier]
+
+            if not isinstance(particle, ABCParticle):
+                raise TypeError(
+                    f"Particle '{identifier}' must be an instance of ABCParticle."
+                )
+
+            particle.set_onlooker_count(onlooker_count)
+
+    def second_update_particle(self, identifier: str) -> ABCParticle:
+        particle = self._population[identifier]
+
+        if not isinstance(particle, ABCParticle):
+            raise TypeError(
+                f"Particle '{identifier}' must be an instance of ABCParticle."
+            )
+
+        if not particle.second_update_required:
+            return particle
+
         current_variables = dict(particle.variables)
         current_fitness = particle.fitness
 
-        employed_variable = particle.random_cache["employed-variable"]
-        employed_partner = particle.random_cache["employed-partner"]
-        employed_phi = particle.random_cache["employed-phi"]
+        particle.candidate_variables = current_variables
+        particle.candidate_fitness = current_fitness
 
-        current_variables, current_fitness = self._attempt_update(
-            variables=current_variables,
-            fitness=current_fitness,
-            variable=employed_variable,
-            partner_id=employed_partner,
-            phi=employed_phi,
-        )
-
-        for index in range(self._onlooker_counts[identifier]):
+        for index in range(particle.onlooker_count):
             variable = particle.random_cache[f"onlooker-{index}-variable"]
             partner_id = particle.random_cache[f"onlooker-{index}-partner"]
             phi = particle.random_cache[f"onlooker-{index}-phi"]
+            partner = self._population[partner_id]
 
-            current_variables, current_fitness = self._attempt_update(
-                variables=current_variables,
-                fitness=current_fitness,
-                variable=variable,
-                partner_id=partner_id,
-                phi=phi,
+            if not isinstance(partner, ABCParticle):
+                raise TypeError(
+                    f"Particle '{partner_id}' must be an instance of ABCParticle."
+                )
+
+            candidate_variables = self._generate_candidate(
+                variables=current_variables, variable=variable, partner=partner, phi=phi
             )
 
-        particle.candidate_variables = current_variables
-        particle.candidate_fitness = current_fitness
+            particle.increment_trial_count()
+            candidate_fitness = self._fitness_function(candidate_variables)
+
+            if np.isnan(candidate_fitness):
+                particle.candidate_variables = candidate_variables
+                particle.candidate_fitness = candidate_fitness
+                return particle
+
+            if self._is_improvement(
+                candidate_fitness=candidate_fitness, current_fitness=current_fitness
+            ):
+                current_variables = candidate_variables
+                current_fitness = candidate_fitness
+                particle.reset_trial_count()
+
+            particle.candidate_variables = current_variables
+            particle.candidate_fitness = current_fitness
 
         return particle
 
@@ -509,21 +584,23 @@ class BeeColony(AlgorithmBase[ABCParticle]):
                     "ABCParticle."
                 )
 
+            if not particle.second_update_required:
+                continue
+
             if particle.candidate_fitness is None:
                 raise RuntimeError(
                     f"Particle '{particle.identifier}' has no candidate fitness."
                 )
 
-            if particle.abc_candidate_fitness is None:
-                raise RecursionError("particle.abc_candidate_fitness cannot be None.")
+            if particle.error_fitness is not None:
+                particle.consolidate(consolidate_new=False)
+                continue
 
-            improved = bool(particle.abc_candidate_fitness < particle.abc_fitness)
+            improved = self._is_improvement(
+                candidate_fitness=particle.candidate_fitness,
+                current_fitness=particle.fitness,
+            )
 
             particle.consolidate(consolidate_new=improved)
-
-            if improved:
-                particle.reset_trial_count()
-            else:
-                particle.increment_trial_count()
 
         self.update_solution_state()
