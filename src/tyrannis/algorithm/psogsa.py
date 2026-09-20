@@ -89,12 +89,14 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
         c1 : float, default=0.5
             Coefficient controlling the influence of the gravitational acceleration
             on the particle velocity. Larger values increase the contribution of
-            the gravitational search to the movement of particles.
+            the gravitational search to the movement of particles. It must be a
+            finite number greater than 0.
 
         c2 : float, default=1.5
             Coefficient controlling the influence of the best solution found so
             far on the particle velocity. Larger values increase the attraction
-            toward the best-known solution.
+            toward the best-known solution. It must be a finite number greater
+            than 0.
 
         g_zero : float, default=1.0
             Initial value of the gravitational constant. Larger values increase
@@ -212,6 +214,12 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
 
             if not np.isfinite(value):
                 raise ValueError(f"{name} must be finite.")
+
+        if c1 <= 0:
+            raise ValueError("c1 must be greater than 0.")
+
+        if c2 <= 0:
+            raise ValueError("c2 must be greater than 0.")
 
         if g_zero <= 0:
             raise ValueError("g_zero must be greater than 0.")
@@ -354,7 +362,8 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
 
         if np.isinf(particle.fitness):
             particle.update(
-                variables=particle.variables, fitness_function=self._fitness_function
+                variables=particle.variables,
+                fitness_function=self._fitness_function,
             )
 
         return particle
@@ -364,7 +373,10 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
         particle.consolidate(consolidate_new=True)
         return particle
 
-    def _calculate_acceleration(self, particle: PSOGSAParticle) -> dict[str, float]:
+    def _calculate_acceleration(
+        self,
+        particle: PSOGSAParticle,
+    ) -> dict[str, float]:
         if self._gravitational_constant is None:
             raise RuntimeError("The gravitational constant has not been initialized.")
 
@@ -450,7 +462,8 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
         particle.acceleration = acceleration
 
         particle.update(
-            variables=new_variables, fitness_function=self._fitness_function
+            variables=new_variables,
+            fitness_function=self._fitness_function,
         )
 
         return particle
@@ -461,7 +474,10 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
         if not particles:
             return
 
-        fitness = np.asarray([particle.fitness for particle in particles], dtype=float)
+        fitness = np.asarray(
+            [particle.fitness for particle in particles],
+            dtype=float,
+        )
 
         finite = np.isfinite(fitness)
 
@@ -503,15 +519,22 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
             return
 
         population_size = len(self._population)
-        minimum_agents = max(1, int(np.ceil(population_size * self._k_agents_percent)))
-        progress = min(next_iter, self._max_iterations) / self._max_iterations
+        minimum_agents = max(
+            1,
+            int(np.ceil(population_size * self._k_agents_percent)),
+        )
+
+        last_algorithm_iter = max(self._max_iterations - 1, 1)
+        progress = min(next_iter, self._max_iterations - 1) / last_algorithm_iter
+
         n_agents = int(
             np.ceil(population_size - (population_size - minimum_agents) * progress)
         )
         n_agents = max(minimum_agents, min(population_size, n_agents))
 
         ranked_particles = sorted(
-            self._population.values(), key=lambda particle: particle.fitness
+            self._population.values(),
+            key=lambda particle: particle.fitness,
         )
         self._k_best = tuple(
             particle.identifier for particle in ranked_particles[:n_agents]
