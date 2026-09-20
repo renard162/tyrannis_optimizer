@@ -1,3 +1,4 @@
+import warnings
 from collections.abc import Collection
 from copy import deepcopy
 from typing import cast
@@ -5,11 +6,7 @@ from typing import cast
 import numpy as np
 from scipy.linalg import qr
 
-from ..core.algorithm import (
-    FITNESS_UNDEFINED,
-    AlgorithmBase,
-    ParticleBase,
-)
+from ..core.algorithm import FITNESS_UNDEFINED, AlgorithmBase, ParticleBase
 
 
 class ACORParticle(ParticleBase):
@@ -21,7 +18,7 @@ class AntColony(AlgorithmBase[ACORParticle]):
 
     def __init__(
         self,
-        archive_size: int = 20,
+        archive_size: int | str = 20,
         q: float = 0.25,
         xi: float = 0.85,
         separable: bool = True,
@@ -46,15 +43,22 @@ class AntColony(AlgorithmBase[ACORParticle]):
 
         Parameters
         ----------
-        archive_size : int, default=10
-            Number of solutions maintained in the solution archive. The archive stores
-            the best solutions found by the colony and provides the probability model
-            used to generate new solutions. With the default Sep-ACOR formulation,
-            ``archive_size`` must be at least 2. When ``separable=False``, the original
-            ACOR correlation-handling mechanism requires the archive to contain at least
-            as many solutions as there are decision variables.
+        archive_size : int or "auto", default=20
+            Number of solutions maintained in the solution archive. Integer values are
+            used exactly as provided and must be at least 2. With the default Sep-ACOR
+            formulation, this lower limit is independent of problem dimensionality.
+            When ``separable=False``, an integer archive size must additionally be at
+            least the number of encoded decision variables used internally by the search
+            space.
 
-        q : float, default=0.5
+            The value ``"auto"`` is available only when ``separable=False``. In this
+            mode, the archive size is determined after the search space has been
+            configured and is set to the number of encoded decision variables required
+            by the original ACOR correlation-handling mechanism. The universal minimum
+            archive size of 2 is retained for one-dimensional encoded spaces. A warning
+            reports the resulting archive size.
+
+        q : float, default=0.25
             Controls the concentration of the probability assigned to solutions in the
             archive according to their rank. Smaller values increase the preference
             for the best solutions, while larger values distribute the probability more
@@ -71,13 +75,17 @@ class AntColony(AlgorithmBase[ACORParticle]):
             ``True`` samples each decision variable independently in the original
             coordinate system. This reduces computational cost, avoids the
             orthogonalization required by the original ACOR formulation, and only
-            requires ``archive_size >= 2``.
+            requires an integer ``archive_size >= 2``. Automatic archive sizing is not
+            available in this mode because its minimum archive size is fixed and does
+            not depend on problem dimensionality.
 
             When ``False``, the original ACOR formulation is used. An adaptive
             orthonormal coordinate system is constructed from the solution archive so
             that correlations between decision variables can influence the search.
             This formulation is computationally more demanding and requires
-            ``archive_size`` to be at least the number of decision variables.
+            ``archive_size`` to be at least the number of encoded decision variables.
+            ``archive_size="auto"`` can be used to determine this minimum-compatible
+            archive size automatically after the search space has been configured.
 
         Notes
         -----
@@ -107,7 +115,10 @@ class AntColony(AlgorithmBase[ACORParticle]):
         is transformed back to the original variables. This allows correlations
         between decision variables to influence the search, at the cost of additional
         computation and the requirement that the archive contain at least as many
-        solutions as there are decision variables.
+        solutions as there are encoded decision variables. When this encoded
+        dimensionality is not known in advance, ``archive_size="auto"`` derives the
+        required archive size from the configured search space and reports the
+        resulting value with a warning.
 
         The parameter ``q`` controls the selection pressure applied to the archive.
         Values that concentrate probability on the best-ranked solutions increase
@@ -143,11 +154,26 @@ class AntColony(AlgorithmBase[ACORParticle]):
         3734-3747.
         https://doi.org/10.1049/gtd2.12560
         """
-        if not isinstance(archive_size, (int, np.integer)):
-            raise TypeError("archive_size must be an integer.")
+        if not isinstance(separable, (bool, np.bool_)):
+            raise TypeError("separable must be a boolean.")
 
-        if archive_size < 2:
-            raise ValueError("archive_size must be greater than or equal to 2.")
+        if isinstance(archive_size, (bool, np.bool_)):
+            raise TypeError("archive_size must be an integer or 'auto'.")
+
+        if isinstance(archive_size, (int, np.integer)):
+            if archive_size < 2:
+                raise ValueError("archive_size must be greater than or equal to 2.")
+        elif isinstance(archive_size, str):
+            if archive_size != "auto":
+                raise ValueError("archive_size must be an integer or 'auto'.")
+
+            if separable:
+                raise ValueError(
+                    "archive_size='auto' is only available when separable=False. "
+                    "Sep-ACOR requires an integer archive_size greater than or equal to 2."
+                )
+        else:
+            raise TypeError("archive_size must be an integer or 'auto'.")
 
         if not isinstance(q, (int, float, np.number)):
             raise TypeError("q must be a number.")
@@ -161,10 +187,9 @@ class AntColony(AlgorithmBase[ACORParticle]):
         if not np.isfinite(xi) or xi <= 0:
             raise ValueError("xi must be a finite number greater than 0.")
 
-        if not isinstance(separable, (bool, np.bool_)):
-            raise TypeError("separable must be a boolean.")
-
-        self._archive_size = int(archive_size)
+        self._automatic_archive_size = archive_size == "auto"
+        self._archive_size = 2 if self._automatic_archive_size else int(archive_size)
+        self._archive_size_resolved = not self._automatic_archive_size
         self._q = float(q)
         self._xi = float(xi)
         self._separable = bool(separable)
@@ -176,7 +201,10 @@ class AntColony(AlgorithmBase[ACORParticle]):
         self._temporary_particle_ids: list[str] = []
 
     @property
-    def archive_size(self) -> int:
+    def archive_size(self) -> int | str:
+        if self._automatic_archive_size and not self._archive_size_resolved:
+            return "auto"
+
         return self._archive_size
 
     @property
@@ -237,11 +265,27 @@ class AntColony(AlgorithmBase[ACORParticle]):
 
         n_dimensions = len(self._boundaries)
 
+        if self._automatic_archive_size:
+            if not self._archive_size_resolved:
+                self._archive_size = max(2, n_dimensions)
+                self._archive_size_resolved = True
+
+                warnings.warn(
+                    f"archive_size='auto' was resolved to {self._archive_size} because "
+                    f"ACOR is operating on {n_dimensions} encoded decision variables.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
+            return
+
         if self._archive_size < n_dimensions:
             raise ValueError(
-                "archive_size must be greater than or equal to the number of "
-                "decision variables when separable=False. Use separable=True "
-                "to use Sep-ACOR, which requires only archive_size >= 2."
+                f"archive_size ({self._archive_size}) must be greater than or equal "
+                f"to the number of encoded decision variables ({n_dimensions}) when "
+                "separable=False. Set archive_size='auto' to use the minimum valid "
+                "archive size automatically, or use separable=True, which requires "
+                "only archive_size >= 2."
             )
 
     def pre_iteration(self, actual_iter: int) -> None:
@@ -480,7 +524,6 @@ class AntColony(AlgorithmBase[ACORParticle]):
         differences = archive - reference
 
         basis = np.empty((n_dimensions, 0), dtype=float)
-
         sampled_coordinates = np.empty(n_dimensions, dtype=float)
 
         tolerance = np.finfo(float).eps * max(1, n_dimensions) * 100
