@@ -21,8 +21,8 @@ class AntColony(AlgorithmBase[ACORParticle]):
 
     def __init__(
         self,
-        archive_size: int = 10,
-        q: float = 0.5,
+        archive_size: int = 20,
+        q: float = 0.25,
         xi: float = 0.85,
         separable: bool = True,
     ) -> None:
@@ -34,23 +34,32 @@ class AntColony(AlgorithmBase[ACORParticle]):
         using pheromone values associated with discrete solution components, ACOR
         represents pheromone information through an archive of promising continuous
         solutions and generates new candidate solutions by sampling probability
-        distributions around them. The original formulation can adapt its coordinate
-        system to correlations between decision variables, while Sep-ACOR omits this
-        correlation-handling mechanism for lower computational cost.
+        distributions around them.
+
+        By default, this implementation uses Sep-ACOR, the separable variant of ACOR.
+        Sep-ACOR samples decision variables independently in the original coordinate
+        system, avoiding the coordinate-system adaptation required by the original
+        ACOR formulation. Setting ``separable=False`` enables the original ACOR
+        correlation-handling mechanism, which constructs an adaptive orthonormal
+        coordinate system so that dependencies between decision variables can influence
+        the generation of new solutions.
 
         Parameters
         ----------
         archive_size : int, default=10
             Number of solutions maintained in the solution archive. The archive stores
             the best solutions found by the colony and provides the probability model
-            used to generate new solutions. ACOR requires at least as many archive
-            solutions as decision variables, while Sep-ACOR requires at least two.
+            used to generate new solutions. With the default Sep-ACOR formulation,
+            ``archive_size`` must be at least 2. When ``separable=False``, the original
+            ACOR correlation-handling mechanism requires the archive to contain at least
+            as many solutions as there are decision variables.
 
         q : float, default=0.5
             Controls the concentration of the probability assigned to solutions in the
             archive according to their rank. Smaller values increase the preference
             for the best solutions, while larger values distribute the probability more
-            evenly across the archive.
+            evenly across the archive. Its effect depends on ``archive_size``, since the
+            width of the rank-based distribution is proportional to their product.
 
         xi : float, default=0.85
             Controls the standard deviation of the probability distributions used to
@@ -58,11 +67,17 @@ class AntColony(AlgorithmBase[ACORParticle]):
             archive solutions, while smaller values concentrate the search around them.
 
         separable : bool, default=True
-            Whether to use the separable ACOR variant (Sep-ACOR). When ``False``, the
-            original ACOR formulation adapts an orthonormal coordinate system to the
-            correlations represented by the solution archive. When ``True``, Sep-ACOR
-            samples the decision variables independently in the original coordinate
-            system, reducing computational cost while ignoring variable correlations.
+            Whether to use Sep-ACOR, the separable variant of ACOR. The default value
+            ``True`` samples each decision variable independently in the original
+            coordinate system. This reduces computational cost, avoids the
+            orthogonalization required by the original ACOR formulation, and only
+            requires ``archive_size >= 2``.
+
+            When ``False``, the original ACOR formulation is used. An adaptive
+            orthonormal coordinate system is constructed from the solution archive so
+            that correlations between decision variables can influence the search.
+            This formulation is computationally more demanding and requires
+            ``archive_size`` to be at least the number of decision variables.
 
         Notes
         -----
@@ -74,18 +89,25 @@ class AntColony(AlgorithmBase[ACORParticle]):
         probability of being selected as references for generating new solutions.
 
         For each new solution, one archive solution is selected according to its
-        rank-based probability. In the original ACOR formulation, the coordinate
-        system is progressively adapted to the distribution of the archive so that
-        correlations between variables can influence the search. At each construction
-        step, directions farther from the selected reference in the remaining search
-        subspace are more likely to define the next coordinate direction. Gaussian
-        sampling is then performed in the resulting temporary coordinate system.
+        rank-based probability. The default Sep-ACOR formulation treats the search
+        dimensions as separable: each decision variable is sampled independently from
+        a normal distribution centered on the corresponding value of the selected
+        archive solution. The standard deviation is calculated from the dispersion of
+        that variable among the archived solutions and scaled by ``xi``. This
+        formulation has lower computational cost and imposes fewer requirements on
+        the archive size, making it suitable as the general-purpose default.
 
-        When ``separable=True``, Sep-ACOR omits the variable-correlation mechanism.
-        Each decision variable is sampled independently from a normal distribution
-        centered on the corresponding variable of the selected archive solution. The
-        standard deviation is calculated from the dispersion of that variable among
-        the solutions in the archive and scaled by ``xi``.
+        Setting ``separable=False`` enables the correlation-handling mechanism of the
+        original ACOR formulation. Instead of sampling directly in the original
+        coordinate system, ACOR progressively constructs an adaptive orthonormal
+        coordinate system from directions represented by the solution archive.
+        Directions farther from the selected reference in the remaining search
+        subspace are more likely to define subsequent axes. Gaussian sampling is then
+        performed in this temporary coordinate system before the generated solution
+        is transformed back to the original variables. This allows correlations
+        between decision variables to influence the search, at the cost of additional
+        computation and the requirement that the archive contain at least as many
+        solutions as there are decision variables.
 
         The parameter ``q`` controls the selection pressure applied to the archive.
         Values that concentrate probability on the best-ranked solutions increase
@@ -218,7 +240,8 @@ class AntColony(AlgorithmBase[ACORParticle]):
         if self._archive_size < n_dimensions:
             raise ValueError(
                 "archive_size must be greater than or equal to the number of "
-                "decision variables when separable=False."
+                "decision variables when separable=False. Use separable=True "
+                "to use Sep-ACOR, which requires only archive_size >= 2."
             )
 
     def pre_iteration(self, actual_iter: int) -> None:
