@@ -442,14 +442,15 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         ``initialize`` indicates whether the particles are about to be
         initialized. When ``True``, the algorithm may use an initialization-specific
         random-generation strategy. When ``False``, it must generate the random
-        values required by the particle-update phase.
+        values required by the immediately following particle-update phase.
 
         If the algorithm uses two cost-function checks during the same
-        optimization iteration, every call with ``initialize=False`` must
-        generate the complete set of random values required by both
-        ``update_particle`` and ``second_update_particle``. The same cache
-        generation strategy is therefore used before either update phase, even
-        though each phase may use only part of the generated values.
+        optimization iteration, ``create_random_cache`` is called separately
+        before ``update_particle`` and ``second_update_particle``. Each call with
+        ``initialize=False`` must therefore generate only the random values
+        required by the immediately following update phase. The second call occurs
+        after ``inter_iteration``, allowing its random-generation strategy to
+        depend on algorithm state established during the intermediate step.
 
         The random cache separates random-number generation from particle
         processing. This is particularly important when particle processing is
@@ -474,8 +475,9 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         algorithm. Implementations must generate the values required by the
         corresponding particle-processing logic and must not assume that all
         algorithms require the same number or type of random values. For
-        algorithms that use two particle checks, every update cache must include
-        the values required by both update phases.
+        algorithms that use two particle checks, the caches for the first and
+        second update phases may therefore contain different values according to
+        the requirements of each phase.
 
         The value of ``initialize`` may therefore affect both the amount and the
         type of random values generated. An algorithm may require one sampling
