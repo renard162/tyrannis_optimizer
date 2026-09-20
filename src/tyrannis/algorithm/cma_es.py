@@ -254,8 +254,10 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
             raise ValueError("CMA-ES requires at least 2 particles.")
 
         center_identifier = self._center_identifier
+        self._double_check_ids = []
 
         if actual_iter == 0:
+            self._double_particle_check = True
             self._initialize_parameters()
 
             initial_values = np.asarray(
@@ -275,8 +277,20 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         if self._mean is None:
             raise RuntimeError("CMA-ES mean has not been initialized.")
 
+        if actual_iter == 0:
+            self.create_particle(
+                identifier=center_identifier,
+                variables=self._array_to_variables(self._mean),
+            )
+            return
+
+        if self._mean_particle is None:
+            raise RuntimeError("CMA-ES mean particle has not been initialized.")
+
         self.create_particle(
-            identifier=center_identifier, variables=self._array_to_variables(self._mean)
+            identifier=center_identifier,
+            variables=self._array_to_variables(self._mean),
+            fitness=self._mean_particle.fitness,
         )
 
     def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
@@ -356,17 +370,8 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
 
         return particle
 
-    def post_iteration(self, actual_iter: int) -> None:
+    def inter_iteration(self, actual_iter: int) -> None:
         center_identifier = self._center_identifier
-
-        if actual_iter == 0:
-            center = self._population[center_identifier]
-            self._mean_particle = deepcopy(center)
-
-            self.delete_particle(center_identifier)
-            self.update_solution_state()
-
-            return
 
         if (
             self._mean is None
@@ -505,13 +510,57 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         self._p_c = p_c
         self._gamma_sigma = gamma_sigma
         self._gamma_c = gamma_c
+        self._double_check_ids = [center_identifier]
 
+    def second_update_particle(self, identifier: str) -> CMAESCandidateSolution:
+        particle = self._population[identifier]
+
+        if not isinstance(particle, CMAESCandidateSolution):
+            raise TypeError(
+                f"Particle '{identifier}' must be an instance of "
+                "CMAESCandidateSolution."
+            )
+
+        if identifier != self._center_identifier:
+            return particle
+
+        if self._mean is None:
+            raise RuntimeError("CMA-ES mean has not been initialized.")
+
+        particle.update(
+            variables=self._array_to_variables(self._mean),
+            fitness_function=self._fitness_function,
+        )
+
+        return particle
+
+    def post_iteration(self, actual_iter: int) -> None:
+        center_identifier = self._center_identifier
         center = self._population[center_identifier]
+
+        if actual_iter == 0:
+            self._mean_particle = deepcopy(center)
+
+            self.delete_particle(center_identifier)
+            self.update_solution_state()
+
+            return
+
+        if center.candidate_fitness is None:
+            raise RuntimeError("CMA-ES mean particle has no candidate fitness.")
+
+        center.consolidate(consolidate_new=True)
         self._mean_particle = deepcopy(center)
         self.delete_particle(center_identifier)
 
-        for particle in particles:
+        for particle in self._population.values():
+            if particle.candidate_fitness is None:
+                raise RuntimeError(
+                    f"Particle '{particle.identifier}' has no candidate fitness."
+                )
+
             particle.consolidate(consolidate_new=True)
 
+        self._double_check_ids = []
         self._injected_particle_ids = set()
         self.update_solution_state()
