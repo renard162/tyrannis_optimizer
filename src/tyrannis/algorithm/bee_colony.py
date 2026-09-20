@@ -224,9 +224,7 @@ class BeeColony(AlgorithmBase[ABCParticle]):
             }
 
         self._population[identifier] = ABCParticle(
-            identifier=identifier,
-            variables=variables,
-            fitness=fitness,
+            identifier=identifier, variables=variables, fitness=fitness
         )
 
     def delete_particle(self, identifier: str | None) -> None:
@@ -267,8 +265,7 @@ class BeeColony(AlgorithmBase[ABCParticle]):
             selected = eligible
         else:
             trial_counts = np.asarray(
-                [particle.trial_count for particle in eligible],
-                dtype=np.int64,
+                [particle.trial_count for particle in eligible], dtype=np.int64
             )
 
             order = np.argsort(-trial_counts, kind="stable")
@@ -278,7 +275,9 @@ class BeeColony(AlgorithmBase[ABCParticle]):
 
     def pre_iteration(self, actual_iter: int) -> None:
         self._validate_population_size()
+
         self._onlooker_phase = False
+        self._double_check_ids = []
 
         for particle in self._population.values():
             if not isinstance(particle, ABCParticle):
@@ -303,14 +302,11 @@ class BeeColony(AlgorithmBase[ABCParticle]):
         particles = list(self._population.values())
 
         abc_fitness = np.asarray(
-            [particle.abc_fitness for particle in particles],
-            dtype=float,
+            [particle.abc_fitness for particle in particles], dtype=float
         )
 
         abc_fitness = np.where(
-            np.isfinite(abc_fitness) & (abc_fitness > 0),
-            abc_fitness,
-            0.0,
+            np.isfinite(abc_fitness) & (abc_fitness > 0), abc_fitness, 0.0
         )
 
         if self._improved_probability:
@@ -324,17 +320,12 @@ class BeeColony(AlgorithmBase[ABCParticle]):
             total_fitness = np.sum(abc_fitness)
 
             if not np.isfinite(total_fitness) or total_fitness <= 0:
-                probabilities = np.full(
-                    len(particles),
-                    1.0 / len(particles),
-                )
+                probabilities = np.full(len(particles), 1.0 / len(particles))
             else:
                 probabilities = abc_fitness / total_fitness
 
         probabilities = np.where(
-            np.isfinite(probabilities) & (probabilities >= 0),
-            probabilities,
-            0.0,
+            np.isfinite(probabilities) & (probabilities >= 0), probabilities, 0.0
         )
         probabilities = np.clip(probabilities, 0.0, 1.0)
 
@@ -373,11 +364,7 @@ class BeeColony(AlgorithmBase[ABCParticle]):
 
         return particle_ids[self._rng.integers(0, len(particle_ids))]
 
-    def create_random_cache(
-        self,
-        particle_ids: list[str],
-        initialize: bool,
-    ) -> None:
+    def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
         if initialize:
             for identifier in particle_ids:
                 self._population[identifier].random_cache = {}
@@ -429,8 +416,7 @@ class BeeColony(AlgorithmBase[ABCParticle]):
 
         if np.isinf(particle.fitness):
             particle.update(
-                variables=particle.variables,
-                fitness_function=self._fitness_function,
+                variables=particle.variables, fitness_function=self._fitness_function
             )
 
         return particle
@@ -462,8 +448,7 @@ class BeeColony(AlgorithmBase[ABCParticle]):
 
     @staticmethod
     def _is_improvement(
-        candidate_fitness: np.float64,
-        current_fitness: np.float64,
+        candidate_fitness: np.float64, current_fitness: np.float64
     ) -> bool:
         candidate_abc_fitness = ABCParticle._calculate_abc_fitness(candidate_fitness)
         current_abc_fitness = ABCParticle._calculate_abc_fitness(current_fitness)
@@ -493,16 +478,12 @@ class BeeColony(AlgorithmBase[ABCParticle]):
             )
 
         candidate_variables = self._generate_candidate(
-            variables=particle.variables,
-            variable=variable,
-            partner=partner,
-            phi=phi,
+            variables=particle.variables, variable=variable, partner=partner, phi=phi
         )
 
         particle.increment_trial_count()
         particle.update(
-            variables=candidate_variables,
-            fitness_function=self._fitness_function,
+            variables=candidate_variables, fitness_function=self._fitness_function
         )
 
         if particle.candidate_fitness is None:
@@ -543,6 +524,8 @@ class BeeColony(AlgorithmBase[ABCParticle]):
         self._onlooker_probabilities = self._calculate_probabilities()
         onlooker_counts = self._select_onlookers()
 
+        double_check_ids: list[str] = []
+
         for identifier, onlooker_count in onlooker_counts.items():
             particle = self._population[identifier]
 
@@ -553,6 +536,10 @@ class BeeColony(AlgorithmBase[ABCParticle]):
 
             particle.set_onlooker_count(onlooker_count)
 
+            if onlooker_count > 0:
+                double_check_ids.append(identifier)
+
+        self._double_check_ids = double_check_ids
         self._onlooker_phase = True
 
     def second_update_particle(self, identifier: str) -> ABCParticle:
@@ -584,10 +571,7 @@ class BeeColony(AlgorithmBase[ABCParticle]):
                 )
 
             candidate_variables = self._generate_candidate(
-                variables=current_variables,
-                variable=variable,
-                partner=partner,
-                phi=phi,
+                variables=current_variables, variable=variable, partner=partner, phi=phi
             )
 
             particle.increment_trial_count()
@@ -599,8 +583,7 @@ class BeeColony(AlgorithmBase[ABCParticle]):
                 return particle
 
             if self._is_improvement(
-                candidate_fitness=candidate_fitness,
-                current_fitness=current_fitness,
+                candidate_fitness=candidate_fitness, current_fitness=current_fitness
             ):
                 current_variables = candidate_variables
                 current_fitness = candidate_fitness

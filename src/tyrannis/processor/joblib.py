@@ -7,10 +7,7 @@ from joblib import Parallel, delayed
 from joblib.parallel import BACKENDS
 
 from ..core.algorithm import CostFunctionWrapperBase, ParticleBase
-from ..core.processor import (
-    ProcessorBase,
-    evaluate_particle,
-)
+from ..core.processor import ProcessorBase, evaluate_particle
 
 
 class JoblibCostFunctionWrapper(CostFunctionWrapperBase):
@@ -268,25 +265,25 @@ class Joblib(ProcessorBase):
 
                         if self._algorithm.double_particle_check:
                             self._algorithm.inter_iteration(actual_iter)
+                            double_check_ids = list(self._algorithm.double_check_ids)
 
-                            population = list(self._algorithm.population)
-
-                            self._algorithm.create_random_cache(
-                                particle_ids=population, initialize=False
-                            )
-                            processed_particles = parallel(
-                                delayed(second_update_worker)(particle_id)
-                                for particle_id in population
-                            )
-                            self.error_log(
-                                actual_iter=actual_iter,
-                                updated_particles=cast(
-                                    Iterable[ParticleBase], processed_particles
-                                ),
-                            )
-                            self._algorithm.update_population(
-                                cast(Iterable[ParticleBase], processed_particles)
-                            )
+                            if double_check_ids:
+                                self._algorithm.create_random_cache(
+                                    particle_ids=double_check_ids, initialize=False
+                                )
+                                processed_particles = parallel(
+                                    delayed(second_update_worker)(particle_id)
+                                    for particle_id in double_check_ids
+                                )
+                                self.error_log(
+                                    actual_iter=actual_iter,
+                                    updated_particles=cast(
+                                        Iterable[ParticleBase], processed_particles
+                                    ),
+                                )
+                                self._algorithm.update_population(
+                                    cast(Iterable[ParticleBase], processed_particles)
+                                )
 
                     self._algorithm.post_iteration(actual_iter)
                     self.iteration_log(actual_iter)

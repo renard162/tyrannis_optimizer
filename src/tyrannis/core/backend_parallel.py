@@ -63,18 +63,22 @@ class ParallelBackendBase(BackendBase, ABC):
                 -> update_population
                 -> [if algorithm.double_particle_check]
                     -> inter_iteration
-                    -> create_random_cache (entire population)
-                    -> second_update_particle (parallel)
-                    -> update_population
+                    -> [if double_check_ids]
+                        -> create_random_cache (double_check_ids)
+                        -> second_update_particle (double_check_ids, parallel)
+                        -> update_population
             -> post_iteration
         -> update_result
 
     Particle initialization and particle updates may be executed concurrently
     by the concrete parallel execution environment. Algorithms that require
     two particle checks execute `inter_iteration` after the first updated
-    population has been received by the backend. A new random cache is then
-    created before `second_update_particle` is distributed to the parallel
-    execution environment.
+    population has been received by the backend. The backend then obtains
+    `double_check_ids`, which identifies the particles that require the second
+    update. If this list is not empty, a new random cache is created only for
+    those particles before `second_update_particle` is distributed to the
+    parallel execution environment. If the list is empty, the second random
+    cache creation, particle processing, and population update are skipped.
 
     The backend must preserve the ordering and synchronization required between
     the algorithm lifecycle stages, while the cluster orchestrator is

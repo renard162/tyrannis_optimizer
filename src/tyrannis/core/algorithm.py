@@ -207,9 +207,10 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
             -> update population
             -> [if double_particle_check]
                 -> inter_iteration
-                -> create_random_cache
-                -> second_update_particle
-                -> update population
+                -> [if double_check_ids]
+                    -> create_random_cache (double_check_ids)
+                    -> second_update_particle (double_check_ids)
+                    -> update population
         -> post_iteration
 
     `pre_iteration` prepares the particle states and algorithm state for the
@@ -228,9 +229,11 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
     particles or other population-level decisions.
 
     When `double_particle_check` is enabled, `inter_iteration` updates the
-    algorithm state between the two particle-processing phases and
-    `second_update_particle` performs the second particle update using that
-    intermediate state.
+    algorithm state between the two particle-processing phases and defines
+    `double_check_ids`, which identifies the particles that require the second
+    update. Only those particles are passed to `create_random_cache` and
+    `second_update_particle`. If `double_check_ids` is empty, the second
+    particle-processing phase is skipped.
 
     `post_iteration` consolidates the new particle states and prepares the
     algorithm and its particles for the next execution cycle.
@@ -266,6 +269,7 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         self._iter_best: str | None = None
         self._iter_worst: str | None = None
         self._double_particle_check: bool = False
+        self._double_check_ids: list[str] = []
         self._max_iterations: int = n_iter
         # Start value of n_particles to initialize algorithm.
         # Thre real value is dinamically set after migration step
@@ -315,7 +319,17 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
 
     @property
     def double_particle_check(self) -> bool:
+        """Return whether the algorithm uses a second particle-processing phase."""
         return self._double_particle_check
+
+    @property
+    def double_check_ids(self) -> list[str]:
+        """Return the particle identifiers selected for the second update phase."""
+        return self._double_check_ids
+
+    @double_check_ids.setter
+    def double_check_ids(self, particle_ids: list[str]) -> None:
+        self._double_check_ids = particle_ids
 
     def update_n_particles(self) -> None:
         self._n_particles = len(self._population)
@@ -394,11 +408,14 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         population-level parameters, or performing other preparations required
         by the algorithm.
 
-        If the algorithm requires two cost-function checks for each particle
-        during an optimization iteration, ``self._double_particle_check`` must
-        be set to ``True`` by this method when ``actual_iter == 0``. This enables
-        the intermediate algorithm-state update and the second particle-update
-        phase for the subsequent optimization iterations.
+        If the algorithm requires a second cost-function check for one or more
+        particles during an optimization iteration,
+        ``self._double_particle_check`` must be set to ``True`` by this method
+        when ``actual_iter == 0``. This enables the intermediate algorithm-state
+        update and the optional second particle-update phase for subsequent
+        optimization iterations. The particles that actually participate in
+        that second phase are defined by ``double_check_ids`` after
+        ``inter_iteration``.
 
         Particles created during this method are considered new particles and
         are initialized immediately after this method returns. Their fitness
@@ -444,13 +461,16 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         random-generation strategy. When ``False``, it must generate the random
         values required by the immediately following particle-update phase.
 
-        If the algorithm uses two cost-function checks during the same
+        If the algorithm uses a second cost-function check during the same
         optimization iteration, ``create_random_cache`` is called separately
-        before ``update_particle`` and ``second_update_particle``. Each call with
-        ``initialize=False`` must therefore generate only the random values
-        required by the immediately following update phase. The second call occurs
-        after ``inter_iteration``, allowing its random-generation strategy to
-        depend on algorithm state established during the intermediate step.
+        before ``update_particle`` and, when required, before
+        ``second_update_particle``. Each call with ``initialize=False`` must
+        therefore generate only the random values required by the immediately
+        following update phase. The second call occurs after ``inter_iteration``
+        and receives only the identifiers in ``double_check_ids``, allowing its
+        random-generation strategy to depend on algorithm state established
+        during the intermediate step. If ``double_check_ids`` is empty, the
+        second cache creation is skipped.
 
         The random cache separates random-number generation from particle
         processing. This is particularly important when particle processing is
@@ -475,9 +495,10 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         algorithm. Implementations must generate the values required by the
         corresponding particle-processing logic and must not assume that all
         algorithms require the same number or type of random values. For
-        algorithms that use two particle checks, the caches for the first and
-        second update phases may therefore contain different values according to
-        the requirements of each phase.
+        algorithms that use two particle-processing phases, the caches for the
+        first and second update phases may therefore contain different values
+        according to the requirements of each phase. The second-phase cache is
+        created only for the particles identified by ``double_check_ids``.
 
         The value of ``initialize`` may therefore affect both the amount and the
         type of random values generated. An algorithm may require one sampling
@@ -637,15 +658,22 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         Update the algorithm state between two particle-processing phases.
 
         The current iteration number is provided through ``actual_iter``. This
-        method is used only by algorithms that require two cost-function checks
-        for each particle during the same optimization iteration and have enabled
-        ``double_particle_check``.
+        method is used only by algorithms that require a second cost-function
+        check for one or more particles during the same optimization iteration
+        and have enabled ``double_particle_check``.
 
         This method is executed after the results of ``update_particle`` have
-        been incorporated into the population and before
-        ``second_update_particle`` is executed. It is responsible for modifying
-        the algorithm state according to the results of the first particle
-        update when that intermediate state is required by the second update.
+        been incorporated into the population and before the optional second
+        particle-processing phase. It is responsible for modifying the algorithm
+        state according to the results of the first particle update when that
+        intermediate state is required by the second update.
+
+        Before this method returns, ``double_check_ids`` must contain the
+        identifiers of the particles in the current population that require
+        ``second_update_particle`` during this iteration. The processor reads
+        this list only after ``inter_iteration`` completes. If the list is empty,
+        the second random-cache creation, particle update, and population update
+        are skipped.
 
         Such operations may include consolidating intermediate particle states,
         updating population-level parameters, calculating selection information,
@@ -654,15 +682,16 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
 
         Random values required for particle processing must not be generated
         directly by this method solely for the purpose of making them available
-        to ``second_update_particle``. Random values are prepared separately by
-        ``create_random_cache`` immediately after this method returns.
+        to ``second_update_particle``. When ``double_check_ids`` is not empty,
+        random values are prepared separately by ``create_random_cache``
+        immediately after this method returns and only for those identifiers.
 
         The method may modify the algorithm state and the state of existing
         particles according to the lifecycle requirements of the concrete
         algorithm. It must not create or remove particles from the population.
 
-        Algorithms that do not require two particle checks may leave this method
-        unchanged.
+        Algorithms that do not require a second particle-processing phase may
+        leave this method unchanged.
         """
         return
 
@@ -670,10 +699,13 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         """
         Perform and return the second update of the identified particle.
 
-        This method is used only by algorithms that require two cost-function
-        checks for each particle during the same optimization iteration and have
-        enabled ``double_particle_check``. It is executed after
-        ``inter_iteration`` has modified the intermediate algorithm state.
+        This method is used only by algorithms that require a second
+        cost-function check for selected particles during the same optimization
+        iteration and have enabled ``double_particle_check``. It is executed only
+        for identifiers present in ``double_check_ids`` after
+        ``inter_iteration`` has modified the intermediate algorithm state. If
+        ``double_check_ids`` is empty, this method is not called during that
+        iteration.
 
         The second update must calculate the candidate state of the specified
         particle according to the optimization algorithm and return the resulting
@@ -716,8 +748,8 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         The returned particle represents the updated state of the particle and
         may be used to replace its corresponding entry in the population.
 
-        Algorithms that do not require two particle checks may use the default
-        implementation, which returns the particle unchanged.
+        Algorithms that do not require a second particle-processing phase may
+        use the default implementation, which returns the particle unchanged.
         """
         return self._population[identifier]
 

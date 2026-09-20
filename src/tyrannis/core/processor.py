@@ -2,7 +2,7 @@ import json
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from copy import deepcopy
-from typing import Any, Generic, Self, TypeVar, cast
+from typing import Any, Generic, Self, TypeVar
 
 import numpy as np
 
@@ -460,7 +460,29 @@ class ProcessorBase(ABC, Generic[SignalType]):
         loop to wait.
 
         The algorithm iteration must then be executed according to the
-        algorithm's defined iteration lifecycle.
+        algorithm's defined iteration lifecycle. Newly created particles must be
+        initialized and consolidated before the regular update phase. From
+        iteration 1 onward, the processor must create the random cache for the
+        current population, execute the first particle update, and incorporate the
+        returned particles into the population.
+
+        When `double_particle_check` is enabled, `inter_iteration` must always be
+        executed after the first population update and before determining which
+        particles participate in the second update phase. After
+        `inter_iteration` returns, the processor must copy `double_check_ids` and
+        use that same list for the complete second phase.
+
+        If the copied `double_check_ids` list is not empty, the processor must
+        create the second random cache only for those identifiers, execute
+        `second_update_particle` only for those identifiers, and update the
+        population only with the particles returned by that second phase. If the
+        list is empty, the second random-cache creation, particle processing, and
+        population update must all be skipped.
+
+        This ordering is required because `inter_iteration` may determine
+        `double_check_ids` from the results of the first update phase. It also
+        guarantees that the random values generated for the second phase correspond
+        exactly to the particles submitted for `second_update_particle`.
         """
 
 

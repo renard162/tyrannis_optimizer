@@ -105,27 +105,29 @@ class Serial(ProcessorBase):
 
                     if self._algorithm.double_particle_check:
                         self._algorithm.inter_iteration(actual_iter)
-                        self._algorithm.create_random_cache(
-                            particle_ids=[idx for idx in self._algorithm.population],
-                            initialize=False,
-                        )
-                        worker = partial(
-                            evaluate_particle,
-                            algorithm=self._algorithm,
-                            fitness_failure_strategy=self._fitness_failure_strategy,
-                            initialize_particle=False,
-                            second_update=True,
-                        )
+                        double_check_ids = list(self._algorithm.double_check_ids)
 
-                        processed_particles = [
-                            worker(particle_id)
-                            for particle_id in self._algorithm.population
-                        ]
-                        self.error_log(
-                            actual_iter=actual_iter,
-                            updated_particles=processed_particles,
-                        )
-                        self._algorithm.update_population(processed_particles)
+                        if double_check_ids:
+                            self._algorithm.create_random_cache(
+                                particle_ids=double_check_ids,
+                                initialize=False,
+                            )
+                            worker = partial(
+                                evaluate_particle,
+                                algorithm=self._algorithm,
+                                fitness_failure_strategy=self._fitness_failure_strategy,
+                                initialize_particle=False,
+                                second_update=True,
+                            )
+
+                            processed_particles = [
+                                worker(particle_id) for particle_id in double_check_ids
+                            ]
+                            self.error_log(
+                                actual_iter=actual_iter,
+                                updated_particles=processed_particles,
+                            )
+                            self._algorithm.update_population(processed_particles)
 
                 self._algorithm.post_iteration(actual_iter)
                 self.iteration_log(actual_iter)

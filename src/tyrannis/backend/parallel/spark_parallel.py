@@ -263,18 +263,22 @@ class SparkParallel(ParallelBackendBase):
 
                     if self._algorithm.double_particle_check:
                         self._algorithm.inter_iteration(actual_iter)
-                        self._algorithm.create_random_cache(
-                            particle_ids=list(self._algorithm.population),
-                            initialize=False,
-                        )
-                        processed_particles = self._parallel_update_particles(
-                            self._algorithm.population, second_update=True
-                        )
-                        self.error_log(
-                            actual_iter=actual_iter,
-                            updated_particles=processed_particles,
-                        )
-                        self._algorithm.update_population(processed_particles)
+                        double_check_ids = list(self._algorithm.double_check_ids)
+
+                        if double_check_ids:
+                            self._algorithm.create_random_cache(
+                                particle_ids=double_check_ids,
+                                initialize=False,
+                            )
+                            processed_particles = self._parallel_update_particles(
+                                double_check_ids,
+                                second_update=True,
+                            )
+                            self.error_log(
+                                actual_iter=actual_iter,
+                                updated_particles=processed_particles,
+                            )
+                            self._algorithm.update_population(processed_particles)
 
                 self._algorithm.post_iteration(actual_iter)
                 self.iteration_log(actual_iter)
