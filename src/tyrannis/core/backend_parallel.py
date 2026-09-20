@@ -2,8 +2,6 @@ import json
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 
-import numpy as np
-
 from ..core.backend_migration import MigrationDriverBase
 from ..core.processor import ProcessorBase
 from .algorithm import AlgorithmBase, ParticleBase
@@ -61,16 +59,26 @@ class ParallelBackendBase(BackendBase, ABC):
             -> update population
             -> [if actual_iter > 0]
                 -> create_random_cache (entire population)
-                -> update particles in parallel
-                -> update population
+                -> update_particle (parallel)
+                -> update_population
+                -> [if algorithm.double_particle_check]
+                    -> inter_iteration
+                    -> create_random_cache (entire population)
+                    -> second_update_particle (parallel)
+                    -> update_population
             -> post_iteration
         -> update_result
 
     Particle initialization and particle updates may be executed concurrently
-    by the concrete parallel execution environment. The backend must preserve
-    the ordering and synchronization required between the algorithm lifecycle
-    stages, while the cluster orchestrator is responsible for distributing
-    and scheduling the actual computational work.
+    by the concrete parallel execution environment. Algorithms that require
+    two particle checks execute `inter_iteration` after the first updated
+    population has been received by the backend. A new random cache is then
+    created before `second_update_particle` is distributed to the parallel
+    execution environment.
+
+    The backend must preserve the ordering and synchronization required between
+    the algorithm lifecycle stages, while the cluster orchestrator is
+    responsible for distributing and scheduling the actual computational work.
 
     The concrete backend defines how this parallel execution is implemented.
     For example, a Spark implementation may distribute particle operations
@@ -132,7 +140,7 @@ class ParallelBackendBase(BackendBase, ABC):
 
         for p_idx in range(self._n_particles):
             self._algorithm.create_particle(
-                identifier=f"{self._identifier}|particle:{p_idx}",
+                identifier=f"{self._identifier}|particle:{p_idx}"
             )
 
     def pre_iteration_log(self, actual_iter: int) -> None:
@@ -222,9 +230,7 @@ class ParallelBackendBase(BackendBase, ABC):
         if not (self._history_config.best or self._history_config.status):
             return
 
-        bests = [
-            (self._algorithm.local_best, "local_best"),
-        ]
+        bests = [(self._algorithm.local_best, "local_best")]
 
         if self._history_config.status:
             bests.extend(

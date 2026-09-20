@@ -205,6 +205,11 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
             -> create_random_cache
             -> update particles
             -> update population
+            -> [if double_particle_check]
+                -> inter_iteration
+                -> create_random_cache
+                -> second_update_particle
+                -> update population
         -> post_iteration
 
     `pre_iteration` prepares the particle states and algorithm state for the
@@ -212,7 +217,7 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
     from the population.
 
     `create_random_cache` generates the random values required by
-    `initialize_particle` and `update_particle`.
+    `initialize_particle`, `update_particle`, and `second_update_particle`.
 
     `initialize_particle` performs the algorithm-specific initialization of
     newly created particles, establishing their initial state.
@@ -221,6 +226,11 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
     state k+1. The resulting candidate state is not necessarily consolidated
     at this stage, since consolidation may require comparisons between
     particles or other population-level decisions.
+
+    When `double_particle_check` is enabled, `inter_iteration` updates the
+    algorithm state between the two particle-processing phases and
+    `second_update_particle` performs the second particle update using that
+    intermediate state.
 
     `post_iteration` consolidates the new particle states and prepares the
     algorithm and its particles for the next execution cycle.
@@ -255,6 +265,7 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         self._local_best: ParticleType | None = None
         self._iter_best: str | None = None
         self._iter_worst: str | None = None
+        self._double_particle_check: bool = False
         self._max_iterations: int = n_iter
         # Start value of n_particles to initialize algorithm.
         # Thre real value is dinamically set after migration step
@@ -301,6 +312,10 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
             for particle_id, particle in self._population.items()
             if particle.new_particle
         ]
+
+    @property
+    def double_particle_check(self) -> bool:
+        return self._double_particle_check
 
     def update_n_particles(self) -> None:
         self._n_particles = len(self._population)
@@ -379,6 +394,12 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         population-level parameters, or performing other preparations required
         by the algorithm.
 
+        If the algorithm requires two cost-function checks for each particle
+        during an optimization iteration, ``self._double_particle_check`` must
+        be set to ``True`` by this method when ``actual_iter == 0``. This enables
+        the intermediate algorithm-state update and the second particle-update
+        phase for the subsequent optimization iterations.
+
         Particles created during this method are considered new particles and
         are initialized immediately after this method returns. Their fitness
         must not be evaluated directly by ``pre_iteration``. The processor is
@@ -387,8 +408,9 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
 
         Random values required for particle initialization or update must not be
         generated directly by this method solely for the purpose of making them
-        available to ``initialize_particle`` or ``update_particle``. Random
-        values required during particle processing are prepared separately by
+        available to ``initialize_particle``, ``update_particle``, or
+        ``second_update_particle``. Random values required during particle
+        processing are prepared separately by
         ``create_random_cache`` immediately before the corresponding
         particle-processing phase.
 
@@ -413,13 +435,21 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         ``particle_ids`` contains the identifiers of the particles that will be
         processed in the immediately following particle-processing phase. The
         concrete algorithm must generate every random value that its
-        ``initialize_particle`` or ``update_particle`` implementation requires
-        and store those values in each particle's ``random_cache``.
+        ``initialize_particle``, ``update_particle``, or
+        ``second_update_particle`` implementation requires and store those
+        values in each particle's ``random_cache``.
 
         ``initialize`` indicates whether the particles are about to be
         initialized. When ``True``, the algorithm may use an initialization-specific
         random-generation strategy. When ``False``, it must generate the random
-        values required by the normal particle-update phase.
+        values required by the particle-update phase.
+
+        If the algorithm uses two cost-function checks during the same
+        optimization iteration, every call with ``initialize=False`` must
+        generate the complete set of random values required by both
+        ``update_particle`` and ``second_update_particle``. The same cache
+        generation strategy is therefore used before either update phase, even
+        though each phase may use only part of the generated values.
 
         The random cache separates random-number generation from particle
         processing. This is particularly important when particle processing is
@@ -441,9 +471,11 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         requirements.
 
         The amount and type of random values required are specific to each
-        algorithm. Implementations must generate exactly the values required by
-        the corresponding particle-processing logic and must not assume that all
-        algorithms require the same number or type of random values.
+        algorithm. Implementations must generate the values required by the
+        corresponding particle-processing logic and must not assume that all
+        algorithms require the same number or type of random values. For
+        algorithms that use two particle checks, every update cache must include
+        the values required by both update phases.
 
         The value of ``initialize`` may therefore affect both the amount and the
         type of random values generated. An algorithm may require one sampling
@@ -467,11 +499,11 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         reused between particles unless such reuse is explicitly part of the
         algorithm's mathematical definition.
 
-        ``initialize_particle`` and ``update_particle`` must consume the values
-        from the cache rather than generating new random values themselves.
-        Consumed values should be removed from the cache so that the cache
-        contains only the random values that remain available to the current
-        particle-processing phase.
+        ``initialize_particle``, ``update_particle``, and
+        ``second_update_particle`` must obtain the values from the cache rather
+        than generating new random values themselves. Cached values must not be
+        removed during particle processing. The cache is cleared by the framework
+        when the processed population is updated.
         """
         raise NotImplementedError
 
@@ -564,11 +596,11 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
 
         Random values in ``random_cache`` are identified by keys defined by the
         concrete algorithm. The update implementation must retrieve each value
-        using its corresponding key and remove it from the cache, normally with
-        ``pop(key)``. It must not rely on dictionary insertion order or generate
-        additional random values during the update.
+        using its corresponding key without removing it from the cache. It must
+        not rely on dictionary insertion order or generate additional random
+        values during the update.
 
-        Key-based consumption is important because different algorithms require
+        Key-based access is important because different algorithms require
         different quantities and types of random values. A cache may therefore
         contain entries for different operations, variables, or stages of the
         update. For example, an algorithm may use keys such as
@@ -576,10 +608,9 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         associated with the same variable.
 
         The concrete implementation is responsible for knowing exactly which
-        cached values it requires and which keys identify them. It must consume
-        the corresponding values completely during the particle update. It must
-        not assume that the cache has a fixed size or fixed value types shared
-        by all algorithms.
+        cached values it requires and which keys identify them. It must not
+        assume that the cache has a fixed size or fixed value types shared by all
+        algorithms.
 
         The random cache is temporary state associated with the current
         particle-processing phase. It must not be treated as persistent
@@ -599,6 +630,95 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         """
         raise NotImplementedError
 
+    def inter_iteration(self, actual_iter: int) -> None:
+        """
+        Update the algorithm state between two particle-processing phases.
+
+        The current iteration number is provided through ``actual_iter``. This
+        method is used only by algorithms that require two cost-function checks
+        for each particle during the same optimization iteration and have enabled
+        ``double_particle_check``.
+
+        This method is executed after the results of ``update_particle`` have
+        been incorporated into the population and before
+        ``second_update_particle`` is executed. It is responsible for modifying
+        the algorithm state according to the results of the first particle
+        update when that intermediate state is required by the second update.
+
+        Such operations may include consolidating intermediate particle states,
+        updating population-level parameters, calculating selection information,
+        or performing other preparations required by the algorithm before the
+        second particle-processing phase.
+
+        Random values required for particle processing must not be generated
+        directly by this method solely for the purpose of making them available
+        to ``second_update_particle``. Random values are prepared separately by
+        ``create_random_cache`` immediately after this method returns.
+
+        The method may modify the algorithm state and the state of existing
+        particles according to the lifecycle requirements of the concrete
+        algorithm. It must not create or remove particles from the population.
+
+        Algorithms that do not require two particle checks may leave this method
+        unchanged.
+        """
+        return
+
+    def second_update_particle(self, identifier: str) -> ParticleType:
+        """
+        Perform and return the second update of the identified particle.
+
+        This method is used only by algorithms that require two cost-function
+        checks for each particle during the same optimization iteration and have
+        enabled ``double_particle_check``. It is executed after
+        ``inter_iteration`` has modified the intermediate algorithm state.
+
+        The second update must calculate the candidate state of the specified
+        particle according to the optimization algorithm and return the resulting
+        particle. The returned particle may subsequently be used by the processor
+        to replace the corresponding particle in the population.
+
+        Any random values required by the update must be obtained from the
+        particle's ``random_cache``. Random values must not normally be generated
+        directly by this method. The cache is populated by
+        ``create_random_cache`` immediately before the particle-processing phase,
+        while the algorithm is still executing in the context that owns its
+        random-number generator.
+
+        Random values in ``random_cache`` are identified by keys defined by the
+        concrete algorithm. The update implementation must retrieve each value
+        using its corresponding key without removing it from the cache. It must
+        not rely on dictionary insertion order or generate additional random
+        values during the update.
+
+        The concrete implementation is responsible for knowing exactly which
+        cached values it requires and which keys identify them. It must not assume
+        that the cache has a fixed size or fixed value types shared by all
+        algorithms.
+
+        The random cache is temporary state associated with the current
+        particle-processing phase. It must not be treated as persistent algorithm
+        state.
+
+        This method may modify the specified particle and, consequently, the
+        algorithm's population. Changes made to the population are preserved
+        after the particle update process and become part of the algorithm's
+        subsequent state.
+
+        No state of the algorithm other than the population may be modified by
+        this method. Changes made to other algorithm state are considered
+        volatile and may be discarded after the particle update process. State
+        required by the second update must therefore be prepared through
+        ``inter_iteration`` before particle processing begins.
+
+        The returned particle represents the updated state of the particle and
+        may be used to replace its corresponding entry in the population.
+
+        Algorithms that do not require two particle checks may use the default
+        implementation, which returns the particle unchanged.
+        """
+        return self._population[identifier]
+
     def update_population(self, new_population: Iterable[ParticleType]) -> None:
         self._population.update(
             {particle.identifier: particle for particle in new_population}
@@ -617,7 +737,7 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         and does not represent the first actual optimization iteration.
 
         This method is executed after the initialization of newly created
-        particles and the update of the particles participating in the current
+        particles and all particle update phases participating in the current
         iteration. It is therefore the appropriate lifecycle stage for
         consolidating candidate particle states, updating population-level
         algorithm state, calculating iteration-level information, and performing

@@ -22,13 +22,7 @@ class SparkParallelCostFunctionWrapper(CostFunctionWrapperBase):
 
 class SparkParallel(ParallelBackendBase):
     _particle_schema = StructType(
-        [
-            StructField(
-                "particles",
-                BinaryType(),
-                nullable=False,
-            ),
-        ]
+        [StructField("particles", BinaryType(), nullable=False)]
     )
 
     def __init__(
@@ -216,9 +210,7 @@ class SparkParallel(ParallelBackendBase):
                     f"Spark code archive not found: {self._code_archive}"
                 )
 
-            self._spark.sparkContext.addPyFile(
-                str(self._code_archive),
-            )
+            self._spark.sparkContext.addPyFile(str(self._code_archive))
 
         self.init_particles()
 
@@ -237,15 +229,13 @@ class SparkParallel(ParallelBackendBase):
 
                 if new_particles_ids:
                     self._algorithm.create_random_cache(
-                        particle_ids=new_particles_ids,
-                        initialize=True,
+                        particle_ids=new_particles_ids, initialize=True
                     )
                     new_particles = self._parallel_initialize_particles(
-                        new_particles_ids,
+                        new_particles_ids
                     )
                     self.error_log(
-                        actual_iter=actual_iter,
-                        updated_particles=new_particles,
+                        actual_iter=actual_iter, updated_particles=new_particles
                     )
                     new_particles = parallel(
                         delayed(self._algorithm.consolidate_new_particles)(particle)
@@ -261,18 +251,30 @@ class SparkParallel(ParallelBackendBase):
 
                 if actual_iter > 0:
                     self._algorithm.create_random_cache(
-                        particle_ids=list(self._algorithm.population),
-                        initialize=False,
+                        particle_ids=list(self._algorithm.population), initialize=False
                     )
                     processed_particles = self._parallel_update_particles(
-                        self._algorithm.population,
+                        self._algorithm.population
                     )
                     self.error_log(
-                        actual_iter=actual_iter,
-                        updated_particles=processed_particles,
+                        actual_iter=actual_iter, updated_particles=processed_particles
                     )
-
                     self._algorithm.update_population(processed_particles)
+
+                    if self._algorithm.double_particle_check:
+                        self._algorithm.inter_iteration(actual_iter)
+                        self._algorithm.create_random_cache(
+                            particle_ids=list(self._algorithm.population),
+                            initialize=False,
+                        )
+                        processed_particles = self._parallel_update_particles(
+                            self._algorithm.population, second_update=True
+                        )
+                        self.error_log(
+                            actual_iter=actual_iter,
+                            updated_particles=processed_particles,
+                        )
+                        self._algorithm.update_population(processed_particles)
 
                 self._algorithm.post_iteration(actual_iter)
                 self.iteration_log(actual_iter)
@@ -281,17 +283,16 @@ class SparkParallel(ParallelBackendBase):
                 self.best_log(actual_iter)
 
     def _parallel_initialize_particles(
-        self,
-        particle_ids: list[str],
+        self, particle_ids: list[str]
     ) -> list[ParticleBase]:
         return self._parallel_process_particles(
-            particle_ids=particle_ids,
-            initialize_particle=True,
+            particle_ids=particle_ids, initialize_particle=True
         )
 
     def _parallel_update_particles(
         self,
         particle_ids: list[str] | dict[str, ParticleBase],
+        second_update: bool = False,
     ) -> list[ParticleBase]:
         if isinstance(particle_ids, dict):
             particle_ids = list(particle_ids)
@@ -299,38 +300,35 @@ class SparkParallel(ParallelBackendBase):
         return self._parallel_process_particles(
             particle_ids=particle_ids,
             initialize_particle=False,
+            second_update=second_update,
         )
 
     def _parallel_process_particles(
         self,
         particle_ids: list[str],
         initialize_particle: bool,
+        second_update: bool = False,
     ) -> list[ParticleBase]:
         if not particle_ids:
             return []
 
         serialized_algorithm = cloudpickle.dumps(self._algorithm)
         particles_df = self._spark.createDataFrame(
-            [(particle_id,) for particle_id in particle_ids],
-            ["particle_id"],
+            [(particle_id,) for particle_id in particle_ids], ["particle_id"]
         )
 
         fitness_failure_strategy = self._fitness_failure_strategy
 
-        def worker(
-            batches: Iterable[pd.DataFrame],
-        ) -> Iterator[pd.DataFrame]:
+        def worker(batches: Iterable[pd.DataFrame]) -> Iterator[pd.DataFrame]:
             return _process_particle_batches(
                 batches=iter(batches),
                 serialized_algorithm=serialized_algorithm,
                 initialize_particle=initialize_particle,
+                second_update=second_update,
                 fitness_failure_strategy=fitness_failure_strategy,
             )
 
-        result_df = particles_df.mapInPandas(
-            worker,
-            schema=self._particle_schema,
-        )
+        result_df = particles_df.mapInPandas(worker, schema=self._particle_schema)
 
         rows = result_df.collect()
         particles: list[ParticleBase] = []
@@ -345,11 +343,10 @@ def _process_particle_batches(
     batches: Iterator[pd.DataFrame],
     serialized_algorithm: bytes,
     initialize_particle: bool,
+    second_update: bool,
     fitness_failure_strategy: str,
 ) -> Iterator[pd.DataFrame]:
-    algorithm = cloudpickle.loads(
-        serialized_algorithm,
-    )
+    algorithm = cloudpickle.loads(serialized_algorithm)
 
     particles: list[ParticleBase] = []
 
@@ -358,6 +355,8 @@ def _process_particle_batches(
             try:
                 if initialize_particle:
                     particle = algorithm.initialize_particle(particle_id)
+                elif second_update:
+                    particle = algorithm.second_update_particle(particle_id)
                 else:
                     particle = algorithm.update_particle(particle_id)
 
@@ -383,8 +382,4 @@ def _process_particle_batches(
 
     serialized_particles = cloudpickle.dumps(particles)
 
-    yield pd.DataFrame(
-        {
-            "particles": [serialized_particles],
-        }
-    )
+    yield pd.DataFrame({"particles": [serialized_particles]})

@@ -469,10 +469,13 @@ def evaluate_particle(
     algorithm: AlgorithmBase,
     fitness_failure_strategy: str,
     initialize_particle: bool = False,
+    second_update: bool = False,
 ) -> ParticleBase:
     try:
         if initialize_particle:
             particle = algorithm.initialize_particle(particle_id)
+        elif second_update:
+            particle = algorithm.second_update_particle(particle_id)
         else:
             particle = algorithm.update_particle(particle_id)
 

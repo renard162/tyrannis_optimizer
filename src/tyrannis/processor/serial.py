@@ -42,67 +42,95 @@ class Serial(ProcessorBase):
         self.init_particles()
         self.initialize_loop_context()
 
-        for actual_iter in range(self._n_iter + 1):
-            self.migration_control(actual_iter)
+        try:
+            for actual_iter in range(self._n_iter + 1):
+                self.migration_control(actual_iter)
 
-            self._algorithm.pre_iteration(actual_iter)
-            self.pre_iteration_log(actual_iter)
+                self._algorithm.pre_iteration(actual_iter)
+                self.pre_iteration_log(actual_iter)
 
-            new_particles_ids = self._algorithm.new_particles_id
-            if new_particles_ids:
-                self._algorithm.create_random_cache(
-                    particle_ids=new_particles_ids,
-                    initialize=True,
-                )
-                worker = partial(
-                    evaluate_particle,
-                    algorithm=self._algorithm,
-                    fitness_failure_strategy=self._fitness_failure_strategy,
-                    initialize_particle=True,
-                )
+                new_particles_ids = self._algorithm.new_particles_id
+                if new_particles_ids:
+                    self._algorithm.create_random_cache(
+                        particle_ids=new_particles_ids,
+                        initialize=True,
+                    )
+                    worker = partial(
+                        evaluate_particle,
+                        algorithm=self._algorithm,
+                        fitness_failure_strategy=self._fitness_failure_strategy,
+                        initialize_particle=True,
+                        second_update=False,
+                    )
 
-                new_particles = [
-                    worker(particle_id) for particle_id in new_particles_ids
-                ]
-                self.error_log(
-                    actual_iter=actual_iter,
-                    updated_particles=new_particles,
-                )
-                new_particles = [
-                    self._algorithm.consolidate_new_particles(particle)
-                    for particle in new_particles
-                ]
-                self.new_particle_log(
-                    actual_iter=actual_iter,
-                    new_particles=new_particles,
-                )
-                self._algorithm.update_population(new_particles)
+                    new_particles = [
+                        worker(particle_id) for particle_id in new_particles_ids
+                    ]
+                    self.error_log(
+                        actual_iter=actual_iter,
+                        updated_particles=new_particles,
+                    )
+                    new_particles = [
+                        self._algorithm.consolidate_new_particles(particle)
+                        for particle in new_particles
+                    ]
+                    self.new_particle_log(
+                        actual_iter=actual_iter,
+                        new_particles=new_particles,
+                    )
+                    self._algorithm.update_population(new_particles)
 
-            if actual_iter > 0:
-                self._algorithm.create_random_cache(
-                    particle_ids=[idx for idx in self._algorithm.population],
-                    initialize=False,
-                )
-                worker = partial(
-                    evaluate_particle,
-                    algorithm=self._algorithm,
-                    fitness_failure_strategy=self._fitness_failure_strategy,
-                    initialize_particle=False,
-                )
+                if actual_iter > 0:
+                    self._algorithm.create_random_cache(
+                        particle_ids=[idx for idx in self._algorithm.population],
+                        initialize=False,
+                    )
+                    worker = partial(
+                        evaluate_particle,
+                        algorithm=self._algorithm,
+                        fitness_failure_strategy=self._fitness_failure_strategy,
+                        initialize_particle=False,
+                        second_update=False,
+                    )
 
-                processed_particles = [
-                    worker(particle_id) for particle_id in self._algorithm.population
-                ]
-                self.error_log(
-                    actual_iter=actual_iter,
-                    updated_particles=processed_particles,
-                )
-                self._algorithm.update_population(processed_particles)
+                    processed_particles = [
+                        worker(particle_id)
+                        for particle_id in self._algorithm.population
+                    ]
+                    self.error_log(
+                        actual_iter=actual_iter,
+                        updated_particles=processed_particles,
+                    )
+                    self._algorithm.update_population(processed_particles)
 
-            self._algorithm.post_iteration(actual_iter)
-            self.iteration_log(actual_iter)
+                    if self._algorithm.double_particle_check:
+                        self._algorithm.inter_iteration(actual_iter)
+                        self._algorithm.create_random_cache(
+                            particle_ids=[idx for idx in self._algorithm.population],
+                            initialize=False,
+                        )
+                        worker = partial(
+                            evaluate_particle,
+                            algorithm=self._algorithm,
+                            fitness_failure_strategy=self._fitness_failure_strategy,
+                            initialize_particle=False,
+                            second_update=True,
+                        )
 
-            self.update_status()
-            self.best_log(actual_iter)
+                        processed_particles = [
+                            worker(particle_id)
+                            for particle_id in self._algorithm.population
+                        ]
+                        self.error_log(
+                            actual_iter=actual_iter,
+                            updated_particles=processed_particles,
+                        )
+                        self._algorithm.update_population(processed_particles)
 
-        self.finalize_loop_context()
+                self._algorithm.post_iteration(actual_iter)
+                self.iteration_log(actual_iter)
+
+                self.update_status()
+                self.best_log(actual_iter)
+        finally:
+            self.finalize_loop_context()

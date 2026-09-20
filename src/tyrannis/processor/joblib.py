@@ -165,7 +165,7 @@ class Joblib(ProcessorBase):
             raise RuntimeError("Migration processor cannot be None.")
 
         self._migration_processor.initialize_loop_context(
-            migration_signal=self._migration_signal,
+            migration_signal=self._migration_signal
         )
 
     def finalize_loop_context(self) -> None:
@@ -184,6 +184,7 @@ class Joblib(ProcessorBase):
             algorithm=self._algorithm,
             fitness_failure_strategy=self._fitness_failure_strategy,
             initialize_particle=True,
+            second_update=False,
         )
 
         update_worker = partial(
@@ -191,6 +192,15 @@ class Joblib(ProcessorBase):
             algorithm=self._algorithm,
             fitness_failure_strategy=self._fitness_failure_strategy,
             initialize_particle=False,
+            second_update=False,
+        )
+
+        second_update_worker = partial(
+            evaluate_particle,
+            algorithm=self._algorithm,
+            fitness_failure_strategy=self._fitness_failure_strategy,
+            initialize_particle=False,
+            second_update=True,
         )
 
         try:
@@ -211,8 +221,7 @@ class Joblib(ProcessorBase):
 
                     if new_particles_ids:
                         self._algorithm.create_random_cache(
-                            particle_ids=new_particles_ids,
-                            initialize=True,
+                            particle_ids=new_particles_ids, initialize=True
                         )
 
                         new_particles = parallel(
@@ -241,10 +250,8 @@ class Joblib(ProcessorBase):
                         population = list(self._algorithm.population)
 
                         self._algorithm.create_random_cache(
-                            particle_ids=population,
-                            initialize=False,
+                            particle_ids=population, initialize=False
                         )
-
                         processed_particles = parallel(
                             delayed(update_worker)(particle_id)
                             for particle_id in population
@@ -258,6 +265,28 @@ class Joblib(ProcessorBase):
                         self._algorithm.update_population(
                             cast(Iterable[ParticleBase], processed_particles)
                         )
+
+                        if self._algorithm.double_particle_check:
+                            self._algorithm.inter_iteration(actual_iter)
+
+                            population = list(self._algorithm.population)
+
+                            self._algorithm.create_random_cache(
+                                particle_ids=population, initialize=False
+                            )
+                            processed_particles = parallel(
+                                delayed(second_update_worker)(particle_id)
+                                for particle_id in population
+                            )
+                            self.error_log(
+                                actual_iter=actual_iter,
+                                updated_particles=cast(
+                                    Iterable[ParticleBase], processed_particles
+                                ),
+                            )
+                            self._algorithm.update_population(
+                                cast(Iterable[ParticleBase], processed_particles)
+                            )
 
                     self._algorithm.post_iteration(actual_iter)
                     self.iteration_log(actual_iter)
