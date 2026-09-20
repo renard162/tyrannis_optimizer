@@ -55,9 +55,12 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
 
         steady_state_fraction : float, default=0.1
             Defines the fraction of the population modified at each steady-state
-            iteration. The value must be between 0 and 1, with at least one particle
-            always selected. Selected particles are not repeated until the entire
-            population has been covered.
+            iteration. The value must be between 0 and 1. A value of 0 deliberately
+            selects exactly one particle per iteration. Selected particles are not
+            repeated until the entire replacement-eligible population has been
+            covered. With elitist survival, elite individuals are excluded from
+            replacement and the number of updates is capped by the number of
+            non-elite individuals.
 
         selection : {"tournament", "fitness", "ranking"}, default="tournament"
             Defines how parents are selected from the population.
@@ -86,8 +89,11 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
             variables of one of the selected parents.
 
         arithmetic_alpha : float, default=0.5
-            Defines the mixing coefficient used by arithmetic crossover. A value of
-            0.5 gives equal influence to both parents.
+            Defines the mixing coefficient used by arithmetic crossover. The
+            formulation conventionally documented in the literature uses values in
+            [0, 1], where 0.5 gives equal influence to both parents. Values greater
+            than 1 are supported as an extension and produce extrapolation beyond the
+            parental interval before the search-space bounds are enforced.
 
         blx_alpha : float, default=0.5
             Defines the extension of the sampling interval used by BLX crossover.
@@ -95,9 +101,9 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
             by the parents.
 
         sbx_eta : float, default=20.0
-            Defines the distribution index of simulated binary crossover. Larger values
-            concentrate offspring closer to the parents, while smaller values allow
-            broader exploration.
+            Defines the non-negative distribution index of simulated binary crossover.
+            Larger values concentrate offspring closer to the parents, while smaller
+            values allow broader exploration.
 
         mutation : {"gaussian", "polynomial"}, default="polynomial"
             Defines how variables are perturbed after crossover.
@@ -107,9 +113,9 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
             distribution index.
 
         polynomial_eta : float, default=20.0
-            Defines the distribution index of polynomial mutation. Larger values
-            concentrate mutations closer to the current value, while smaller values
-            allow larger perturbations.
+            Defines the non-negative distribution index of polynomial mutation. Larger
+            values concentrate mutations closer to the current value, while smaller
+            values allow larger perturbations.
 
         gaussian_sigma : float, default=0.1
             Defines the standard deviation of Gaussian mutation relative to the range
@@ -130,8 +136,10 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
             protection.
 
         elite_count : int, default=1
-            Defines the number of best individuals protected when
-            ``survival="elitism"``.
+            Defines the requested number of best individuals protected when
+            ``survival="elitism"``. The effective elite count is dynamically limited
+            to at most ``population_size - 1``, guaranteeing at least one non-elite
+            individual.
 
         Notes
         -----
@@ -149,12 +157,14 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
         the population rather than from the magnitude of the objective values.
 
         Selected parents are combined using the configured crossover operator.
-        Arithmetic crossover generates values between the parents according to a
-        mixing coefficient. BLX-alpha samples values from an interval surrounding
-        the range defined by the parents, allowing offspring to explore beyond their
-        current values. Simulated binary crossover generates real-valued offspring
-        with a distribution controlled by ``sbx_eta`` and provides a flexible balance
-        between exploration around and exploitation of the parent solutions.
+        Arithmetic crossover conventionally generates values between the parents
+        when ``arithmetic_alpha`` is in [0, 1]. Values greater than 1 are supported as
+        an extension and extrapolate beyond the parental interval before the
+        search-space bounds are enforced. BLX-alpha samples values from an interval
+        surrounding the range defined by the parents, allowing offspring to explore
+        beyond their current values. Simulated binary crossover generates real-valued
+        offspring with a distribution controlled by ``sbx_eta`` and provides a flexible
+        balance between exploration around and exploitation of the parent solutions.
 
         After crossover, mutation can modify each variable independently. Gaussian
         mutation introduces normally distributed perturbations whose scale depends
@@ -167,17 +177,20 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
         generational evolution, the entire population is replaced by newly generated
         candidates at each iteration. In steady-state evolution, only a fraction of
         the population is modified at a time. The fraction is controlled by
-        ``steady_state_fraction`` and at least one individual is modified per
-        iteration. The selected individuals are covered without repetition before a
-        new selection cycle begins, ensuring that the population is progressively
-        updated rather than relying on random selection that could leave individuals
-        unmodified for an arbitrarily long period.
+        ``steady_state_fraction``. A value of 0 deliberately selects exactly one
+        individual per iteration. Replacement-eligible individuals are covered
+        without repetition before a new selection cycle begins; if an iteration
+        crosses a cycle boundary, the next cycle immediately supplies the remaining
+        updates. Newly arrived migration particles are incorporated into the current
+        cycle. With elitist survival, elite individuals are excluded from replacement.
 
         Survivor selection determines which generated candidates become part of the
         population. With elitist survival, the best ``elite_count`` individuals are
         preserved, preventing the best solutions found so far from being replaced.
-        With replacement survival, generated candidates are accepted without this
-        elitist protection.
+        Elites remain eligible for parent selection but are excluded from steady-state
+        replacement, and the effective elite count is limited to at most one less than
+        the current population size. With replacement survival, generated candidates
+        are accepted without this elitist protection.
 
         The Genetic Algorithm is a derivative-free method and does not require
         gradient information from the objective function. Its real-valued
@@ -271,7 +284,7 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
         self._validate_probability(crossover_probability, "crossover_probability")
         self._validate_finite_nonnegative(arithmetic_alpha, "arithmetic_alpha")
         self._validate_finite_nonnegative(blx_alpha, "blx_alpha")
-        self._validate_finite_positive(sbx_eta, "sbx_eta")
+        self._validate_finite_nonnegative(sbx_eta, "sbx_eta")
 
         if mutation not in ("gaussian", "polynomial"):
             raise ValueError("mutation must be 'gaussian' or 'polynomial'.")
@@ -281,7 +294,7 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
 
         self._validate_finite_nonnegative(mutation_intensity, "mutation_intensity")
         self._validate_finite_positive(gaussian_sigma, "gaussian_sigma")
-        self._validate_finite_positive(polynomial_eta, "polynomial_eta")
+        self._validate_finite_nonnegative(polynomial_eta, "polynomial_eta")
 
         if survival not in ("elitism", "replacement"):
             raise ValueError("survival must be 'elitism' or 'replacement'.")
@@ -315,6 +328,7 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
         self._effective_mutation_probability: float | None = None
         self._active_identifiers: set[str] = set()
         self._steady_state_queue: list[str] = []
+        self._steady_state_cycle_identifiers: set[str] = set()
 
     @staticmethod
     def _validate_probability(value: float, name: str) -> None:
@@ -341,6 +355,74 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
 
         if not np.isfinite(value) or value <= 0:
             raise ValueError(f"{name} must be a finite number greater than 0.")
+
+    @staticmethod
+    def _next_power_of_ten(value: float) -> float:
+        if value <= 0:
+            return float(np.nextafter(0.0, 1.0))
+
+        exponent = int(np.ceil(np.log10(value)))
+        power = float(10.0**exponent)
+
+        if power == 0.0:
+            return float(np.nextafter(0.0, 1.0))
+
+        return power
+
+    @staticmethod
+    def _ulp_toward_zero(value: float) -> float:
+        if value == 0.0:
+            return float(np.nextafter(0.0, 1.0))
+
+        adjacent = np.nextafter(value, 0.0)
+        return float(abs(value - adjacent))
+
+    def _sbx_tolerance(
+        self, first: float, second: float, lower: float, upper: float
+    ) -> float:
+        epsilon_margin = float(10.0 * np.finfo(float).eps)
+
+        if np.signbit(lower) != np.signbit(upper):
+            domain_tolerance = epsilon_margin * abs(lower) + epsilon_margin * abs(upper)
+        else:
+            domain_tolerance = epsilon_margin * abs(upper - lower)
+
+        ulp_tolerance = 4.0 * max(
+            self._ulp_toward_zero(first), self._ulp_toward_zero(second)
+        )
+
+        return self._next_power_of_ten(max(domain_tolerance, ulp_tolerance))
+
+    def _start_steady_state_cycle(self, eligible_identifiers: list[str]) -> None:
+        self._steady_state_cycle_identifiers = set(eligible_identifiers)
+        self._steady_state_queue = eligible_identifiers.copy()
+        self._rng.shuffle(self._steady_state_queue)
+
+    def _synchronize_steady_state_cycle(self, eligible_identifiers: list[str]) -> None:
+        eligible_identifier_set = set(eligible_identifiers)
+
+        self._steady_state_queue = [
+            identifier
+            for identifier in self._steady_state_queue
+            if identifier in eligible_identifier_set
+        ]
+        self._steady_state_cycle_identifiers.intersection_update(
+            eligible_identifier_set
+        )
+
+        new_identifiers = [
+            identifier
+            for identifier in eligible_identifiers
+            if identifier not in self._steady_state_cycle_identifiers
+        ]
+
+        if new_identifiers:
+            self._steady_state_queue.extend(new_identifiers)
+            self._steady_state_cycle_identifiers.update(new_identifiers)
+            self._rng.shuffle(self._steady_state_queue)
+
+        if not self._steady_state_queue:
+            self._steady_state_cycle_identifiers = set()
 
     @property
     def population_method(self) -> str:
@@ -444,39 +526,59 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
                 self._effective_mutation_probability = self._mutation_probability
 
             self._active_identifiers = set()
-
-            if self._population_method == "steady-state":
-                particle_ids = list(self._population)
-                self._rng.shuffle(particle_ids)
-                self._steady_state_queue = particle_ids
-            else:
-                self._steady_state_queue = []
-
+            self._steady_state_queue = []
+            self._steady_state_cycle_identifiers = set()
             return
 
-        if self._population_method == "steady-state":
-            particle_ids = set(self._population)
+        if self._population_method != "steady-state":
+            self._active_identifiers = set()
+            return
 
-            self._steady_state_queue = [
-                identifier
-                for identifier in self._steady_state_queue
-                if identifier in particle_ids
-            ]
+        particle_ids = list(self._population)
+        elite_identifiers = self._elite_identifiers()
+        eligible_identifiers = [
+            identifier
+            for identifier in particle_ids
+            if identifier not in elite_identifiers
+        ]
+
+        if not eligible_identifiers:
+            self._active_identifiers = set()
+            self._steady_state_queue = []
+            self._steady_state_cycle_identifiers = set()
+            return
+
+        self._synchronize_steady_state_cycle(eligible_identifiers=eligible_identifiers)
+
+        n_updates = max(
+            1, int(np.ceil(self._steady_state_fraction * len(particle_ids)))
+        )
+        n_updates = min(n_updates, len(eligible_identifiers))
+
+        active_identifiers: set[str] = set()
+
+        while len(active_identifiers) < n_updates:
+            if not self._steady_state_queue:
+                self._start_steady_state_cycle(
+                    eligible_identifiers=eligible_identifiers
+                )
+
+            selected_index = next(
+                index
+                for index, identifier in enumerate(self._steady_state_queue)
+                if identifier not in active_identifiers
+            )
+            identifier = self._steady_state_queue[selected_index]
+            self._steady_state_queue = (
+                self._steady_state_queue[:selected_index]
+                + self._steady_state_queue[selected_index + 1 :]
+            )
+            active_identifiers.add(identifier)
 
             if not self._steady_state_queue:
-                self._steady_state_queue = list(particle_ids)
-                self._rng.shuffle(self._steady_state_queue)
+                self._steady_state_cycle_identifiers = set()
 
-            n_updates = max(
-                1, int(np.ceil(self._steady_state_fraction * len(particle_ids)))
-            )
-
-            n_updates = min(n_updates, len(self._steady_state_queue))
-
-            self._active_identifiers = set(self._steady_state_queue[:n_updates])
-            self._steady_state_queue = self._steady_state_queue[n_updates:]
-        else:
-            self._active_identifiers = set()
+        self._active_identifiers = active_identifiers
 
     def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
         for identifier in particle_ids:
@@ -576,30 +678,49 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
         fitness = np.where(np.isnan(fitness), np.inf, fitness)
 
         if self._selection == "fitness":
-            if np.any(np.isneginf(fitness)):
-                probabilities = np.isneginf(fitness).astype(float)
+            negative_infinite = np.isneginf(fitness)
+
+            if np.any(negative_infinite):
+                probabilities = negative_infinite.astype(float)
+                return probabilities / np.sum(probabilities)
+
+            finite = np.isfinite(fitness)
+
+            if not np.any(finite):
+                return np.full(len(particles), 1.0 / len(particles))
+
+            finite_fitness = fitness[finite]
+            maximum_magnitude = np.max(np.abs(finite_fitness))
+
+            if maximum_magnitude == 0.0:
+                scaled_fitness = finite_fitness
             else:
-                finite = np.isfinite(fitness)
+                _, exponent = np.frexp(maximum_magnitude)
+                scaled_fitness = np.ldexp(finite_fitness, -int(exponent))
 
-                if not np.any(finite):
-                    return np.full(len(particles), 1.0 / len(particles))
-
-                worst = np.max(fitness[finite])
-                probabilities = np.zeros(len(particles), dtype=float)
-
-                probabilities[finite] = worst - fitness[finite] + np.finfo(float).eps
-        else:
-            order = np.argsort(fitness, kind="stable")
-
+            worst = np.max(scaled_fitness)
             probabilities = np.zeros(len(particles), dtype=float)
-            probabilities[order] = np.arange(len(particles), 0, -1, dtype=float)
+            probabilities[finite] = worst - scaled_fitness
 
-        total = np.sum(probabilities)
+            total = np.sum(probabilities)
 
-        if not np.isfinite(total) or total <= 0:
-            return np.full(len(particles), 1.0 / len(particles))
+            if total == 0.0:
+                probabilities[finite] = 1.0
+                return probabilities / np.sum(probabilities)
 
-        return probabilities / total
+            if not np.isfinite(total):
+                raise RuntimeError(
+                    "Fitness-proportionate selection produced non-finite weights."
+                )
+
+            return probabilities / total
+
+        order = np.argsort(fitness, kind="stable")
+
+        probabilities = np.zeros(len(particles), dtype=float)
+        probabilities[order] = np.arange(len(particles), 0, -1, dtype=float)
+
+        return probabilities / np.sum(probabilities)
 
     def _crossover(
         self, particle: GAParticle, parent_1: GAParticle, parent_2: GAParticle
@@ -652,8 +773,12 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
         random_value: float,
         upper_child: bool,
     ) -> float:
-        if np.isclose(first, second):
-            return 0.5 * (first + second)
+        tolerance = self._sbx_tolerance(
+            first=first, second=second, lower=lower, upper=upper
+        )
+
+        if np.isclose(first, second, rtol=0.0, atol=tolerance):
+            return 0.5 * first + 0.5 * second
 
         first, second = sorted((first, second))
         difference = second - first
@@ -777,7 +902,7 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
         if self._survival != "elitism":
             return set()
 
-        elite_count = min(self._elite_count, len(self._population))
+        elite_count = min(self._elite_count, max(len(self._population) - 1, 0))
 
         ordered = sorted(
             self._population.values(),
