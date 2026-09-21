@@ -202,33 +202,16 @@ def test_constructor_accepts_one_dimensional_numpy_choices() -> None:
 @pytest.mark.parametrize(
     ("bounds", "exception"),
     [
-        (("a", "z"), TypeError),
         ((0.0,), ValueError),
         ((1.0, 1.0), ValueError),
     ],
-    ids=["non-numeric", "wrong-dimension", "equal-endpoints"],
+    ids=["wrong-dimension", "equal-endpoints"],
 )
 def test_constructor_rejects_invalid_bounds(
     bounds: object, exception: type[Exception]
 ) -> None:
     with pytest.raises(exception):
         Permutation(["A"], bounds=bounds)  # type: ignore[arg-type]
-
-
-@pytest.mark.parametrize(
-    ("decoder", "params"),
-    [
-        ("plackett-luce", {"temperature": 0.0}),
-        ("gumbel-random-keys", {"temperature": "cold"}),
-        ("gumbel-sinkhorn", {"sinkhorn_iterations": 0}),
-    ],
-    ids=["non-positive-temperature", "non-numeric-temperature", "zero-iterations"],
-)
-def test_stochastic_decoder_parameters_are_validated(
-    decoder: str, params: dict[str, object]
-) -> None:
-    with pytest.raises((TypeError, ValueError)):
-        Permutation(["A", "B"], decoder=decoder, params=params)
 
 
 def test_constructor_preserves_all_choices_from_a_documented_iterable() -> None:

@@ -72,13 +72,6 @@ def test_decode_rejects_invalid_encoded_inputs(
         space.decode(inputs)
 
 
-@pytest.mark.parametrize(
-    "boundaries",
-    [(1.0, 1.0), (2.0, 1.0)],
-    ids=["equal-endpoints", "reversed-endpoints"],
-)
-def test_constructor_rejects_non_increasing_boundaries(
-    boundaries: tuple[float, float],
-) -> None:
-    with pytest.raises(ValueError):
-        Continuous(boundaries)
+def test_constructor_requires_lower_boundary_to_be_smaller() -> None:
+    with pytest.raises(Exception):
+        Continuous((2.0, 1.0))

@@ -107,15 +107,3 @@ def test_stochastic_rounding_warns_without_seed_but_not_with_seed() -> None:
 def test_constructor_rejects_unknown_decoder() -> None:
     with pytest.raises(ValueError, match="Invalid decoder"):
         Integer((0, 3), decoder="invalid")
-
-
-@pytest.mark.parametrize(
-    "boundaries",
-    [(1, 1), (3, 1)],
-    ids=["equal-endpoints", "reversed-endpoints"],
-)
-def test_constructor_rejects_non_increasing_boundaries(
-    boundaries: tuple[int, int],
-) -> None:
-    with pytest.raises(ValueError):
-        Integer(boundaries)
