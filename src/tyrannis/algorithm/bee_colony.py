@@ -11,7 +11,20 @@ from ..core.algorithm import (
 
 
 class ABCParticle(ParticleBase):
-    """Particle implementation for the Artificial Bee Colony algorithm."""
+    """
+    Particle implementation for the Artificial Bee Colony algorithm.
+
+    ``trial_count`` and ``onlooker_count`` are intentionally local execution
+    state and are not part of the particle state transferred during migration.
+    They must therefore not be included in ``__call__``, exposed as constructor
+    arguments, or propagated through ``BeeColony.create_particle``. A particle
+    recreated after migration starts with both counters reset and rebuilds this
+    algorithm-specific state locally during subsequent ABC iterations.
+
+    This is an intentional exception to the general particle reconstruction
+    contract: migration preserves the solution state represented by identifier,
+    variables, and fitness, but does not preserve these ABC-specific counters.
+    """
 
     def __init__(
         self,
