@@ -7,12 +7,11 @@ import numpy as np
 from numpy.random import SeedSequence
 
 from ..core.results import HistoryConfig
-from .algorithm import AlgorithmBase
 from .backend_communication import (
     CommunicationDriverBase,
     CommunicationProcessorBase,
 )
-from .signals import LocalEvent
+from .signals import EventProtocol
 
 
 class MigrationProcessorBase(ABC):
@@ -57,6 +56,7 @@ class MigrationProcessorBase(ABC):
         -> start
         -> initialize_loop_context
         -> migration_control (repeated for each iteration)
+        -> synchronization_control (repeated for each iteration)
         -> finalize_loop_context
         -> stop
 
@@ -81,11 +81,11 @@ class MigrationProcessorBase(ABC):
     replace it with independent synchronization mechanisms when coordinating
     the same execution state.
 
-    `migration_control` is the main extension point of a concrete migration
-    strategy. It is called during the optimization loop and receives the
-    current population and the best particle found during the current
-    iteration (`iter_best`), together with callbacks through which it can
-    request particle insertion and removal.
+    `migration_control` and `synchronization_control` are the processor-side
+    extension points of a concrete migration strategy. They are called during
+    the optimization loop and receive the state required to coordinate
+    migration together with callbacks through which population changes are
+    requested.
 
     The migration strategy must remain independent of the implementation of
     the processor and the optimization algorithm. Interactions with the local
@@ -93,7 +93,8 @@ class MigrationProcessorBase(ABC):
     through the contract provided by this class.
     """
 
-    _algorithm: AlgorithmBase | None = None
+    _migration_signal: EventProtocol | None
+    _communication_processor: CommunicationProcessorBase
 
     @abstractmethod
     def __init__(
@@ -123,6 +124,12 @@ class MigrationProcessorBase(ABC):
         communication_processor:
             Communication processor used by the migration strategy to exchange
             migration messages with the driver.
+
+        seed:
+            Seed or seed sequence assigned to this processor-side migration
+            module. Implementations that require random sampling must derive
+            their random-number generator from this value rather than creating
+            an unseeded generator.
 
         Notes
         -----
@@ -156,7 +163,7 @@ class MigrationProcessorBase(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def initialize_loop_context(self, migration_signal: LocalEvent) -> None:
+    def initialize_loop_context(self, migration_signal: EventProtocol) -> None:
         """
         Initialize resources associated with the optimization loop and establish
         migration synchronization.
@@ -255,7 +262,7 @@ class MigrationProcessorBase(ABC):
         population: dict[str, np.float64],
         iter_best: str | None,
         insert_arrival_particle: Callable[[dict[str, Any]], None],
-        departure_particle: Callable[[str], None],
+        departure_particle: Callable[[str], dict[str, Any] | None],
     ) -> None:
         """
         Execute the migration strategy for the current iteration.
@@ -301,7 +308,9 @@ class MigrationProcessorBase(ABC):
             solutions.
 
             A fitness value of `FITNESS_UNDEFINED` indicates that the particle has
-            not yet received a valid fitness evaluation.
+            not yet received a valid fitness evaluation. This mapping is migration
+            state supplied by the processor and does not grant access to the
+            optimization algorithm or its particle objects.
 
         iter_best:
             Serialized representation of the best particle found during the
@@ -330,11 +339,13 @@ class MigrationProcessorBase(ABC):
             management rules.
 
         departure_particle:
-            Callback used to request removal of a particle selected for migration
-            from the local processor population.
+            Callback used to remove a particle selected for migration from the
+            local processor population and return its serialized state.
 
-            The migration strategy must use this callback rather than directly
-            modifying the processor's population.
+            The callback returns the serialized particle state when the particle
+            exists, or `None` when the requested identifier is not present. The
+            migration strategy must use this callback rather than accessing the
+            optimization algorithm or directly modifying its population.
 
         Notes
         -----
@@ -375,7 +386,7 @@ class MigrationProcessorBase(ABC):
         self,
         actual_iter: int,
         insert_arrival_particle: Callable[[dict[str, Any]], None],
-        departure_particle: Callable[[str], None],
+        departure_particle: Callable[[str], dict[str, Any] | None],
     ) -> None:
         """
         Control processor-side synchronization after migration control.
@@ -415,14 +426,17 @@ class MigrationProcessorBase(ABC):
 
         departure_particle:
             Callback used to remove a particle selected for migration from the
-            local processor population. If synchronization requires the
-            processor to remain active while waiting for a driver command, the
-            implementation may use this callback when processing pending
-            migration requests during the synchronization phase.
+            local processor population and return its serialized state. If
+            synchronization requires the processor to remain active while waiting
+            for a driver command, the implementation may use this callback when
+            processing pending migration requests during the synchronization
+            phase.
 
-            The migration strategy must not directly modify the processor's
-            population or algorithm state. Population removal must occur
-            exclusively through this callback.
+            The callback returns the serialized particle state when the particle
+            exists, or `None` when the requested identifier is not present. The
+            migration strategy must not directly access the optimization algorithm
+            or modify its population. Population removal must occur exclusively
+            through this callback.
 
         Notes
         -----
@@ -532,11 +546,13 @@ class MigrationDriverBase(ABC):
     processors operate independently and synchronous strategies in which the
     driver coordinates when processors may proceed.
 
-    The migration driver also maintains a random seed sequence initialized
-    from the optimizer seed. Each processor-side migration module receives an
-    independent child seed sequence when it is created. This keeps the random
-    streams of different migration processors independent while preserving
-    deterministic derivation from the original seed.
+    The migration driver maintains both a driver-side random-number generator
+    and a random seed sequence initialized from the optimizer seed. The driver
+    uses its generator for migration decisions performed on the driver side,
+    while each processor-side migration module receives an independent child
+    seed sequence when it is created. This preserves deterministic derivation
+    from the original seed while keeping processor-side random streams
+    independent.
     """
 
     _processor_class: type[MigrationProcessorBase]
@@ -544,7 +560,10 @@ class MigrationDriverBase(ABC):
     _communication_processor_class: type[CommunicationProcessorBase]
     _migration_processor_init_kargs: dict[str, Any]
     _history_buffer: list[str]
-    _seed_sequence: np.random.SeedSequence
+    _history_config: HistoryConfig
+    _seed: int | None
+    _seed_sequence: SeedSequence
+    _rng: np.random.Generator
 
     @abstractmethod
     def __init__(self, initial_iter: int = 1, *args: Any, **kargs: Any) -> None:
@@ -633,9 +652,10 @@ class MigrationDriverBase(ABC):
             recorded.
 
         seed:
-            Seed used to initialize the migration random seed sequence. A
-            child seed sequence is generated from this sequence for each
-            migration processor created by `create_processor_module`.
+            Seed used to initialize both the driver-side random-number generator
+            and the migration seed sequence. A child seed sequence is generated
+            from this sequence for each migration processor created by
+            `create_processor_module`.
 
         Notes
         -----
@@ -647,9 +667,9 @@ class MigrationDriverBase(ABC):
         being stored, so later modifications to the original dictionary do
         not alter the migration configuration.
 
-        The seed is used only to initialize the driver-side seed sequence.
-        Individual migration processors receive independent child seed
-        sequences when they are created.
+        The seed initializes the driver-side random-number generator and the
+        driver-side seed sequence. Individual migration processors receive
+        independent child seed sequences when they are created.
         """
         self._communication_driver = communication_driver
         self._communication_processor_class = communication_processor_class
@@ -710,8 +730,7 @@ class MigrationDriverBase(ABC):
         ].copy()
 
         communication_processor = self._communication_processor_class(
-            **communication_kargs,
-            identifier=identifier,
+            **communication_kargs, identifier=identifier
         )
 
         migration_processor_kargs = self._migration_processor_init_kargs.copy()
