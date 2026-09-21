@@ -3,17 +3,22 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from queue import Empty
-from threading import Event, Thread
+from threading import Event as ThreadEvent
+from threading import Thread
 from time import sleep
 from typing import Any
 
 import numpy as np
 import scipy as sp
+from numpy.random import SeedSequence
 
-from ..core.backend_communication import CommunicationProcessorBase
+from ..core.backend_communication import (
+    CommunicationDriverBase,
+    CommunicationProcessorBase,
+)
 from ..core.backend_migration import MigrationDriverBase, MigrationProcessorBase
 from ..core.results import HistoryConfig
-from ..core.signals import LocalEvent
+from ..core.signals import EventProtocol
 
 
 class IslandMigrationProcessor(MigrationProcessorBase):
@@ -34,6 +39,7 @@ class IslandMigrationProcessor(MigrationProcessorBase):
         movement_strategy: str,
         trigger: str,
         communication_processor: CommunicationProcessorBase,
+        seed: SeedSequence | int | None,
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -45,13 +51,13 @@ class IslandMigrationProcessor(MigrationProcessorBase):
         self._trigger = trigger
         self._communication_processor = communication_processor
 
-        self._migration_signal: LocalEvent | None = None
-        self._algorithm = None
+        self._migration_signal: EventProtocol | None = None
+        self._population: dict[str, np.float64] | None = None
 
         self._next_synchronization_iter = initial_iter
         self._synchronization_paused_iter: int | None = None
 
-        self._rng = np.random.default_rng()
+        self._rng = np.random.default_rng(seed)
 
     def start(self) -> None:
         self._communication_processor.start()
@@ -59,8 +65,9 @@ class IslandMigrationProcessor(MigrationProcessorBase):
     def stop(self) -> None:
         self._communication_processor.stop()
 
-    def initialize_loop_context(self, migration_signal: LocalEvent) -> None:
+    def initialize_loop_context(self, migration_signal: EventProtocol) -> None:
         self._migration_signal = migration_signal
+        self._population = None
         self._next_synchronization_iter = self._initial_iter
         self._synchronization_paused_iter = None
         self._communication_processor.set_message_signal(migration_signal)
@@ -68,6 +75,7 @@ class IslandMigrationProcessor(MigrationProcessorBase):
     def finalize_loop_context(self) -> None:
         self._communication_processor.set_message_signal(None)
         self._migration_signal = None
+        self._population = None
         self._synchronization_paused_iter = None
 
     def migration_control(
@@ -76,12 +84,15 @@ class IslandMigrationProcessor(MigrationProcessorBase):
         population: dict[str, np.float64],
         iter_best: str | None,
         insert_arrival_particle: Callable[[dict[str, Any]], None],
-        departure_particle: Callable[[str], None],
+        departure_particle: Callable[[str], dict[str, Any] | None],
     ) -> None:
         if self._migration_signal is None:
             raise RuntimeError("Migration loop context has not been initialized.")
 
+        self._population = population
+
         self._consume_messages(
+            population=population,
             insert_arrival_particle=insert_arrival_particle,
             departure_particle=departure_particle,
         )
@@ -98,13 +109,16 @@ class IslandMigrationProcessor(MigrationProcessorBase):
         self,
         actual_iter: int,
         insert_arrival_particle: Callable[[dict[str, Any]], None],
-        departure_particle: Callable[[str], None],
+        departure_particle: Callable[[str], dict[str, Any] | None],
     ) -> None:
         if self._trigger != "synchronous":
             return
 
         if actual_iter < self._next_synchronization_iter:
             return
+
+        if self._population is None:
+            raise RuntimeError("Migration population has not been initialized.")
 
         checkpoint = self._next_synchronization_iter
 
@@ -122,6 +136,7 @@ class IslandMigrationProcessor(MigrationProcessorBase):
 
             self._consume_message(
                 message=message,
+                population=self._population,
                 insert_arrival_particle=insert_arrival_particle,
                 departure_particle=departure_particle,
             )
@@ -139,8 +154,9 @@ class IslandMigrationProcessor(MigrationProcessorBase):
 
     def _consume_messages(
         self,
+        population: dict[str, np.float64],
         insert_arrival_particle: Callable[[dict[str, Any]], None],
-        departure_particle: Callable[[str], None],
+        departure_particle: Callable[[str], dict[str, Any] | None],
     ) -> None:
         while True:
             try:
@@ -150,6 +166,7 @@ class IslandMigrationProcessor(MigrationProcessorBase):
 
             self._consume_message(
                 message=message,
+                population=population,
                 insert_arrival_particle=insert_arrival_particle,
                 departure_particle=departure_particle,
             )
@@ -157,8 +174,9 @@ class IslandMigrationProcessor(MigrationProcessorBase):
     def _consume_message(
         self,
         message: str,
+        population: dict[str, np.float64],
         insert_arrival_particle: Callable[[dict[str, Any]], None],
-        departure_particle: Callable[[str], None],
+        departure_particle: Callable[[str], dict[str, Any] | None],
     ) -> None:
         try:
             payload = json.loads(message)
@@ -174,6 +192,7 @@ class IslandMigrationProcessor(MigrationProcessorBase):
             self._send_selected_particle(
                 request_id=payload.get("request_id"),
                 actual_iter=payload.get("actual_iter"),
+                population=population,
                 departure_particle=departure_particle,
             )
             return
@@ -188,6 +207,7 @@ class IslandMigrationProcessor(MigrationProcessorBase):
 
         if message_type == self.SYNCHRONIZATION_RELEASE:
             actual_iter = payload.get("actual_iter")
+
             if actual_iter is None:
                 raise RuntimeError("actual_iter cannot be None.")
 
@@ -199,26 +219,24 @@ class IslandMigrationProcessor(MigrationProcessorBase):
         self,
         request_id: Any,
         actual_iter: Any,
-        departure_particle: Callable[[str], None],
+        population: dict[str, np.float64],
+        departure_particle: Callable[[str], dict[str, Any] | None],
     ) -> None:
-        if self._algorithm is None:
-            raise RuntimeError("Migration processor algorithm is not initialized.")
-
         if not isinstance(request_id, str):
             return
 
         if not isinstance(actual_iter, int):
             return
 
-        particle_ids = list(self._algorithm.population)
+        particle_ids = list(population)
 
         if not particle_ids:
             particle = None
         else:
-            particle_id = self._select_particle(particle_ids=particle_ids)
-
-            particle = self._algorithm.population[particle_id]()
-            departure_particle(particle_id)
+            particle_id = self._select_particle(
+                particle_ids=particle_ids, population=population
+            )
+            particle = departure_particle(particle_id)
 
         self._communication_processor.outgoing_queue.put(
             json.dumps(
@@ -231,27 +249,16 @@ class IslandMigrationProcessor(MigrationProcessorBase):
             )
         )
 
-    def _select_particle(self, particle_ids: list[str]) -> str:
-        if self._algorithm is None:
-            raise RuntimeError("Migration processor algorithm is not initialized.")
-
-        algorithm = self._algorithm
-
+    def _select_particle(
+        self, particle_ids: list[str], population: dict[str, np.float64]
+    ) -> str:
         if self._selection == "random":
             random_values = self._rng.random(len(particle_ids))
 
             return particle_ids[int(np.argmin(random_values))]
 
         fitness = np.asarray(
-            [
-                (
-                    np.inf
-                    if algorithm.population[particle_id].fitness is None
-                    else algorithm.population[particle_id].fitness
-                )
-                for particle_id in particle_ids
-            ],
-            dtype=float,
+            [population[particle_id] for particle_id in particle_ids], dtype=float
         )
 
         if self._selection == "best":
@@ -575,13 +582,13 @@ class IslandMigration(MigrationDriverBase):
         self._synchronization_paused: dict[int, set[str]] = {}
         self._synchronization_pending: dict[int, set[str]] = {}
 
-        self._running = Event()
+        self._running: ThreadEvent | None = None
         self._thread: Thread | None = None
 
     def initialize_context(
         self,
-        communication_driver,
-        communication_processor_class,
+        communication_driver: CommunicationDriverBase,
+        communication_processor_class: type[CommunicationProcessorBase],
         communication_processor_kargs: dict[str, Any],
         history_config: HistoryConfig,
         seed: int | None,
@@ -597,6 +604,9 @@ class IslandMigration(MigrationDriverBase):
         self._island_ids = sorted(communication_driver.incoming_queues)
 
     def start(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            raise RuntimeError("Migration is already running.")
+
         self._states.clear()
         self._state_departures.clear()
         self._state_arrivals.clear()
@@ -608,26 +618,33 @@ class IslandMigration(MigrationDriverBase):
         self._next_migration_iter = self._initial_iter
         self._last_trigger_check_iter = None
 
+        self._running = ThreadEvent()
         self._running.set()
         self._communication_driver.start()
 
         self._thread = Thread(
             target=self._routing_loop, name="island-migration", daemon=True
         )
-
         self._thread.start()
 
     def stop(self) -> None:
-        self._running.clear()
+        if self._running is not None:
+            self._running.clear()
 
         if self._thread is not None:
             self._thread.join()
             self._thread = None
 
         self._communication_driver.stop()
+        self._running = None
 
     def _routing_loop(self) -> None:
-        while self._running.is_set():
+        running = self._running
+
+        if running is None:
+            raise RuntimeError("Migration runtime has not been initialized.")
+
+        while running.is_set():
             self._process_incoming()
             sleep(0.01)
 
@@ -754,7 +771,6 @@ class IslandMigration(MigrationDriverBase):
         state_population = dict(population)
 
         departures = self._state_departures.get(island_id, set())
-
         arrivals = self._state_arrivals.get(island_id, {})
 
         for particle_id in departures:
@@ -1081,7 +1097,6 @@ class IslandMigration(MigrationDriverBase):
             return
 
         donor_state = self._states.get(donor)
-
         receiver_state = self._states.get(receiver)
 
         if donor_state is None or receiver_state is None:

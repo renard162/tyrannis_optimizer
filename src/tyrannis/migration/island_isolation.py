@@ -4,18 +4,22 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
+from numpy.random import SeedSequence
 
 from ..backend.distributed.communication.no_communication import (
     NoCommunicationDriver,
     NoCommunicationProcessor,
 )
-from ..core.backend_communication import CommunicationProcessorBase
+from ..core.backend_communication import (
+    CommunicationDriverBase,
+    CommunicationProcessorBase,
+)
 from ..core.backend_migration import (
     MigrationDriverBase,
     MigrationProcessorBase,
 )
 from ..core.results import HistoryConfig
-from ..core.signals import LocalEvent
+from ..core.signals import EventProtocol
 
 
 class IslandIsolationProcessor(MigrationProcessorBase):
@@ -25,6 +29,7 @@ class IslandIsolationProcessor(MigrationProcessorBase):
         self,
         initial_iter: int,
         communication_processor: CommunicationProcessorBase,
+        seed: SeedSequence | int | None,
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -42,11 +47,11 @@ class IslandIsolationProcessor(MigrationProcessorBase):
 
         self._communication_processor.stop()
 
-    def initialize_loop_context(self, migration_signal: LocalEvent) -> None:
-        """Do nothing."""
+    def initialize_loop_context(self, migration_signal: EventProtocol) -> None:
+        """Do nothing because isolated islands do not use migration signaling."""
 
     def finalize_loop_context(self) -> None:
-        """Do nothing."""
+        """Do nothing because isolated islands have no migration loop resources."""
 
     def migration_control(
         self,
@@ -54,15 +59,15 @@ class IslandIsolationProcessor(MigrationProcessorBase):
         population: dict[str, np.float64],
         iter_best: str | None,
         insert_arrival_particle: Callable[[dict[str, Any]], None],
-        departure_particle: Callable[[str], None],
+        departure_particle: Callable[[str], dict[str, Any] | None],
     ) -> None:
-        """Do nothing."""
+        """Do nothing because isolated islands do not migrate particles."""
 
     def synchronization_control(
         self,
         actual_iter: int,
         insert_arrival_particle: Callable[[dict[str, Any]], None],
-        departure_particle: Callable[[str], None],
+        departure_particle: Callable[[str], dict[str, Any] | None],
     ) -> None:
         """Do nothing because isolated islands do not synchronize."""
 
@@ -77,8 +82,8 @@ class IslandIsolation(MigrationDriverBase):
 
     def initialize_context(
         self,
-        communication_driver,
-        communication_processor_class,
+        communication_driver: CommunicationDriverBase,
+        communication_processor_class: type[CommunicationProcessorBase],
         communication_processor_kargs: dict[str, Any],
         history_config: HistoryConfig,
         seed: int | None,
