@@ -58,7 +58,7 @@ class Joblib(ProcessorBase):
             release the GIL.
             - ``"multiprocessing"``: Process-based execution using Python's
             multiprocessing, with broad compatibility for CPU-bound workloads.
-            - ``"serialized"``: Sequential execution without parallelism.
+            - ``"sequential"``: Sequential execution without parallelism.
 
         batch_size:
             Number of particle evaluations submitted as a single batch to each
