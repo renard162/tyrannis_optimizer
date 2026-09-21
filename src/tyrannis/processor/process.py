@@ -3,18 +3,14 @@ from __future__ import annotations
 from collections.abc import Callable
 from functools import partial
 from multiprocessing import Event, get_all_start_methods, get_context
-from multiprocessing.synchronize import Event as EventProtocol
 from typing import Any
 
 import cloudpickle
 import numpy as np
 
 from ..core.algorithm import CostFunctionWrapperBase
-from ..core.processor import (
-    ProcessorBase,
-    evaluate_particle,
-)
-from ..core.signals import LocalEvent
+from ..core.processor import ProcessorBase, evaluate_particle
+from ..core.signals import EventProtocol
 
 
 class ProcessPoolCostFunctionWrapper(CostFunctionWrapperBase):
@@ -33,15 +29,10 @@ class ProcessPoolCostFunctionWrapper(CostFunctionWrapperBase):
     def __reduce__(
         self,
     ) -> tuple[Callable[[bytes], ProcessPoolCostFunctionWrapper], tuple[bytes]]:
-        return (
-            ProcessPoolCostFunctionWrapper._restore,
-            (self._serialized_function,),
-        )
+        return (ProcessPoolCostFunctionWrapper._restore, (self._serialized_function,))
 
     @staticmethod
-    def _restore(
-        serialized_function: bytes,
-    ) -> ProcessPoolCostFunctionWrapper:
+    def _restore(serialized_function: bytes) -> ProcessPoolCostFunctionWrapper:
         instance = object.__new__(ProcessPoolCostFunctionWrapper)
         instance._serialized_function = serialized_function
         instance._function = None
@@ -49,18 +40,20 @@ class ProcessPoolCostFunctionWrapper(CostFunctionWrapperBase):
         return instance
 
 
-class PoolSignal(LocalEvent):
+class PoolSignal:
     def __init__(self) -> None:
         self._signal: EventProtocol = Event()
         self._manager_signal: EventProtocol | None = None
 
     def set(self) -> None:
         self._signal.set()
+
         if self._manager_signal is not None:
             self._manager_signal.set()
 
     def clear(self) -> None:
         self._signal.clear()
+
         if self._manager_signal is not None:
             self._manager_signal.clear()
 
@@ -69,8 +62,7 @@ class PoolSignal(LocalEvent):
 
     def set_manager_signal(self, manager_signal: EventProtocol) -> None:
         self._manager_signal = manager_signal
-        if self._manager_signal is None:
-            raise RuntimeError("Manager signal cannot be None.")
+
         if self._signal.is_set():
             self._manager_signal.set()
         else:
@@ -83,10 +75,11 @@ class PoolSignal(LocalEvent):
     def manager_signal(self) -> EventProtocol:
         if self._manager_signal is None:
             raise RuntimeError("Manager signal has not been initialized.")
+
         return self._manager_signal
 
 
-class ProcessPool(ProcessorBase):
+class ProcessPool(ProcessorBase[PoolSignal]):
     def __init__(
         self,
         n_jobs: int | None = None,
@@ -193,8 +186,10 @@ class ProcessPool(ProcessorBase):
 
         self._n_process = n_jobs
         self._multiprocessing_context = "spawn"
+
         if multiprocessing_context is not None:
             self._multiprocessing_context = multiprocessing_context
+
         self._maxtasksperchild = maxtasksperchild
         self._chunksize = chunksize
 
@@ -207,136 +202,172 @@ class ProcessPool(ProcessorBase):
         self.stop_migration()
 
     def initialize_loop_context(self) -> None:
-        self._migration_signal = PoolSignal()
-        if self._migration_processor is None:
+        migration_processor = self._migration_processor
+
+        if migration_processor is None:
             raise RuntimeError("Migration processor cannot be None.")
 
-        self._migration_processor.initialize_loop_context(
-            migration_signal=self._migration_signal,
-        )
+        migration_signal = PoolSignal()
+        self._migration_signal = migration_signal
+
+        migration_processor.initialize_loop_context(migration_signal=migration_signal)
 
     def finalize_loop_context(self) -> None:
-        if self._migration_processor is None:
+        migration_processor = self._migration_processor
+
+        if migration_processor is None:
             raise RuntimeError("Migration processor cannot be None.")
 
-        self._migration_processor.finalize_loop_context()
+        migration_processor.finalize_loop_context()
+
+        migration_signal = self._migration_signal
+
+        if migration_signal is not None:
+            migration_signal.clear_manager_signal()
+
         self._migration_signal = None
 
     def run(self) -> None:
         self.init_particles()
         self.initialize_loop_context()
 
+        migration_signal = self._migration_signal
+
+        if migration_signal is None:
+            raise RuntimeError("Migration signal has not been initialized.")
+
         context = get_context(self._multiprocessing_context)
 
-        with context.Manager() as manager:
-            self._migration_signal.set_manager_signal(manager.Event())
+        try:
+            with context.Manager() as manager:
+                try:
+                    manager_signal: EventProtocol = manager.Event()
+                    migration_signal.set_manager_signal(manager_signal)
 
-            try:
-                with context.Pool(
-                    processes=self._n_process,
-                    maxtasksperchild=self._maxtasksperchild,
-                ) as pool:
-                    for actual_iter in range(self._n_iter + 1):
-                        self.migration_control(actual_iter)
+                    with context.Pool(
+                        processes=self._n_process,
+                        maxtasksperchild=self._maxtasksperchild,
+                    ) as pool:
+                        for actual_iter in range(self._n_iter + 1):
+                            self.migration_control(actual_iter)
 
-                        self._algorithm.pre_iteration(actual_iter)
-                        self.pre_iteration_log(actual_iter)
+                            self._algorithm.pre_iteration(actual_iter)
+                            self.pre_iteration_log(actual_iter)
 
-                        new_particles_ids = self._algorithm.new_particles_id
-                        if new_particles_ids:
-                            self._algorithm.create_random_cache(
-                                particle_ids=new_particles_ids,
-                                initialize=True,
-                            )
-                            worker = partial(
-                                evaluate_particle,
-                                algorithm=self._algorithm,
-                                fitness_failure_strategy=self._fitness_failure_strategy,
-                                initialize_particle=True,
-                                second_update=False,
-                            )
-                            new_particles = pool.map(
-                                worker,
-                                new_particles_ids,
-                                chunksize=self._chunksize,
-                            )
-                            self.error_log(
-                                actual_iter=actual_iter,
-                                updated_particles=new_particles,
-                            )
-                            new_particles = pool.map(
-                                self._algorithm.consolidate_new_particles,
-                                new_particles,
-                                chunksize=self._chunksize,
-                            )
-                            self.new_particle_log(
-                                actual_iter=actual_iter,
-                                new_particles=new_particles,
-                            )
-                            self._algorithm.update_population(new_particles)
+                            new_particles_ids = self._algorithm.new_particles_id
 
-                        if actual_iter > 0:
-                            self._algorithm.create_random_cache(
-                                particle_ids=[
-                                    idx for idx in self._algorithm.population
-                                ],
-                                initialize=False,
-                            )
-                            worker = partial(
-                                evaluate_particle,
-                                algorithm=self._algorithm,
-                                fitness_failure_strategy=self._fitness_failure_strategy,
-                                initialize_particle=False,
-                                second_update=False,
-                            )
-                            processed_particles = pool.map(
-                                worker,
-                                self._algorithm.population,
-                                chunksize=self._chunksize,
-                            )
-                            self.error_log(
-                                actual_iter=actual_iter,
-                                updated_particles=processed_particles,
-                            )
-                            self._algorithm.update_population(processed_particles)
-
-                            if self._algorithm.double_particle_check:
-                                self._algorithm.inter_iteration(actual_iter)
-                                double_check_ids = list(
-                                    self._algorithm.double_check_ids
+                            if new_particles_ids:
+                                self._algorithm.create_random_cache(
+                                    particle_ids=new_particles_ids, initialize=True
                                 )
 
-                                if double_check_ids:
-                                    self._algorithm.create_random_cache(
-                                        particle_ids=double_check_ids,
-                                        initialize=False,
-                                    )
-                                    worker = partial(
-                                        evaluate_particle,
-                                        algorithm=self._algorithm,
-                                        fitness_failure_strategy=(
-                                            self._fitness_failure_strategy
-                                        ),
-                                        initialize_particle=False,
-                                        second_update=True,
-                                    )
-                                    processed_particles = pool.map(
-                                        worker,
-                                        double_check_ids,
-                                        chunksize=self._chunksize,
-                                    )
-                                    self.error_log(
-                                        actual_iter=actual_iter,
-                                        updated_particles=processed_particles,
-                                    )
-                                    self._algorithm.update_population(
-                                        processed_particles
+                                worker = partial(
+                                    evaluate_particle,
+                                    algorithm=self._algorithm,
+                                    fitness_failure_strategy=(
+                                        self._fitness_failure_strategy
+                                    ),
+                                    initialize_particle=True,
+                                    second_update=False,
+                                )
+
+                                new_particles = pool.map(
+                                    func=worker,
+                                    iterable=new_particles_ids,
+                                    chunksize=self._chunksize,
+                                )
+
+                                self.error_log(
+                                    actual_iter=actual_iter,
+                                    updated_particles=new_particles,
+                                )
+
+                                new_particles = pool.map(
+                                    func=self._algorithm.consolidate_new_particles,
+                                    iterable=new_particles,
+                                    chunksize=self._chunksize,
+                                )
+
+                                self.new_particle_log(
+                                    actual_iter=actual_iter, new_particles=new_particles
+                                )
+
+                                self._algorithm.update_population(new_particles)
+
+                            if actual_iter > 0:
+                                particle_ids = list(self._algorithm.population)
+
+                                self._algorithm.create_random_cache(
+                                    particle_ids=particle_ids, initialize=False
+                                )
+
+                                worker = partial(
+                                    evaluate_particle,
+                                    algorithm=self._algorithm,
+                                    fitness_failure_strategy=(
+                                        self._fitness_failure_strategy
+                                    ),
+                                    initialize_particle=False,
+                                    second_update=False,
+                                )
+
+                                processed_particles = pool.map(
+                                    func=worker,
+                                    iterable=particle_ids,
+                                    chunksize=self._chunksize,
+                                )
+
+                                self.error_log(
+                                    actual_iter=actual_iter,
+                                    updated_particles=processed_particles,
+                                )
+
+                                self._algorithm.update_population(processed_particles)
+
+                                if self._algorithm.double_particle_check:
+                                    self._algorithm.inter_iteration(actual_iter)
+
+                                    double_check_ids = list(
+                                        self._algorithm.double_check_ids
                                     )
 
-                        self._algorithm.post_iteration(actual_iter)
-                        self.iteration_log(actual_iter)
+                                    if double_check_ids:
+                                        self._algorithm.create_random_cache(
+                                            particle_ids=double_check_ids,
+                                            initialize=False,
+                                        )
 
-                        self.update_status()
-                        self.best_log(actual_iter)
-            finally:
-                self.finalize_loop_context()
+                                        worker = partial(
+                                            evaluate_particle,
+                                            algorithm=self._algorithm,
+                                            fitness_failure_strategy=(
+                                                self._fitness_failure_strategy
+                                            ),
+                                            initialize_particle=False,
+                                            second_update=True,
+                                        )
+
+                                        processed_particles = pool.map(
+                                            func=worker,
+                                            iterable=double_check_ids,
+                                            chunksize=self._chunksize,
+                                        )
+
+                                        self.error_log(
+                                            actual_iter=actual_iter,
+                                            updated_particles=processed_particles,
+                                        )
+
+                                        self._algorithm.update_population(
+                                            processed_particles
+                                        )
+
+                            self._algorithm.post_iteration(actual_iter)
+                            self.iteration_log(actual_iter)
+
+                            self.update_status()
+                            self.best_log(actual_iter)
+                finally:
+                    migration_signal.clear_manager_signal()
+        finally:
+            self.finalize_loop_context()

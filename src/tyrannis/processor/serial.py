@@ -1,10 +1,7 @@
 from functools import partial
 
 from ..core.algorithm import CostFunctionWrapperBase
-from ..core.processor import (
-    ProcessorBase,
-    evaluate_particle,
-)
+from ..core.processor import ProcessorBase, evaluate_particle
 from ..core.signals import LocalEvent
 
 
@@ -12,7 +9,7 @@ class SerialCostFunctionWrapper(CostFunctionWrapperBase):
     """Serial processor cost-function wrapper."""
 
 
-class Serial(ProcessorBase):
+class Serial(ProcessorBase[LocalEvent]):
     def __init__(self) -> None:
         self._cost_function_wrapper = SerialCostFunctionWrapper
 
@@ -23,19 +20,23 @@ class Serial(ProcessorBase):
         self.stop_migration()
 
     def initialize_loop_context(self) -> None:
-        self._migration_signal = LocalEvent()
-        if self._migration_processor is None:
+        migration_processor = self._migration_processor
+
+        if migration_processor is None:
             raise RuntimeError("Migration processor cannot be None.")
 
-        self._migration_processor.initialize_loop_context(
-            migration_signal=self._migration_signal,
-        )
+        migration_signal = LocalEvent()
+        self._migration_signal = migration_signal
+
+        migration_processor.initialize_loop_context(migration_signal=migration_signal)
 
     def finalize_loop_context(self) -> None:
-        if self._migration_processor is None:
+        migration_processor = self._migration_processor
+
+        if migration_processor is None:
             raise RuntimeError("Migration processor cannot be None.")
 
-        self._migration_processor.finalize_loop_context()
+        migration_processor.finalize_loop_context()
         self._migration_signal = None
 
     def run(self) -> None:
@@ -50,11 +51,12 @@ class Serial(ProcessorBase):
                 self.pre_iteration_log(actual_iter)
 
                 new_particles_ids = self._algorithm.new_particles_id
+
                 if new_particles_ids:
                     self._algorithm.create_random_cache(
-                        particle_ids=new_particles_ids,
-                        initialize=True,
+                        particle_ids=new_particles_ids, initialize=True
                     )
+
                     worker = partial(
                         evaluate_particle,
                         algorithm=self._algorithm,
@@ -66,25 +68,27 @@ class Serial(ProcessorBase):
                     new_particles = [
                         worker(particle_id) for particle_id in new_particles_ids
                     ]
+
                     self.error_log(
-                        actual_iter=actual_iter,
-                        updated_particles=new_particles,
+                        actual_iter=actual_iter, updated_particles=new_particles
                     )
+
                     new_particles = [
                         self._algorithm.consolidate_new_particles(particle)
                         for particle in new_particles
                     ]
+
                     self.new_particle_log(
-                        actual_iter=actual_iter,
-                        new_particles=new_particles,
+                        actual_iter=actual_iter, new_particles=new_particles
                     )
+
                     self._algorithm.update_population(new_particles)
 
                 if actual_iter > 0:
                     self._algorithm.create_random_cache(
-                        particle_ids=[idx for idx in self._algorithm.population],
-                        initialize=False,
+                        particle_ids=list(self._algorithm.population), initialize=False
                     )
+
                     worker = partial(
                         evaluate_particle,
                         algorithm=self._algorithm,
@@ -97,10 +101,11 @@ class Serial(ProcessorBase):
                         worker(particle_id)
                         for particle_id in self._algorithm.population
                     ]
+
                     self.error_log(
-                        actual_iter=actual_iter,
-                        updated_particles=processed_particles,
+                        actual_iter=actual_iter, updated_particles=processed_particles
                     )
+
                     self._algorithm.update_population(processed_particles)
 
                     if self._algorithm.double_particle_check:
@@ -109,13 +114,15 @@ class Serial(ProcessorBase):
 
                         if double_check_ids:
                             self._algorithm.create_random_cache(
-                                particle_ids=double_check_ids,
-                                initialize=False,
+                                particle_ids=double_check_ids, initialize=False
                             )
+
                             worker = partial(
                                 evaluate_particle,
                                 algorithm=self._algorithm,
-                                fitness_failure_strategy=self._fitness_failure_strategy,
+                                fitness_failure_strategy=(
+                                    self._fitness_failure_strategy
+                                ),
                                 initialize_particle=False,
                                 second_update=True,
                             )
@@ -123,10 +130,12 @@ class Serial(ProcessorBase):
                             processed_particles = [
                                 worker(particle_id) for particle_id in double_check_ids
                             ]
+
                             self.error_log(
                                 actual_iter=actual_iter,
                                 updated_particles=processed_particles,
                             )
+
                             self._algorithm.update_population(processed_particles)
 
                 self._algorithm.post_iteration(actual_iter)

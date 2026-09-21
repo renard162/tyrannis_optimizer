@@ -6,19 +6,16 @@ from ....core.backend_communication import (
     CommunicationDriverBase,
     CommunicationProcessorBase,
 )
-from ....core.signals import LocalEvent
+from ....core.signals import EventProtocol
 
 
 class NoCommunicationProcessor(CommunicationProcessorBase):
     """Inactive communication layer for processor modules."""
 
-    def __init__(
-        self,
-        identifier: str,
-        **kwargs: object,
-    ) -> None:
+    def __init__(self, identifier: str, **kwargs: object) -> None:
         self._identifier = identifier
 
+        self._message_signal: EventProtocol | None = None
         self._messages: Queue[str] | None = None
         self._outgoing_queue: Queue[str] | None = None
 
@@ -37,28 +34,27 @@ class NoCommunicationProcessor(CommunicationProcessorBase):
         return self._outgoing_queue
 
     def start(self) -> None:
+        if (self._messages is not None) or (self._outgoing_queue is not None):
+            raise RuntimeError("Communication is already running.")
+
         self._messages = Queue()
         self._outgoing_queue = Queue()
 
     def stop(self) -> None:
+        self._message_signal = None
         self._messages = None
         self._outgoing_queue = None
 
-    def set_message_signal(
-        self,
-        message_signal: LocalEvent | None,
-    ) -> None:
-        """Set the signal used to notify the processor of received messages."""
+    def set_message_signal(self, message_signal: EventProtocol | None) -> None:
+        """Set or clear the signal associated with message notification."""
+
+        self._message_signal = message_signal
 
 
 class NoCommunicationDriver(CommunicationDriverBase):
     """Inactive communication layer for driver modules."""
 
-    def __init__(
-        self,
-        island_ids: list[str],
-        **kwargs: object,
-    ) -> None:
+    def __init__(self, island_ids: list[str], **kwargs: object) -> None:
         self._island_ids = set(island_ids)
 
         self._incoming_queues: dict[str, Queue[str]] = {

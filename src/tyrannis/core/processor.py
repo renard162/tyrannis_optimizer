@@ -271,13 +271,15 @@ class ProcessorBase(ABC, Generic[SignalType]):
             seed=self._seed_sequence.spawn(1)[0],
         )
 
-        new_processor._migration_processor = (
-            self._migration_driver.create_processor_module(  # type: ignore
-                identifier=processor_identifier
-            )
+        migration_driver = self._migration_driver
+
+        if migration_driver is None:
+            raise RuntimeError("Migration driver has not been initialized.")
+
+        new_processor._migration_processor = migration_driver.create_processor_module(
+            identifier=processor_identifier
         )
 
-        new_processor._migration_processor._algorithm = new_processor._algorithm
         return new_processor
 
     def update_processors_pool(self, new_processors: Iterable[Self]) -> None:
@@ -360,11 +362,18 @@ class ProcessorBase(ABC, Generic[SignalType]):
         if particle_id not in self._algorithm.population:
             self._algorithm.create_particle(**particle_data)
 
-    def _departure_particle(self, particle_id: str) -> None:
-        if particle_id not in self._algorithm.population:
-            return
+    def _departure_particle(self, particle_id: str) -> dict[str, Any] | None:
+        particle = self._algorithm.population.get(particle_id)
+
+        if particle is None:
+            return None
+
+        particle_data = particle()
 
         self._algorithm.delete_particle(identifier=particle_id)
+        self._population.pop(particle_id, None)
+
+        return particle_data
 
     def update_status(self) -> None:
         self._update_partial_result()

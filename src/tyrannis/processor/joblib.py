@@ -8,13 +8,14 @@ from joblib.parallel import BACKENDS
 
 from ..core.algorithm import CostFunctionWrapperBase, ParticleBase
 from ..core.processor import ProcessorBase, evaluate_particle
+from ..core.signals import EventProtocol
 
 
 class JoblibCostFunctionWrapper(CostFunctionWrapperBase):
     """Joblib processor cost-function wrapper."""
 
 
-class Joblib(ProcessorBase):
+class Joblib(ProcessorBase[EventProtocol]):
     def __init__(
         self,
         n_jobs: int = -1,
@@ -156,20 +157,23 @@ class Joblib(ProcessorBase):
         self.stop_migration()
 
     def initialize_loop_context(self) -> None:
-        self._migration_signal = Event()
+        migration_processor = self._migration_processor
 
-        if self._migration_processor is None:
+        if migration_processor is None:
             raise RuntimeError("Migration processor cannot be None.")
 
-        self._migration_processor.initialize_loop_context(
-            migration_signal=self._migration_signal
-        )
+        migration_signal: EventProtocol = Event()
+        self._migration_signal = migration_signal
+
+        migration_processor.initialize_loop_context(migration_signal=migration_signal)
 
     def finalize_loop_context(self) -> None:
-        if self._migration_processor is None:
+        migration_processor = self._migration_processor
+
+        if migration_processor is None:
             raise RuntimeError("Migration processor cannot be None.")
 
-        self._migration_processor.finalize_loop_context()
+        migration_processor.finalize_loop_context()
         self._migration_signal = None
 
     def run(self) -> None:
@@ -225,20 +229,24 @@ class Joblib(ProcessorBase):
                             delayed(initialize_worker)(particle_id)
                             for particle_id in new_particles_ids
                         )
+
                         self.error_log(
                             actual_iter=actual_iter,
                             updated_particles=cast(
                                 Iterable[ParticleBase], new_particles
                             ),
                         )
+
                         new_particles = parallel(
                             delayed(self._algorithm.consolidate_new_particles)(particle)
                             for particle in new_particles
                         )
+
                         self.new_particle_log(
                             actual_iter=actual_iter,
                             new_particles=cast(Iterable[ParticleBase], new_particles),
                         )
+
                         self._algorithm.update_population(
                             cast(Iterable[ParticleBase], new_particles)
                         )
@@ -249,38 +257,45 @@ class Joblib(ProcessorBase):
                         self._algorithm.create_random_cache(
                             particle_ids=population, initialize=False
                         )
+
                         processed_particles = parallel(
                             delayed(update_worker)(particle_id)
                             for particle_id in population
                         )
+
                         self.error_log(
                             actual_iter=actual_iter,
                             updated_particles=cast(
                                 Iterable[ParticleBase], processed_particles
                             ),
                         )
+
                         self._algorithm.update_population(
                             cast(Iterable[ParticleBase], processed_particles)
                         )
 
                         if self._algorithm.double_particle_check:
                             self._algorithm.inter_iteration(actual_iter)
+
                             double_check_ids = list(self._algorithm.double_check_ids)
 
                             if double_check_ids:
                                 self._algorithm.create_random_cache(
                                     particle_ids=double_check_ids, initialize=False
                                 )
+
                                 processed_particles = parallel(
                                     delayed(second_update_worker)(particle_id)
                                     for particle_id in double_check_ids
                                 )
+
                                 self.error_log(
                                     actual_iter=actual_iter,
                                     updated_particles=cast(
                                         Iterable[ParticleBase], processed_particles
                                     ),
                                 )
+
                                 self._algorithm.update_population(
                                     cast(Iterable[ParticleBase], processed_particles)
                                 )
@@ -290,6 +305,5 @@ class Joblib(ProcessorBase):
 
                     self.update_status()
                     self.best_log(actual_iter)
-
         finally:
             self.finalize_loop_context()
