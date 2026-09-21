@@ -48,9 +48,11 @@ class BackendBase(ABC):
     directly execute particles, whereas a distributed backend may coordinate
     processors, communication, and migration.
 
-    After execution has completed, the complete result is available through
-    the `result` property. The optimization result itself is contained in
-    `result.result`, while execution history is contained in `result.history`.
+    After `initialize_context` has completed, a `ProcessorResult` container is
+    available through the `result` property. Before execution has produced an
+    optimization result, `result.result` is `None` and `result.history` is empty.
+    During and after execution, these fields contain the result and history
+    produced by the backend.
     """
 
     _identifier: str
@@ -200,15 +202,16 @@ class BackendBase(ABC):
         return self._identifier
 
     @property
-    def result(self) -> ProcessorResult | None:
+    def result(self) -> ProcessorResult:
         """
         Return the complete result produced by the backend.
 
         Returns
         -------
-        ProcessorResult | None
-            The complete optimization result, including the best solution and
-            the execution history accumulated by the backend. `None` is
-            returned when execution has not yet produced a result.
+        ProcessorResult
+            The backend result container. Before execution has produced an
+            optimization result, its `result` field is `None` and its `history`
+            field is empty. During and after execution, these fields contain the
+            result and history produced by the backend.
         """
         return self._result

@@ -114,9 +114,7 @@ class ParticleBase(ABC):
         return self._candidate_variables
 
     @candidate_variables.setter
-    def candidate_variables(
-        self, new_variables: dict[str, float]
-    ) -> dict[str, float] | None:
+    def candidate_variables(self, new_variables: dict[str, float]) -> None:
         self._candidate_variables = new_variables
 
     @property
@@ -167,6 +165,8 @@ class ParticleBase(ABC):
 
         if self._new_particle and (not np.isinf(self._fitness)):
             self._new_particle = False
+            self._candidate_variables = None
+            self._candidate_fitness = None
             return
 
         self._new_particle = False
@@ -346,9 +346,10 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         """
         Create and add a particle to the population.
 
-        The signature of this method must match the signature of the particle
-        constructor (`__init__`) implemented by the algorithm, including all of its
-        arguments and their respective types. The only required argument of this
+        The parameters required to represent the complete particle state must
+        correspond to the parameters of the particle constructor (`__init__`)
+        implemented by the algorithm, using the same names and corresponding
+        types. Unlike the particle constructor, the only required argument of this
         method must be `identifier`. All other arguments must be optional and use
         the appropriate undefined value for their respective type. In particular,
         fitness-related arguments must use `FITNESS_UNDEFINED` as their default
@@ -540,10 +541,12 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         required to initialize the particle before it participates in the current
         iteration, including the evaluation of its initial fitness when necessary.
 
-        Newly created particles must have their fitness evaluated during this
-        process so that they can participate in the current iteration without
-        requiring an additional iteration solely for their first fitness
-        evaluation.
+        Newly created particles whose fitness is `FITNESS_UNDEFINED` must have
+        their fitness evaluated during this process so that they can participate
+        in the current iteration without requiring an additional iteration solely
+        for their first fitness evaluation. Particles recreated with an already
+        evaluated fitness must preserve the provided fitness and do not require
+        re-evaluation solely because they are new to the population.
 
         This method must not consolidate the particle. Consolidation is performed
         subsequently by ``consolidate_new_particles``.
@@ -779,7 +782,8 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         particle-processing phase.
 
         Newly created particles must not be initialized here. Their initial
-        fitness is evaluated and consolidated by ``initialize_particle`` before
+        fitness is evaluated by ``initialize_particle`` when necessary and they
+        are subsequently consolidated by ``consolidate_new_particles`` before
         they participate in the current iteration.
 
         This method may modify the algorithm object and any objects contained
