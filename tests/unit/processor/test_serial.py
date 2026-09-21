@@ -1,8 +1,8 @@
 from threading import get_ident
 
 import pytest
-
 from _support.processors import configure_processor_for_dispatch
+
 from tyrannis.processor.serial import Serial
 
 

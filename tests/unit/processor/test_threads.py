@@ -4,10 +4,10 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 import pytest
-
 from _support.processors import configure_processor_for_dispatch
-from tyrannis.processor import ThreadsPool
+
 import tyrannis.processor.threads as threads_module
+from tyrannis.processor import ThreadsPool
 
 
 class _RecordingThreadPool:

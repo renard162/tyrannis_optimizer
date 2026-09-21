@@ -6,11 +6,11 @@ from typing import Any
 
 import numpy as np
 import pytest
-
 from _support.processors import configure_processor_for_dispatch
+
+import tyrannis.processor.process as process_module
 from tyrannis.processor import ProcessPool
 from tyrannis.processor.process import ProcessPoolCostFunctionWrapper
-import tyrannis.processor.process as process_module
 
 
 class _EventDouble:
@@ -163,9 +163,7 @@ def test_process_pool_propagates_worker_exceptions_and_finalizes_loop() -> None:
 
 def test_process_pool_wrapper_round_trips_a_cloudpickle_callable() -> None:
     offset = 2.0
-    wrapper = ProcessPoolCostFunctionWrapper(
-        lambda value: np.float64(value + offset)
-    )
+    wrapper = ProcessPoolCostFunctionWrapper(lambda value: np.float64(value + offset))
 
     restored = pickle.loads(pickle.dumps(wrapper))
 
