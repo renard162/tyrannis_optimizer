@@ -114,6 +114,7 @@ dev = [
 testpaths = [
     "tests/unit",
     "tests/integration",
+    "tests/mathematical",
 ]
 pythonpath = ["tests"]
 addopts = "--import-mode=importlib"
@@ -121,6 +122,3 @@ addopts = "--import-mode=importlib"
 
 [tool.coverage.run]
 branch = true
-omit = [
-    "src/tyrannis/examples/*",
-]
