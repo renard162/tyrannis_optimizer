@@ -67,9 +67,12 @@ class Categorical(SpaceBase):
             maps each input name to its collection of possible choices.
 
         cost_function:
-            User-defined cost function to be evaluated after decoding the
-            solver inputs. It may be ``None`` during construction, but
-            ``initialize_context`` requires a valid cost function.
+            User-defined cost function evaluated after decoding the solver
+            inputs into their user-facing representation. This argument is
+            required when the space is used independently. It does not need
+            to be provided when the space is used as a component of a
+            ``Mixed`` space, because in that case the cost function is
+            provided to the ``Mixed`` space itself.
 
         decoder:
             Method used to decode the continuous solver representation. Supported

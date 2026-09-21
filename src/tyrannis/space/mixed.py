@@ -49,7 +49,9 @@ class Mixed(SpaceBase):
             User-defined cost function to be evaluated after all component
             spaces have decoded their respective variables. It receives all
             variables in their combined user-facing representation as
-            keyword arguments.
+            keyword arguments. When using ``Mixed``, the cost function must
+            be provided only to the ``Mixed`` space itself; the individual
+            component spaces do not need to receive their own cost function.
 
         use_cache:
             Whether cost-function evaluations should be cached. When
