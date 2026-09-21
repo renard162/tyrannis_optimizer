@@ -14,9 +14,9 @@ from .algorithm import (
 )
 from .backend_migration import MigrationDriverBase, MigrationProcessorBase
 from .results import HistoryConfig, ProcessorResult
-from .signals import LocalEvent
+from .signals import EventProtocol
 
-SignalType = TypeVar("SignalType", bound=LocalEvent)
+SignalType = TypeVar("SignalType", bound=EventProtocol)
 
 
 class IntSequence:
@@ -30,9 +30,27 @@ class IntSequence:
 
 
 class ProcessorBase(ABC, Generic[SignalType]):
-    """Base class for processor agent."""
+    """
+    Base class for processor agents.
 
-    _migration_signal: SignalType
+    A processor configured by the optimization orchestrator acts as a template
+    for the processors that execute optimization islands. ``initialize_context``
+    configures this template with the algorithm and optimization-wide execution
+    parameters, while ``create_processors_pool`` creates independent replicas for
+    the requested islands.
+
+    Each replica receives its own algorithm configuration and migration processor
+    before execution. Runtime resources that must exist only in the execution
+    context are initialized after replication and removed before the processor
+    leaves that context. Resources whose lifetime is naturally limited to
+    ``run`` may instead be created and released inside that method.
+
+    The original processor retains the replicas in ``processors_pool`` and may be
+    used by a backend to collect the processors returned from their execution
+    environments.
+    """
+
+    _migration_signal: SignalType | None
     _cost_function_wrapper: type[CostFunctionWrapperBase]
     _processors_pool: dict[str, Self]
     _migration_driver: MigrationDriverBase | None
@@ -63,11 +81,12 @@ class ProcessorBase(ABC, Generic[SignalType]):
         behavior, or any other configuration that is pertinent exclusively to the
         processor implementation.
 
-        The implementation must not initialize execution-context resources such as
-        synchronization primitives or other non-serializable objects. These
-        resources must be created by `initialize_execution_context` immediately
-        before the processor is executed and removed by
-        `finalize_execution_context` when execution is finished.
+        The implementation must not initialize runtime resources that cannot be
+        safely serialized or replicated with the processor template. Such resources
+        must be created only after replication, either by
+        `initialize_execution_context` when they must span the complete processor
+        execution or inside `run` when their lifetime can be restricted to that
+        local execution scope.
 
         The `_cost_function_wrapper` attribute must be initialized with the
         processor-specific cost-function wrapper implementation. The wrapper must
@@ -89,58 +108,68 @@ class ProcessorBase(ABC, Generic[SignalType]):
 
     def initialize_execution_context(self) -> None:
         """
-        Initialize resources required exclusively during processor execution.
+        Initialize resources that must span the processor execution context.
 
-        This method must create any execution-specific resources that are required
-        for the processor to operate but must not be present while the processor is
-        being serialized or replicated. This includes any non-serializable
-        variables, synchronization primitives, process or thread resources, or
-        other runtime-specific objects required by the processor's execution
-        strategy.
+        This hook is executed after the processor has been replicated and, when
+        applicable, deserialized in the environment in which it will run. It must
+        initialize runtime resources that need to remain available across the
+        complete processor execution and that must not be propagated through
+        processor replication.
 
-        The resources created by this method must be local to the execution context
-        in which the processor will run. They must not be created during
-        initialization or replication of the processor, since the processor may
-        subsequently be serialized and distributed to another execution context.
+        Resources whose lifetime is naturally restricted to ``run`` may be created
+        and released inside ``run`` itself. Pools, context managers, or similar
+        resources therefore do not need to be moved into this hook solely because
+        they use processes, threads, or another execution runtime.
 
-        Every resource created by this method must have a corresponding cleanup
-        operation implemented by `finalize_execution_context`.
+        Every resource created by this method that survives beyond a narrower local
+        context must have a corresponding cleanup operation in
+        ``finalize_execution_context``.
         """
 
     def finalize_execution_context(self) -> None:
         """
-        Remove resources associated with the processor's execution context.
+        Finalize resources that span the processor execution context.
 
-        This method must release and remove any execution-specific resources
-        created by `initialize_execution_context`, including non-serializable
-        variables, synchronization primitives, process or thread resources, and
-        other runtime-specific objects that must not be retained after execution.
+        This hook must release resources initialized by
+        ``initialize_execution_context`` and restore any state that must not remain
+        attached to the processor after execution. Resources created and fully
+        managed inside ``run`` are outside this hook's ownership and must be cleaned
+        up by the context that created them.
 
-        This method must leave the processor in a state that can safely be
-        serialized, deep-copied, or returned from a worker to the driver without
-        carrying resources that are specific to the execution context in which
-        it was run.
-
-        Every resource initialized by `initialize_execution_context` must be
-        released or replaced here before the processor leaves its execution
-        context.
+        After this method returns, the processor must not retain live resources
+        owned by its execution context that would prevent it from being safely
+        returned to the backend or reused according to the concrete processor's
+        lifecycle.
         """
 
     @abstractmethod
     def initialize_loop_context(self) -> None:
         """
-        Implement here all start logic related with migration event signal set
+        Initialize runtime state shared with migration during the iteration loop.
 
-        Set here the _migration_signal
+        The concrete processor must create the migration signal required by its
+        execution model, assign it to ``_migration_signal``, and provide that signal
+        to the associated migration processor through its loop-context
+        initialization. Any additional migration runtime state whose lifetime is
+        restricted to the processor loop must also be initialized here.
+
+        This method is called by ``run`` before the first call to
+        ``migration_control``.
         """
         raise NotImplementedError
 
     @abstractmethod
     def finalize_loop_context(self) -> None:
         """
-        Implement here all stop logic related with migration event signal set.
+        Finalize runtime state shared with migration during the iteration loop.
 
-        Unset hete the _migration_signal
+        The concrete processor must finalize the migration processor's loop context
+        and release or clear the migration signal and any other runtime state
+        initialized by ``initialize_loop_context``.
+
+        This method must be safe to execute as part of the cleanup path of ``run``
+        so that loop-specific migration resources do not remain attached to the
+        processor after execution.
         """
         raise NotImplementedError
 
@@ -153,6 +182,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
                 continue
             setattr(new_processor, name, deepcopy(value, memo))
 
+        new_processor._migration_signal = None
         new_processor._seed_sequence = None
         new_processor._pool_count_sequence = None
         new_processor._processors_pool = {}
@@ -168,9 +198,28 @@ class ProcessorBase(ABC, Generic[SignalType]):
         n_particles: int,
         migration_driver: MigrationDriverBase,
         history_config: HistoryConfig,
-        fitness_failure_strategy: str = "invalidate",
-        seed: int | None = None,
+        fitness_failure_strategy: str,
+        seed: int | None,
     ) -> None:
+        """
+        Configure the processor template for an optimization execution.
+
+        The optimization orchestrator supplies the complete execution context to
+        this method before any processor replicas are created. The configured
+        processor acts as a template: ``create_processors_pool`` deep-copies it and
+        configures each replica with an independent algorithm random state and its
+        own migration processor.
+
+        This method initializes only serializable or replicable execution state.
+        Resources that belong to the environment in which a replica actually runs
+        must be created later by ``initialize_execution_context``,
+        ``initialize_loop_context``, ``run``, or another concrete runtime scope as
+        appropriate.
+
+        All arguments supplied by the optimization orchestrator are required. This
+        prevents an omitted orchestration parameter from being silently replaced by
+        an internal default.
+        """
         self._algorithm = algorithm
         self._n_iter = n_iter
         self._n_particles = n_particles
@@ -185,6 +234,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
         self._migration_driver = migration_driver
         self._history_config = history_config
 
+        self._migration_signal = None
         self._migration_processor = None
         self._identifier = "MainProcessor"
         self._population = {}
@@ -195,6 +245,15 @@ class ProcessorBase(ABC, Generic[SignalType]):
         self._processors_pool = {}
 
     def create_processors_pool(self, n_islands: int) -> None:
+        """
+        Create and register one independent processor replica for each island.
+
+        Replicas are created from the processor template configured by
+        ``initialize_context``. Each replica receives a unique identifier, an
+        independently configured algorithm random state, and a migration processor
+        associated with its island. The template itself is not inserted into the
+        pool and is not used as an island executor.
+        """
         for _ in range(n_islands):
             processor = self._replicate_processor()
             self._processors_pool[processor.identifier] = processor
@@ -214,7 +273,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
 
         new_processor._migration_processor = (
             self._migration_driver.create_processor_module(  # type: ignore
-                identifier=processor_identifier,
+                identifier=processor_identifier
             )
         )
 
@@ -251,7 +310,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
 
         for p_idx in range(self._n_particles):
             self._algorithm.create_particle(
-                identifier=f"{self._identifier}|particle:{p_idx}",
+                identifier=f"{self._identifier}|particle:{p_idx}"
             )
 
     def start_migration(self) -> None:
@@ -305,7 +364,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
         if particle_id not in self._algorithm.population:
             return
 
-        del self._algorithm.population[particle_id]
+        self._algorithm.delete_particle(identifier=particle_id)
 
     def update_status(self) -> None:
         self._update_partial_result()
@@ -414,9 +473,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
         if not (self._history_config.best or self._history_config.status):
             return
 
-        bests = [
-            (self._algorithm.local_best, "local_best"),
-        ]
+        bests = [(self._algorithm.local_best, "local_best")]
 
         if self._history_config.status:
             bests.extend(
