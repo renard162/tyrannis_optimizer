@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from queue import Queue
 
-from .signals import LocalEvent
+from .signals import EventProtocol
 
 
 class CommunicationProcessorBase(ABC):
@@ -47,11 +47,7 @@ class CommunicationProcessorBase(ABC):
     """
 
     @abstractmethod
-    def __init__(
-        self,
-        identifier: str,
-        **kwargs: object,
-    ) -> None:
+    def __init__(self, identifier: str, **kwargs: object) -> None:
         """
         Initialize the processor communication configuration.
 
@@ -217,19 +213,16 @@ class CommunicationProcessorBase(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def set_message_signal(
-        self,
-        message_signal: LocalEvent | None,
-    ) -> None:
+    def set_message_signal(self, message_signal: EventProtocol | None) -> None:
         """
         Set or clear the signal used to notify message arrival.
 
         Parameters
         ----------
         message_signal:
-            Shared local event used to notify the processor-side execution
-            that at least one complete application-level message has been
-            inserted into `messages`.
+            Shared synchronization event used to notify the processor-side
+            execution that at least one complete application-level message has
+            been inserted into `messages`.
 
             Passing `None` disables message-arrival signaling. This is used
             when the loop context associated with the signal has been
@@ -298,11 +291,7 @@ class CommunicationDriverBase(ABC):
     """
 
     @abstractmethod
-    def __init__(
-        self,
-        island_ids: list[str],
-        **kwargs: object,
-    ) -> None:
+    def __init__(self, island_ids: list[str], **kwargs: object) -> None:
         """
         Initialize the driver communication configuration.
 
