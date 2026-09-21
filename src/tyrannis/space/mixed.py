@@ -61,7 +61,8 @@ class Mixed(SpaceBase):
             Cache strategy to use when caching is enabled. Supported strategies are:
 
             - ``"lru"``: Least Recently Used cache. (default)
-            - ``"disk"``: Persistent disk-based cache.
+            - ``"disk"``: Temporary disk-backed runtime cache. Its contents are
+            local to the current runtime and are not preserved through serialization.
             - ``"lfu"``: Least Frequently Used cache. Requires the optional
             dependencies for advanced caching.
             - ``"fifo"``: First In, First Out cache. Requires the optional
@@ -168,6 +169,8 @@ class Mixed(SpaceBase):
             self._variable_names.extend(variables)
 
     def decode(self, float_inputs: dict[str, float]) -> dict[str, Any]:
+        self._check_input_bounds(float_inputs)
+
         decoded = {}
 
         for space, encoded_variables in zip(

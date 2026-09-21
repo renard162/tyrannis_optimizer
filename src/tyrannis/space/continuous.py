@@ -58,7 +58,8 @@ class Continuous(SpaceBase):
             Cache strategy to use when caching is enabled. Supported strategies are:
 
             - ``"lru"``: Least Recently Used cache. (default)
-            - ``"disk"``: Persistent disk-based cache.
+            - ``"disk"``: Temporary disk-backed runtime cache. Its contents are
+            local to the current runtime and are not preserved through serialization.
             - ``"lfu"``: Least Frequently Used cache. Requires the optional
             dependencies for advanced caching.
             - ``"fifo"``: First In, First Out cache. Requires the optional
