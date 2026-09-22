@@ -77,7 +77,7 @@ Spaces define the search domain, including the variables, their bounds or availa
 | --- | --- |
 | `Continuous` | Continuous variables bounded by numerical lower and upper limits. |
 | `Integer` | Integer variables bounded by numerical lower and upper limits. |
-| `Binary` | Binary variables restricted to `0` or `1`. |
+| `Binary` | Binary variables restricted to `False` or `True`. |
 | `Categorical` | Categorical variables selected from a finite set of discrete choices. |
 | `Permutation` | Permutation variables for ordering and permutation-based optimization problems. |
 | `Mixed` | Composition of multiple spaces, allowing heterogeneous variable types in the same optimization problem. |
@@ -90,9 +90,9 @@ Processors define how the optimization loop is executed within each machine or e
 
 | Import | Description |
 | --- | --- |
-| `Joblib` | Executes particle processing through Joblib parallelism. |
-| `ProcessPool` | Executes particle processing using multiple processes. |
-| `ThreadsPool` | Executes particle processing using a pool of threads. |
+| `Joblib` | Executes particle processing in parallel using Joblib. |
+| `ProcessPool` | Executes particle processing in parallel using multiple processes. |
+| `ThreadsPool` | Executes particle processing in parallel using a pool of threads. |
 
 When no processor is provided, `Optimizer` uses its internal serial processor. This keeps the default execution sequential while allowing parallel particle evaluation to be enabled explicitly.
 
@@ -163,7 +163,7 @@ print(optimizer.best_fitness)
 
 ### Mixed search space and parallel processing
 
-Tyrannis can combine different variable types in the same optimization problem. In this example, a continuous variable and a categorical variable are optimized together using the Artificial Bee Colony algorithm and a Joblib processor:
+Tyrannis can combine different variable types in the same optimization problem. In this example, a continuous variable and a categorical variable are optimized together using the Artificial Bee Colony algorithm and a Joblib (parallel) processor:
 
 ```python
 from tyrannis import Optimizer
