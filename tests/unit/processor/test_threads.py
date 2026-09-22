@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from typing import Any
+from typing import Any, Self
 
 import pytest
-from _support.processors import configure_processor_for_dispatch
+from _support.processors import (
+    assert_second_phase_dispatch,
+    configure_processor_for_dispatch,
+)
 
 import tyrannis.processor.threads as threads_module
 from tyrannis.processor import ThreadsPool
@@ -16,7 +19,7 @@ class _RecordingThreadPool:
         self.map_calls: list[tuple[list[Any], int | None]] = []
         self.exited = False
 
-    def __enter__(self) -> _RecordingThreadPool:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args: object) -> None:
@@ -111,3 +114,38 @@ def test_threads_pool_propagates_worker_exceptions_and_finalizes_loop() -> None:
         processor.run()
 
     assert migration.loop_finalized
+
+
+@pytest.mark.parametrize(
+    "checked_indexes", [[1], []], ids=["selected-particle", "empty-selection"]
+)
+def test_threads_pool_runs_only_selected_second_updates(
+    checked_indexes: list[int],
+) -> None:
+    processor = ThreadsPool(n_jobs=2, chunksize=1)
+    algorithm, _ = configure_processor_for_dispatch(
+        processor, n_iterations=1, n_particles=3
+    )
+    ids = [f"MainProcessor|particle:{index}" for index in range(3)]
+    algorithm.double_particle_check = True
+    algorithm.requested_double_check_ids = [ids[index] for index in checked_indexes]
+
+    processor.run()
+
+    assert set(algorithm.second_updated_ids) == set(
+        algorithm.requested_double_check_ids
+    )
+    assert_second_phase_dispatch(algorithm, ids)
+
+
+def test_threads_pool_execution_context_starts_and_stops_migration() -> None:
+    processor = ThreadsPool(n_jobs=1)
+    _, migration = configure_processor_for_dispatch(
+        processor, n_iterations=0, n_particles=0
+    )
+
+    processor.initialize_execution_context()
+    processor.finalize_execution_context()
+
+    assert migration.started
+    assert migration.stopped

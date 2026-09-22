@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import pickle
 from collections.abc import Callable, Iterable
-from typing import Any
+from typing import Any, Self
 
 import numpy as np
 import pytest
-from _support.processors import configure_processor_for_dispatch
+from _support.processors import (
+    assert_second_phase_dispatch,
+    configure_processor_for_dispatch,
+)
 
 import tyrannis.processor.process as process_module
 from tyrannis.processor import ProcessPool
-from tyrannis.processor.process import ProcessPoolCostFunctionWrapper
+from tyrannis.processor.process import PoolSignal, ProcessPoolCostFunctionWrapper
 
 
 class _EventDouble:
@@ -31,7 +34,7 @@ class _RecordingManager:
     def __init__(self) -> None:
         self.exited = False
 
-    def __enter__(self) -> _RecordingManager:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args: object) -> None:
@@ -49,7 +52,7 @@ class _RecordingProcessPool:
         self.map_calls: list[tuple[list[Any], int | None]] = []
         self.exited = False
 
-    def __enter__(self) -> _RecordingProcessPool:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args: object) -> None:
@@ -58,13 +61,13 @@ class _RecordingProcessPool:
 
     def map(
         self,
-        function: Callable[[Any], Any],
-        inputs: Iterable[Any],
+        func: Callable[[Any], Any],
+        iterable: Iterable[Any],
         chunksize: int | None = None,
     ) -> list[Any]:
-        items = list(inputs)
+        items = list(iterable)
         self.map_calls.append((items, chunksize))
-        return [function(item) for item in items]
+        return [func(item) for item in items]
 
 
 class _RecordingContext:
@@ -82,6 +85,32 @@ class _RecordingContext:
     ) -> _RecordingProcessPool:
         self.pool = _RecordingProcessPool(processes, maxtasksperchild)
         return self.pool
+
+
+def test_pool_signal_mirrors_state_to_manager_and_releases_it() -> None:
+    signal = PoolSignal()
+    manager_signal = _EventDouble()
+    assert not signal.is_set()
+
+    signal.set_manager_signal(manager_signal)
+    assert signal.manager_signal is manager_signal
+    assert not manager_signal.is_set()
+
+    signal.set()
+    assert signal.is_set()
+    assert manager_signal.is_set()
+
+    signal.clear()
+    assert not signal.is_set()
+    assert not manager_signal.is_set()
+
+    signal.set()
+    signal.clear_manager_signal()
+    with pytest.raises(RuntimeError, match="Manager signal"):
+        _ = signal.manager_signal
+
+    signal.set_manager_signal(manager_signal)
+    assert manager_signal.is_set()
 
 
 def test_process_pool_forwards_context_and_pool_configuration_and_closes_resources(
@@ -163,7 +192,7 @@ def test_process_pool_propagates_worker_exceptions_and_finalizes_loop() -> None:
 
 def test_process_pool_wrapper_round_trips_a_cloudpickle_callable() -> None:
     offset = 2.0
-    wrapper = ProcessPoolCostFunctionWrapper(lambda value: np.float64(value + offset))
+    wrapper = ProcessPoolCostFunctionWrapper(lambda value: float(value + offset))
 
     restored = pickle.loads(pickle.dumps(wrapper))
 
@@ -176,14 +205,50 @@ def test_process_pool_rejects_unknown_multiprocessing_context() -> None:
 
 
 @pytest.mark.parametrize(
-    "kwargs",
+    "option",
     [
-        pytest.param({"chunksize": 0}, id="chunksize"),
-        pytest.param({"maxtasksperchild": 0}, id="maxtasksperchild"),
+        pytest.param("chunksize", id="chunksize"),
+        pytest.param("maxtasksperchild", id="maxtasksperchild"),
     ],
 )
 def test_process_pool_rejects_non_positive_pool_options(
-    kwargs: dict[str, int],
+    option: str,
 ) -> None:
     with pytest.raises(ValueError):
-        ProcessPool(**kwargs)
+        if option == "chunksize":
+            ProcessPool(chunksize=0)
+        else:
+            ProcessPool(maxtasksperchild=0)
+
+
+@pytest.mark.multiprocess
+@pytest.mark.parametrize(
+    "checked_indexes", [[1], []], ids=["selected-particle", "empty-selection"]
+)
+def test_process_pool_runs_only_selected_second_updates(
+    checked_indexes: list[int],
+) -> None:
+    processor = ProcessPool(n_jobs=2, multiprocessing_context="spawn", chunksize=1)
+    algorithm, _ = configure_processor_for_dispatch(
+        processor, n_iterations=1, n_particles=3
+    )
+    ids = [f"MainProcessor|particle:{index}" for index in range(3)]
+    algorithm.double_particle_check = True
+    algorithm.requested_double_check_ids = [ids[index] for index in checked_indexes]
+
+    processor.run()
+
+    assert_second_phase_dispatch(algorithm, ids)
+
+
+def test_process_pool_execution_context_starts_and_stops_migration() -> None:
+    processor = ProcessPool(n_jobs=1)
+    _, migration = configure_processor_for_dispatch(
+        processor, n_iterations=0, n_particles=0
+    )
+
+    processor.initialize_execution_context()
+    processor.finalize_execution_context()
+
+    assert migration.started
+    assert migration.stopped

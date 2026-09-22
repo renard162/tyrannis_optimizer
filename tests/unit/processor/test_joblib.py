@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from typing import Any
+from typing import Any, Self
 
 import pytest
-from _support.processors import configure_processor_for_dispatch
+from _support.processors import (
+    assert_second_phase_dispatch,
+    configure_processor_for_dispatch,
+)
 
 import tyrannis.processor.joblib as joblib_module
 from tyrannis.processor import Joblib
@@ -35,7 +38,7 @@ class _RecordingParallel:
         ] = []
         self.exited = False
 
-    def __enter__(self) -> _RecordingParallel:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *args: object) -> None:
@@ -241,3 +244,54 @@ def test_joblib_rejects_non_positive_batch_size(batch_size: int) -> None:
 def test_joblib_rejects_non_positive_pre_dispatch(pre_dispatch: int) -> None:
     with pytest.raises(ValueError, match="pre_dispatch"):
         Joblib(pre_dispatch=pre_dispatch)
+
+
+@pytest.mark.parametrize(
+    "checked_indexes", [[1], []], ids=["selected-particle", "empty-selection"]
+)
+def test_joblib_runs_only_selected_second_updates(checked_indexes: list[int]) -> None:
+    processor = Joblib(n_jobs=1, joblib_backend="sequential")
+    algorithm, _ = configure_processor_for_dispatch(
+        processor, n_iterations=1, n_particles=3
+    )
+    ids = [f"MainProcessor|particle:{index}" for index in range(3)]
+    algorithm.double_particle_check = True
+    algorithm.requested_double_check_ids = [ids[index] for index in checked_indexes]
+
+    processor.run()
+
+    assert algorithm.second_updated_ids == algorithm.requested_double_check_ids
+    assert_second_phase_dispatch(algorithm, ids)
+
+
+def test_joblib_execution_context_starts_and_stops_migration() -> None:
+    processor = Joblib(n_jobs=1, joblib_backend="sequential")
+    _, migration = configure_processor_for_dispatch(
+        processor, n_iterations=0, n_particles=0
+    )
+
+    processor.initialize_execution_context()
+    processor.finalize_execution_context()
+
+    assert migration.started
+    assert migration.stopped
+
+
+def test_joblib_rejects_boolean_worker_count() -> None:
+    with pytest.raises(TypeError, match="n_jobs"):
+        Joblib(n_jobs=True)
+
+
+def test_joblib_rejects_boolean_batch_size() -> None:
+    with pytest.raises(TypeError, match="batch_size"):
+        Joblib(batch_size=True)
+
+
+def test_joblib_rejects_boolean_pre_dispatch() -> None:
+    with pytest.raises(TypeError, match="pre_dispatch"):
+        Joblib(pre_dispatch=True)
+
+
+def test_joblib_rejects_unknown_batch_size() -> None:
+    with pytest.raises(ValueError, match="batch_size"):
+        Joblib(batch_size="invalid")

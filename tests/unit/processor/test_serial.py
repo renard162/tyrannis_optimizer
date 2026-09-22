@@ -1,12 +1,15 @@
 from threading import get_ident
 
 import pytest
-from _support.processors import configure_processor_for_dispatch
+from _support.processors import (
+    assert_second_phase_dispatch,
+    configure_processor_for_dispatch,
+)
 
 from tyrannis.processor.serial import Serial
 
 
-def test_serial_executes_every_particle_in_order_on_the_calling_thread() -> None:
+def test_serial_executes_every_particle_on_the_calling_thread() -> None:
     processor = Serial()
     algorithm, migration = configure_processor_for_dispatch(
         processor,
@@ -18,9 +21,11 @@ def test_serial_executes_every_particle_in_order_on_the_calling_thread() -> None
     processor.run()
 
     expected_ids = [f"MainProcessor|particle:{index}" for index in range(3)]
-    assert algorithm.initialized_ids == expected_ids
-    assert algorithm.updated_ids == expected_ids
-    assert list(algorithm.population) == expected_ids
+    assert set(algorithm.initialized_ids) == set(expected_ids)
+    assert set(algorithm.updated_ids) == set(expected_ids)
+    assert len(algorithm.initialized_ids) == len(expected_ids)
+    assert len(algorithm.updated_ids) == len(expected_ids)
+    assert set(algorithm.population) == set(expected_ids)
     assert [particle.updates for particle in algorithm.population.values()] == [1, 1, 1]
     assert algorithm.worker_threads == [calling_thread] * 6
     assert migration.loop_initialized
@@ -71,3 +76,25 @@ def test_serial_execution_context_starts_and_stops_migration() -> None:
 
     assert migration.started
     assert migration.stopped
+
+
+@pytest.mark.parametrize(
+    "checked_indexes",
+    [[1], []],
+    ids=["selected-particle", "empty-selection"],
+)
+def test_serial_runs_inter_iteration_and_only_selected_second_updates(
+    checked_indexes: list[int],
+) -> None:
+    processor = Serial()
+    algorithm, _ = configure_processor_for_dispatch(
+        processor, n_iterations=1, n_particles=3
+    )
+    ids = [f"MainProcessor|particle:{index}" for index in range(3)]
+    algorithm.double_particle_check = True
+    algorithm.requested_double_check_ids = [ids[index] for index in checked_indexes]
+
+    processor.run()
+
+    assert algorithm.second_updated_ids == algorithm.requested_double_check_ids
+    assert_second_phase_dispatch(algorithm, ids)
