@@ -1,9 +1,10 @@
 import warnings
 from pathlib import Path
+from typing import Any
 
 from pyspark.sql import SparkSession
 
-from ...core.algorithm import CostFunctionWrapperBase
+from ...core.algorithm import AlgorithmBase, CostFunctionWrapperBase
 from ...core.backend_distributed import DistributedBackendBase
 from ...core.backend_migration import MigrationDriverBase
 from ...core.processor import ProcessorBase
@@ -32,35 +33,40 @@ class SparkDistributed(DistributedBackendBase):
         Spark backend for distributed island-based optimization.
 
         `SparkDistributed` distributes the complete population among
-        independent optimization islands, with one processor and algorithm
-        instance executed by each Spark executor. Each island evolves its
-        local population independently and participates in the configured
-        migration strategy when migration is enabled.
+        independent optimization islands. One processor and algorithm instance
+        is created for each island, and the islands are submitted to Spark as
+        independent partitions. Spark is responsible for scheduling those
+        partitions on the executors available in the cluster.
 
         By default, the particles within each island are processed serially.
         A different `ProcessorBase` implementation can be supplied through the
         backend configuration, in which case the corresponding processor is used
         independently within each Spark island, allowing additional parallel
-        processing of particles inside each executor.
+        processing of particles inside the executor running that island.
 
         Parameters
         ----------
         spark:
             Active Spark session used to distribute the optimization islands
-            across Spark executors. The session must already be configured and
+            across the Spark cluster. The session must already be configured and
             available when the backend is created.
 
         n_executors:
-            Number of Spark executors used as optimization islands. Each
-            executor receives an independent processor and algorithm instance,
-            and therefore maintains its own population. The value of
-            `n_particles` supplied to the optimization is applied independently
-            to every island, resulting in an initial population of
-            `n_particles * n_executors` particles across the distributed
-            optimization. Ideally, `n_executors` should match the number of
-            workers available in the Spark cluster, so that each worker can
-            execute one optimization island without unnecessarily increasing
-            resource contention or leaving available workers unused.
+            Number of optimization islands created by the backend. The same
+            value is used as the number of Spark partitions when the island
+            processors are submitted for execution.
+
+            Despite the parameter name, this value does not configure or
+            guarantee the number of physical Spark executors. Spark determines
+            dynamically which executor runs each partition, so multiple islands
+            may execute on the same executor and executors may process different
+            islands over the lifetime of the Spark job.
+
+            The value of `n_particles` supplied to the optimization is applied
+            independently to every island, resulting in an initial distributed
+            population of `n_particles * n_executors` particles. For efficient
+            resource utilization, this value should normally be chosen according
+            to the parallel execution capacity available in the Spark cluster.
 
         communication_port:
             TCP port used by the Spark communication layer for communication
@@ -94,12 +100,12 @@ class SparkDistributed(DistributedBackendBase):
         environment.
 
         The default processor executes the particles of each island serially.
-        This avoids introducing a second layer of parallelization inside each
-        Spark executor and is generally appropriate when the available Spark
-        executors already provide the required degree of parallelism. If a
+        This avoids introducing a second layer of parallelization inside the
+        Spark task executing that island and is generally appropriate when the
+        Spark cluster already provides the required degree of parallelism. If a
         different `ProcessorBase` is configured, that processor is replicated
         independently for each island and controls the particle-level
-        processing within its corresponding executor. Consequently,
+        processing within its corresponding Spark task. Consequently,
         `SparkDistributed` can also be combined with local parallel processors
         when additional parallelism inside each island is appropriate.
 
@@ -123,13 +129,12 @@ class SparkDistributed(DistributedBackendBase):
         communication cost of the distributed execution.
 
         Because each island maintains an independent optimization state, the
-        algorithm and processor are serialized and replicated across the Spark
-        executors. The algorithm, processor, cost function, and all objects
-        required for their execution must therefore be compatible with Spark's
+        algorithm and processor are serialized and submitted as Spark partition
+        data. The algorithm, processor, cost function, and all objects required
+        for their execution must therefore be compatible with Spark's
         serialization mechanism and available in the executor environment. If
         required project modules are not already installed on the workers,
-        `code_archive` can be used to distribute the corresponding Python
-        code.
+        `code_archive` can be used to distribute the corresponding Python code.
 
         The history logging system should be used with extreme care with
         `SparkDistributed`. Processor histories are returned from the Spark
@@ -154,8 +159,20 @@ class SparkDistributed(DistributedBackendBase):
         if spark is None:
             raise ValueError("Spark session cannot be None.")
 
-        if (communication_port is not None) and (not 1 <= communication_port <= 65535):
-            raise ValueError("communication_port must be between 1 and 65535.")
+        if not isinstance(n_executors, int) or isinstance(n_executors, bool):
+            raise TypeError("n_executors must be an integer.")
+
+        if n_executors <= 0:
+            raise ValueError("n_executors must be greater than zero.")
+
+        if communication_port is not None:
+            if not isinstance(communication_port, int) or isinstance(
+                communication_port, bool
+            ):
+                raise TypeError("communication_port must be an integer or None.")
+
+            if not 1 <= communication_port <= 65535:
+                raise ValueError("communication_port must be between 1 and 65535.")
 
         self._spark = spark
         self._code_archive = Path(code_archive) if code_archive is not None else None
@@ -164,14 +181,15 @@ class SparkDistributed(DistributedBackendBase):
         if communication_port is None:
             self._communication_port = 18081
             warnings.warn(
-                (
-                    f"WARNING: The default communication port ({self._communication_port}) is being used. "
-                    "This port may conflict with another service or process running on the "
-                    "cluster, which can prevent SparkDistributed from establishing the required "
-                    "communication channel. Specify communication_port explicitly if this port "
-                    "is already in use."
+                message=(
+                    f"WARNING: The default communication port "
+                    f"({self._communication_port}) is being used. "
+                    "This port may conflict with another service or process running "
+                    "on the cluster, which can prevent SparkDistributed from "
+                    "establishing the required communication channel. Specify "
+                    "communication_port explicitly if this port is already in use."
                 ),
-                UserWarning,
+                category=UserWarning,
                 stacklevel=2,
             )
         else:
@@ -184,14 +202,14 @@ class SparkDistributed(DistributedBackendBase):
 
     def initialize_context(
         self,
-        algorithm,
+        algorithm: AlgorithmBase,
         n_iter: int,
         n_particles: int,
         migration: MigrationDriverBase,
-        processor: ProcessorBase | None,
+        processor: ProcessorBase[Any] | None,
         fitness_failure_strategy: str,
         history_config: HistoryConfig,
-        seed: int | None = None,
+        seed: int | None,
     ) -> None:
         super().initialize_context(
             algorithm=algorithm,
@@ -207,13 +225,10 @@ class SparkDistributed(DistributedBackendBase):
         island_ids = [f"island:{idx}" for idx in range(self._n_executors)]
 
         communication_driver = SparkCommunicationDriver(
-            island_ids=island_ids,
-            port=self._communication_port,
+            island_ids=island_ids, port=self._communication_port
         )
 
-        driver_ip = self._spark.conf.get(
-            "spark.driver.host",
-        )
+        driver_ip = self._spark.conf.get("spark.driver.host")
 
         self._migration.initialize_context(
             communication_driver=communication_driver,
@@ -228,7 +243,7 @@ class SparkDistributed(DistributedBackendBase):
 
         if self._history_config.history_enabled:
             warnings.warn(
-                (
+                message=(
                     "\n"
                     "============================================================\n"
                     "CRITICAL WARNING — SPARK HISTORY ENABLED\n"
@@ -245,7 +260,7 @@ class SparkDistributed(DistributedBackendBase):
                     "WITHIN THE LIMITS OF YOUR SPARK CONFIGURATION.\n"
                     "============================================================"
                 ),
-                UserWarning,
+                category=UserWarning,
                 stacklevel=3,
             )
 
@@ -259,14 +274,10 @@ class SparkDistributed(DistributedBackendBase):
                     f"Spark code archive not found: {self._code_archive}"
                 )
 
-            self._spark.sparkContext.addPyFile(
-                str(self._code_archive),
-            )
+            self._spark.sparkContext.addPyFile(str(self._code_archive))
 
-        if len(self._processor.processors_pool) == 0:
-            self._processor.create_processors_pool(
-                self._n_executors,
-            )
+        if not self._processor.processors_pool:
+            self.init_processors()
 
         self._migration.start()
 
@@ -274,13 +285,11 @@ class SparkDistributed(DistributedBackendBase):
             spark_context = self._spark.sparkContext
 
             processors = spark_context.parallelize(
-                list(self._processor.processors_pool.values()),
+                c=list(self._processor.processors_pool.values()),
                 numSlices=self._n_executors,
             )
 
-            results = processors.map(
-                _run_processor,
-            ).collect()
+            results = processors.map(_run_processor).collect()
 
             self._local_bests = dict(results)
 
@@ -290,7 +299,7 @@ class SparkDistributed(DistributedBackendBase):
             self._migration.stop()
 
 
-def _run_processor(processor: ProcessorBase) -> tuple[str, ProcessorResult]:
+def _run_processor(processor: ProcessorBase[Any]) -> tuple[str, ProcessorResult]:
     """
     Execute a processor inside a Spark executor.
 
