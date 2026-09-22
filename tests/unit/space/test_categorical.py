@@ -1,9 +1,10 @@
 import warnings
+from typing import cast
 
 import numpy as np
 import pytest
-from _support.numerics import seed_for
 
+from tests._support.numerics import seed_for
 from tyrannis.space import Categorical
 
 
@@ -47,6 +48,32 @@ def test_scalar_initialization_uses_one_encoded_value_per_variable_and_custom_bo
     assert space.decode({"0": -2.0, "1": 2.0}) == ["small", "green"]
 
 
+def test_named_scalar_uses_one_variable_and_default_bounds_per_choice_collection() -> (
+    None
+):
+    space = Categorical(
+        {"color": ["red", "blue"], "size": ["S", "L"]}, decoder="scalar"
+    )
+    space.initialize_context(seed=seed_for(310))
+
+    assert space.variable_names == ["color", "size"]
+    assert space.encoded_variable_names == ["color", "size"]
+    assert space.encoded_boundaries == {"color": (0.0, 1.0), "size": (0.0, 1.0)}
+    assert space.decode({"color": 0.0, "size": 1.0}) == {"color": "red", "size": "L"}
+
+
+@pytest.mark.parametrize("decoder", ["softmax", "gumbel-softmax"])
+def test_stochastic_decoders_expose_one_encoded_variable_per_choice(
+    decoder: str,
+) -> None:
+    space = Categorical(["red", "blue"], decoder=decoder)
+    space.initialize_context(seed=seed_for(311))
+
+    assert space.variable_names == ["0"]
+    assert space.encoded_variable_names == ["0-red", "0-blue"]
+    assert space.encoded_boundaries == {"0-red": (-1.0, 1.0), "0-blue": (-1.0, 1.0)}
+
+
 def test_one_hot_decode_returns_named_choices_from_the_configured_domain() -> None:
     choices = {"color": ["red", "blue"], "size": ["small", "large"]}
     space = Categorical(choices, decoder="one-hot")
@@ -82,6 +109,13 @@ def test_cache_codec_preserves_categorical_input_representation(
     space.initialize_context(seed=seed_for(304))
 
     assert space.decode_cache(space.encode_cache(inputs)) == inputs
+
+
+def test_cache_rejects_unhashable_choice_values_when_enabled() -> None:
+    space = Categorical({"choice": [[1], [2]]}, use_cache=True)
+
+    with pytest.raises(TypeError, match="hashable"):
+        _ = space.encode_cache({"choice": [1]})
 
 
 @pytest.mark.parametrize(
@@ -124,24 +158,32 @@ def test_decode_rejects_invalid_encoded_inputs(
     space.initialize_context(seed=seed_for(306))
 
     with pytest.raises(exception):
-        space.decode(inputs)
+        _ = space.decode(inputs)
 
 
 @pytest.mark.parametrize(
     ("choices", "exception"),
     [
         ([], ValueError),
+        ({}, ValueError),
         ({"color": []}, ValueError),
         ({"color": 3}, TypeError),
         (np.asarray([[["red", "blue"]]]), ValueError),
     ],
-    ids=["empty", "empty-named", "non-iterable-variable", "three-dimensional-array"],
+    ids=[
+        "empty",
+        "empty-mapping",
+        "empty-named",
+        "non-iterable-variable",
+        "three-dimensional-array",
+    ],
 )
 def test_constructor_rejects_invalid_choice_collections(
     choices: object, exception: type[Exception]
 ) -> None:
     with pytest.raises(exception):
-        Categorical(choices)  # type: ignore[arg-type]
+        # Runtime validation deliberately receives values outside the typed API.
+        _ = Categorical(cast("list[object]", choices))
 
 
 def test_constructor_accepts_one_dimensional_numpy_choices() -> None:
@@ -151,6 +193,19 @@ def test_constructor_accepts_one_dimensional_numpy_choices() -> None:
 
     assert space.variable_names == ["0"]
     assert space.encoded_variable_names == ["0-red", "0-blue"]
+
+
+def test_two_dimensional_numpy_choices_create_independent_positional_variables() -> (
+    None
+):
+    space = Categorical(np.asarray([["red", "blue"], ["small", "large"]]))
+    space.initialize_context(seed=seed_for(312))
+
+    assert space.variable_names == ["0", "1"]
+    assert space.encoded_variable_names == ["0-red", "0-blue", "1-small", "1-large"]
+    assert space.decode(
+        {"0-red": 1.0, "0-blue": -1.0, "1-small": -1.0, "1-large": 1.0}
+    ) == ["red", "large"]
 
 
 @pytest.mark.parametrize(
@@ -165,12 +220,13 @@ def test_constructor_rejects_invalid_bounds(
     bounds: object, exception: type[Exception]
 ) -> None:
     with pytest.raises(exception):
-        Categorical(["red"], bounds=bounds)  # type: ignore[arg-type]
+        # Runtime validation deliberately receives values outside the typed API.
+        _ = Categorical(["red"], bounds=cast("tuple[float, float]", bounds))
 
 
 def test_gumbel_softmax_rejects_temperature_outside_documented_domain() -> None:
-    with pytest.raises(Exception):
-        Categorical(
+    with pytest.raises(ValueError):
+        _ = Categorical(
             ["red", "blue"],
             decoder="gumbel-softmax",
             params={"temperature": 0.0},
@@ -195,4 +251,4 @@ def test_encoded_representation_distinguishes_choices_with_equal_string_forms() 
 
 def test_constructor_rejects_unknown_decoder() -> None:
     with pytest.raises(ValueError, match="Invalid decoder"):
-        Categorical(["red"], decoder="invalid")
+        _ = Categorical(["red"], decoder="invalid")

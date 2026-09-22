@@ -1,8 +1,9 @@
 import warnings
+from typing import cast
 
 import pytest
-from _support.numerics import seed_for
 
+from tests._support.numerics import seed_for
 from tyrannis.space import Binary
 
 
@@ -99,6 +100,8 @@ def test_cache_codec_preserves_binary_input_representation(
     space.initialize_context(seed=seed_for(205))
 
     assert space.decode_cache(space.encode_cache(inputs)) == inputs
+    if isinstance(inputs, dict):
+        assert space.encode_cache(inputs) == (("first", True), ("second", False))
 
 
 @pytest.mark.parametrize(
@@ -116,7 +119,7 @@ def test_decode_rejects_invalid_encoded_inputs(
     space.initialize_context(seed=seed_for(206))
 
     with pytest.raises(exception):
-        space.decode(inputs)
+        _ = space.decode(inputs)
 
 
 @pytest.mark.parametrize(
@@ -134,7 +137,8 @@ def test_constructor_rejects_invalid_bit_definitions(
     bits: object, exception: type[Exception]
 ) -> None:
     with pytest.raises(exception):
-        Binary(bits)  # type: ignore[arg-type]
+        # Runtime validation deliberately receives values outside the typed API.
+        _ = Binary(cast("int | list[str] | None", bits))
 
 
 @pytest.mark.parametrize(
@@ -151,7 +155,8 @@ def test_constructor_rejects_invalid_bounds(
     bounds: object, exception: type[Exception]
 ) -> None:
     with pytest.raises(exception):
-        Binary(bounds=bounds)  # type: ignore[arg-type]
+        # Runtime validation deliberately receives values outside the typed API.
+        _ = Binary(bounds=cast("tuple[float, float] | None", bounds))
 
 
 def test_s_shape_warns_without_seed_and_replays_with_same_seed() -> None:
@@ -167,11 +172,13 @@ def test_s_shape_warns_without_seed_and_replays_with_same_seed() -> None:
 
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
-        assert [first.decode(inputs) for _ in range(3)] == [
-            second.decode(inputs) for _ in range(3)
-        ]
+        first_values = [first.decode(inputs) for _ in range(3)]
+        assert first_values == [second.decode(inputs) for _ in range(3)]
+        assert all(
+            all(isinstance(bit, bool) for bit in values) for values in first_values
+        )
 
 
 def test_constructor_rejects_unknown_decoder() -> None:
     with pytest.raises(ValueError, match="Invalid decoder"):
-        Binary(decoder="invalid")
+        _ = Binary(decoder="invalid")

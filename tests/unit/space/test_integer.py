@@ -1,8 +1,9 @@
 import warnings
+from typing import cast
 
 import pytest
-from _support.numerics import seed_for
 
+from tests._support.numerics import seed_for
 from tyrannis.space import Integer
 
 
@@ -75,6 +76,49 @@ def test_round_decoder_preserves_input_representation_and_cache_round_trip(
     assert space.decode_cache(space.encode_cache(decoded)) == expected
 
 
+def test_documented_single_interval_creates_one_positional_variable() -> None:
+    # Mixed's public example uses this form; Integer's annotation omits it.
+    space = Integer(cast("list[tuple[int, int]]", cast(object, (0, 3))))
+    space.initialize_context(seed=seed_for(109))
+
+    assert space.variable_names == ["0"]
+    assert space.encoded_boundaries == {"0": (0.0, 3.0)}
+    assert space.decode({"0": 3.0}) == [3]
+
+
+def test_scaling_decoder_accepts_encoded_endpoints() -> None:
+    space = Integer({"low": (-2, 4), "high": (-2, 4)}, decoder="scaling")
+    space.initialize_context(seed=seed_for(107))
+
+    assert space.decode({"low": 0.0, "high": 1.0}) == {"low": -2, "high": 4}
+
+
+def test_transfer_function_decoder_returns_bounded_integer_values() -> None:
+    space = Integer({"low": (-2, 4), "high": (-2, 4)}, decoder="transfer_function")
+    space.initialize_context(seed=seed_for(110))
+
+    decoded = space.decode({"low": -6.0, "high": 6.0})
+
+    assert isinstance(decoded, dict)
+    assert set(decoded) == {"low", "high"}
+    assert all(
+        isinstance(value, int) and -2 <= value <= 4 for value in decoded.values()
+    )
+
+
+def test_seeded_stochastic_decoder_replays_an_integer_result() -> None:
+    first = Integer({"count": (0, 3)}, decoder="stochastic_round")
+    second = Integer({"count": (0, 3)}, decoder="stochastic_round")
+    first.initialize_context(seed=seed_for(108))
+    second.initialize_context(seed=seed_for(108))
+
+    first_values = [first.decode({"count": 1.25}) for _ in range(3)]
+    second_values = [second.decode({"count": 1.25}) for _ in range(3)]
+
+    assert first_values == second_values
+    assert all(value in ({"count": 1}, {"count": 2}) for value in first_values)
+
+
 @pytest.mark.parametrize(
     ("decoder", "inputs", "exception"),
     [
@@ -90,15 +134,15 @@ def test_decode_rejects_invalid_encoded_inputs(
     space.initialize_context(seed=seed_for(104))
 
     with pytest.raises(exception):
-        space.decode(inputs)
+        _ = space.decode(inputs)
 
 
 def test_stochastic_rounding_warns_without_seed_but_not_with_seed() -> None:
-    unseeded = Integer((0, 3), decoder="stochastic_round")
+    unseeded = Integer([(0, 3)], decoder="stochastic_round")
     with pytest.warns(RuntimeWarning, match="without a seed"):
         unseeded.initialize_context()
 
-    seeded = Integer((0, 3), decoder="stochastic_round")
+    seeded = Integer([(0, 3)], decoder="stochastic_round")
     with warnings.catch_warnings():
         warnings.simplefilter("error", RuntimeWarning)
         seeded.initialize_context(seed=seed_for(105))
@@ -106,4 +150,4 @@ def test_stochastic_rounding_warns_without_seed_but_not_with_seed() -> None:
 
 def test_constructor_rejects_unknown_decoder() -> None:
     with pytest.raises(ValueError, match="Invalid decoder"):
-        Integer((0, 3), decoder="invalid")
+        _ = Integer([(0, 3)], decoder="invalid")

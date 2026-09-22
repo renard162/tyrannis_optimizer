@@ -1,10 +1,11 @@
 import warnings
+from typing import cast
 
 import numpy as np
 import pytest
-from _support.assertions import assert_valid_permutation
-from _support.numerics import seed_for
 
+from tests._support.assertions import assert_valid_permutation
+from tests._support.numerics import seed_for
 from tyrannis.space import Permutation
 
 
@@ -102,6 +103,17 @@ def test_random_keys_decode_preserves_permutation_structure_and_representation(
     assert_valid_permutation(values, ["A", "B", "C"])
 
 
+def test_multiple_positional_permutations_decode_independently() -> None:
+    space = Permutation([["A", "B"], ["X", "Y", "Z"]])
+    space.initialize_context(seed=seed_for(412))
+
+    assert space.variable_names == ["0", "1"]
+    assert space.encoded_variable_names == ["0-A", "0-B", "1-X", "1-Y", "1-Z"]
+    assert space.decode(
+        {"0-A": 1.0, "0-B": 0.0, "1-X": 0.5, "1-Y": 1.0, "1-Z": 0.0}
+    ) == [["B", "A"], ["Z", "X", "Y"]]
+
+
 @pytest.mark.parametrize(
     "decoder",
     ["random-keys", "gumbel-random-keys", "plackett-luce", "gumbel-sinkhorn"],
@@ -133,6 +145,13 @@ def test_cache_codec_preserves_permutation_input_representation(
     space.initialize_context(seed=seed_for(406))
 
     assert space.decode_cache(space.encode_cache(inputs)) == inputs
+
+
+def test_cache_rejects_unhashable_permutation_elements_when_enabled() -> None:
+    space = Permutation({"route": [[1], [2]]}, use_cache=True)
+
+    with pytest.raises(TypeError, match="hashable"):
+        _ = space.encode_cache({"route": [[2], [1]]})
 
 
 @pytest.mark.parametrize(
@@ -176,24 +195,32 @@ def test_decode_rejects_invalid_encoded_inputs(
     space.initialize_context(seed=seed_for(408))
 
     with pytest.raises(exception):
-        space.decode(inputs)
+        _ = space.decode(inputs)
 
 
 @pytest.mark.parametrize(
     ("choices", "exception"),
     [
         ([], ValueError),
+        ({}, ValueError),
         ({"route": []}, ValueError),
         ({"route": 3}, TypeError),
         (np.asarray([[["A", "B"]]]), ValueError),
     ],
-    ids=["empty", "empty-named", "non-iterable-variable", "three-dimensional-array"],
+    ids=[
+        "empty",
+        "empty-mapping",
+        "empty-named",
+        "non-iterable-variable",
+        "three-dimensional-array",
+    ],
 )
 def test_constructor_rejects_invalid_choice_collections(
     choices: object, exception: type[Exception]
 ) -> None:
     with pytest.raises(exception):
-        Permutation(choices)  # type: ignore[arg-type]
+        # Runtime validation deliberately receives values outside the typed API.
+        _ = Permutation(cast("list[object]", choices))
 
 
 def test_constructor_accepts_one_dimensional_numpy_choices() -> None:
@@ -203,6 +230,20 @@ def test_constructor_accepts_one_dimensional_numpy_choices() -> None:
 
     assert space.variable_names == ["0"]
     assert space.encoded_variable_names == ["0-A", "0-B"]
+
+
+def test_two_dimensional_numpy_choices_create_independent_positional_permutations() -> (
+    None
+):
+    space = Permutation(np.asarray([["A", "B"], ["X", "Y"]]))
+    space.initialize_context(seed=seed_for(413))
+
+    assert space.variable_names == ["0", "1"]
+    assert space.encoded_variable_names == ["0-A", "0-B", "1-X", "1-Y"]
+    assert space.decode({"0-A": 1.0, "0-B": 0.0, "1-X": 0.0, "1-Y": 1.0}) == [
+        ["B", "A"],
+        ["X", "Y"],
+    ]
 
 
 @pytest.mark.parametrize(
@@ -217,7 +258,8 @@ def test_constructor_rejects_invalid_bounds(
     bounds: object, exception: type[Exception]
 ) -> None:
     with pytest.raises(exception):
-        Permutation(["A"], bounds=bounds)  # type: ignore[arg-type]
+        # Runtime validation deliberately receives values outside the typed API.
+        _ = Permutation(["A"], bounds=cast("tuple[float, float]", bounds))
 
 
 def test_constructor_preserves_all_choices_from_a_documented_iterable() -> None:
@@ -238,4 +280,4 @@ def test_encoded_representation_distinguishes_choices_with_equal_string_forms() 
 
 def test_constructor_rejects_unknown_decoder() -> None:
     with pytest.raises(ValueError, match="Invalid decoder"):
-        Permutation(["A"], decoder="invalid")
+        _ = Permutation(["A"], decoder="invalid")
