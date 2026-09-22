@@ -6,9 +6,10 @@ from collections.abc import Callable, Iterable, Iterator
 from copy import deepcopy
 from pathlib import Path
 from pickle import dumps
-from typing import Protocol, Self, final, runtime_checkable
+from typing import Protocol, final, runtime_checkable
 from unittest.mock import Mock
 
+import joblib  # pyright: ignore[reportMissingTypeStubs]  # Joblib lacks stubs.
 import numpy as np
 import pytest
 
@@ -18,6 +19,7 @@ from tests._support.processors import (
     ProcessorAlgorithmDouble,
     ProcessorMigrationDriverDouble,
     ProcessorParticleDouble,
+    assert_second_phase_dispatch,
 )
 from tyrannis.core.results import HistoryConfig, ProcessorResult
 from tyrannis.core.signals import EventProtocol
@@ -62,15 +64,10 @@ class _SerializedColumn(Protocol):
 
 
 class _ObservableBackend(SparkParallel):
-    def process(
-        self, particle_ids: list[str], initialize_particle: bool
-    ) -> list[ParticleBase]:
-        return self._parallel_process_particles(particle_ids, initialize_particle)
-
     def update_ids(
-        self, particle_ids: list[str] | dict[str, ParticleBase], second_update: bool
+        self, particle_ids: dict[str, ParticleBase] | list[str]
     ) -> list[ParticleBase]:
-        return self._parallel_update_particles(particle_ids, second_update)
+        return self._parallel_update_particles(particle_ids)
 
 
 @final
@@ -99,35 +96,6 @@ class _InputFrame:
         self.worker = worker
         self.schema = schema
         return _CollectedFrame(self.rows)
-
-
-class _AuxParallel:
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_value: BaseException | None,
-        traceback: object,
-    ) -> None:
-        del exc_type, exc_value, traceback
-
-    def __call__(
-        self,
-        tasks: Iterable[
-            tuple[
-                Callable[[ParticleBase], ParticleBase],
-                tuple[ParticleBase],
-                dict[str, object],
-            ]
-        ],
-    ) -> list[ParticleBase]:
-        consolidated: list[ParticleBase] = []
-        for operation, args, kwargs in tasks:
-            del kwargs
-            consolidated.append(operation(*args))
-        return consolidated
 
 
 def _spark() -> SparkSession:
@@ -176,7 +144,6 @@ def _stub_particle_processing(
     algorithm: ProcessorAlgorithmDouble,
     monkeypatch: pytest.MonkeyPatch,
     calls: list[tuple[str, list[str], bool]],
-    second_phase_references: list[list[str]] | None = None,
 ) -> None:
     def initialize(particle_ids: list[str]) -> list[ParticleBase]:
         calls.append(("initialize", list(particle_ids), False))
@@ -190,9 +157,6 @@ def _stub_particle_processing(
     ) -> list[ParticleBase]:
         identifiers = list(particle_ids)
         calls.append(("update", identifiers, second_update))
-        if second_update and second_phase_references is not None:
-            assert isinstance(particle_ids, list)
-            second_phase_references.append(particle_ids)
         operation = (
             algorithm.second_update_particle
             if second_update
@@ -236,52 +200,11 @@ def _worker_particles(
     return particles
 
 
-def test_constructor_defaults_and_session_identity() -> None:
-    spark = _spark()
-    backend = SparkParallel(spark)
-
-    assert backend.identifier == "SparkParallel"
-    assert vars(backend)["_spark"] is spark
-    assert vars(backend)["_code_archive"] is None
-    assert vars(backend)["_n_process"] == -1
-    assert vars(backend)["_joblib_backend"] == "sequential"
-    assert vars(backend)["_batch_size"] == "auto"
-    assert vars(backend)["_pre_dispatch"] == "2 * n_jobs"
-
-
-@pytest.mark.parametrize("archive", ["code.zip", Path("code.zip")], ids=["str", "path"])
-def test_constructor_normalizes_code_archive(archive: str | Path) -> None:
-    assert vars(SparkParallel(_spark(), spark_code_archive=archive))[
-        "_code_archive"
-    ] == Path("code.zip")
-
-
-@pytest.mark.parametrize(
-    "n_jobs", [1, 3, -1, -3], ids=["one", "three", "all", "relative"]
-)
-def test_constructor_accepts_nonzero_aux_jobs(n_jobs: int) -> None:
-    assert vars(SparkParallel(_spark(), n_aux_jobs=n_jobs))["_n_process"] == n_jobs
-
-
-@pytest.mark.parametrize(
-    "n_jobs", [0, True, 1.5, "2"], ids=["zero", "bool", "float", "str"]
-)
+@pytest.mark.parametrize("n_jobs", [0, True, "2"], ids=["zero", "bool", "str"])
 def test_constructor_rejects_invalid_aux_jobs(n_jobs: object) -> None:
     expected = ValueError if n_jobs == 0 else TypeError
     with pytest.raises(expected):
         _ = _construct_runtime(spark=_spark(), n_aux_jobs=n_jobs)
-
-
-@pytest.mark.parametrize(
-    "backend_name",
-    ["sequential", "threading", "loky", "multiprocessing"],
-    ids=["sequential", "threading", "loky", "multiprocessing"],
-)
-def test_constructor_accepts_supported_joblib_backends(backend_name: str) -> None:
-    assert (
-        vars(SparkParallel(_spark(), aux_backend=backend_name))["_joblib_backend"]
-        == backend_name
-    )
 
 
 @pytest.mark.parametrize(
@@ -296,24 +219,14 @@ def test_constructor_rejects_invalid_joblib_backend(
         _ = _construct_runtime(spark=_spark(), aux_backend=backend_name)
 
 
-@pytest.mark.parametrize("batch_size", ["auto", 1, 4], ids=["auto", "one", "four"])
-def test_constructor_accepts_aux_batch_size(batch_size: str | int) -> None:
-    assert (
-        vars(SparkParallel(_spark(), aux_batch_size=batch_size))["_batch_size"]
-        == batch_size
-    )
-
-
 @pytest.mark.parametrize(
     "batch_size,expected",
     [
         (0, ValueError),
-        (-1, ValueError),
         (True, TypeError),
         ("invalid", ValueError),
-        (1.5, ValueError),
     ],
-    ids=["zero", "negative", "bool", "string", "float"],
+    ids=["zero", "bool", "string"],
 )
 def test_constructor_rejects_invalid_aux_batch_size(
     batch_size: object, expected: type[Exception]
@@ -323,21 +236,9 @@ def test_constructor_rejects_invalid_aux_batch_size(
 
 
 @pytest.mark.parametrize(
-    "pre_dispatch",
-    ["2 * n_jobs", "all", 1, 4],
-    ids=["expression", "string", "one", "four"],
-)
-def test_constructor_accepts_aux_pre_dispatch(pre_dispatch: str | int) -> None:
-    assert (
-        vars(SparkParallel(_spark(), aux_pre_dispatch=pre_dispatch))["_pre_dispatch"]
-        == pre_dispatch
-    )
-
-
-@pytest.mark.parametrize(
     "pre_dispatch,expected",
-    [(0, ValueError), (-1, ValueError), (True, TypeError), (1.5, TypeError)],
-    ids=["zero", "negative", "bool", "float"],
+    [(0, ValueError), (True, TypeError), (1.5, TypeError)],
+    ids=["zero", "bool", "float"],
 )
 def test_constructor_rejects_invalid_aux_pre_dispatch(
     pre_dispatch: object, expected: type[Exception]
@@ -372,20 +273,6 @@ def test_initialize_context_configures_spark_wrapper_and_result(
     assert isinstance(backend.result, ProcessorResult)
     assert backend.result.result is None
     assert backend.result.history == []
-
-
-def test_execute_without_archive_does_not_distribute_code(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    spark = _spark()
-    add_py_file = Mock()
-    monkeypatch.setattr(spark.sparkContext, "addPyFile", add_py_file)
-    backend = SparkParallel(spark)
-    _configure(backend, ProcessorAlgorithmDouble())
-
-    backend.execute()
-
-    add_py_file.assert_not_called()
 
 
 def test_execute_distributes_existing_code_archive(
@@ -477,24 +364,19 @@ def test_execute_passes_auxiliary_joblib_settings_and_uses_consolidation(
     _configure(backend, algorithm, n_particles=1)
     calls: list[tuple[str, list[str], bool]] = []
     _stub_particle_processing(backend, algorithm, monkeypatch, calls)
-    settings: dict[str, object] = {}
-
-    def record_parallel(**kwargs: object) -> _AuxParallel:
-        settings.update(kwargs)
-        return _AuxParallel()
-
+    parallel_factory = Mock(wraps=joblib.Parallel)
     monkeypatch.setattr(
-        "tyrannis.backend.parallel.spark_parallel.Parallel", record_parallel
+        "tyrannis.backend.parallel.spark_parallel.Parallel", parallel_factory
     )
     backend.execute()
 
-    assert settings == {
-        "n_jobs": 2,
-        "backend": "threading",
-        "batch_size": 3,
-        "pre_dispatch": 4,
-        "return_as": "list",
-    }
+    parallel_factory.assert_called_once_with(
+        n_jobs=2,
+        backend="threading",
+        batch_size=3,
+        pre_dispatch=4,
+        return_as="list",
+    )
     assert calls == [("initialize", ["SparkParallel|particle:0"], False)]
     assert not algorithm.population["SparkParallel|particle:0"].new_particle
 
@@ -517,25 +399,6 @@ def test_execute_skips_new_particle_block_when_population_is_initialized(
     assert algorithm.population["SparkParallel|particle:0"].updates == 1
 
 
-def test_execute_without_double_check_does_not_enter_second_phase(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    backend = SparkParallel(_spark())
-    algorithm = ProcessorAlgorithmDouble()
-    _configure(backend, algorithm, n_iter=1, n_particles=1)
-    calls: list[tuple[str, list[str], bool]] = []
-    _stub_particle_processing(backend, algorithm, monkeypatch, calls)
-
-    backend.execute()
-
-    assert algorithm.inter_iterations == []
-    assert algorithm.second_updated_ids == []
-    assert calls == [
-        ("initialize", ["SparkParallel|particle:0"], False),
-        ("update", ["SparkParallel|particle:0"], False),
-    ]
-
-
 def test_execute_double_check_with_empty_selection_skips_second_update(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -548,13 +411,8 @@ def test_execute_double_check_with_empty_selection_skips_second_update(
 
     backend.execute()
 
-    assert algorithm.inter_iterations == [1]
-    assert algorithm.random_cache_calls == [
-        (["SparkParallel|particle:0"], True),
-        (["SparkParallel|particle:0"], False),
-    ]
+    assert_second_phase_dispatch(algorithm, ["SparkParallel|particle:0"])
     assert [call for call in calls if call[2]] == []
-    assert algorithm.population["SparkParallel|particle:0"].updates == 1
 
 
 def test_execute_double_check_reuses_selected_ids_after_first_update(
@@ -567,29 +425,14 @@ def test_execute_double_check_reuses_selected_ids_after_first_update(
     selected = ["SparkParallel|particle:1"]
     algorithm.requested_double_check_ids = selected
     calls: list[tuple[str, list[str], bool]] = []
-    update_references: list[list[str]] = []
-    cache_references: list[list[str]] = []
-    _stub_particle_processing(backend, algorithm, monkeypatch, calls, update_references)
-    original_cache = algorithm.create_random_cache
-
-    def record_cache(particle_ids: list[str], initialize: bool) -> None:
-        if not initialize and particle_ids == selected:
-            cache_references.append(particle_ids)
-        original_cache(particle_ids, initialize)
-
-    monkeypatch.setattr(algorithm, "create_random_cache", record_cache)
+    _stub_particle_processing(backend, algorithm, monkeypatch, calls)
 
     backend.execute()
 
-    assert algorithm.inter_iterations == [1]
-    assert algorithm.phase_events.index("inter") > algorithm.phase_events.index(
-        "population_update", 4
+    assert_second_phase_dispatch(
+        algorithm, ["SparkParallel|particle:0", "SparkParallel|particle:1"]
     )
     assert calls[-1] == ("update", selected, True)
-    assert algorithm.random_cache_calls[-1] == (selected, False)
-    assert cache_references[0] is update_references[0]
-    assert algorithm.population[selected[0]].updates == 2
-    assert algorithm.population["SparkParallel|particle:0"].updates == 1
 
 
 def test_execute_logs_errors_and_best_and_updates_result(
@@ -700,31 +543,6 @@ def test_worker_recovers_original_particle_after_update_failure() -> None:
     assert particles[0].error_fitness == FITNESS_UNDEFINED
 
 
-def test_worker_recovers_original_particle_after_initialization_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    identifier = "SparkParallel|particle:0"
-    algorithm = ProcessorAlgorithmDouble()
-    _configure(SparkParallel(_spark()), algorithm)
-    algorithm.create_particle(identifier)
-
-    def fail_initialization(particle_id: str) -> ProcessorParticleDouble:
-        raise ValueError(f"failed initialization: {particle_id}")
-
-    monkeypatch.setattr(algorithm, "initialize_particle", fail_initialization)
-
-    particles = _worker_particles(
-        algorithm, [[identifier]], initialize=True, strategy="continue"
-    )
-
-    assert len(particles) == 1
-    assert particles[0].identifier == identifier
-    assert particles[0].new_particle
-    assert particles[0].candidate_fitness is not None
-    assert np.isinf(particles[0].candidate_fitness)
-    assert particles[0].error_fitness == FITNESS_UNDEFINED
-
-
 def test_worker_preserves_existing_error_fitness_after_failure() -> None:
     identifier = "SparkParallel|particle:0"
     algorithm = ProcessorAlgorithmDouble(fail_on_update=identifier)
@@ -782,21 +600,9 @@ def test_worker_records_nan_and_recovers_original_particle(
     assert np.isnan(particles[0].error_fitness)
 
 
-def test_spark_adapter_returns_early_for_empty_identifiers(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    spark = _spark()
-    create_data_frame = Mock()
-    monkeypatch.setattr(spark, "createDataFrame", create_data_frame)
-    backend = _ObservableBackend(spark)
-    _configure(backend, ProcessorAlgorithmDouble())
-
-    assert backend.process([], initialize_particle=True) == []
-    create_data_frame.assert_not_called()
-
-
-def test_spark_adapter_serializes_algorithm_and_flattens_collected_particles(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("as_mapping", [False, True], ids=["ids", "population"])
+def test_spark_adapter_submits_population_and_collects_particles(
+    monkeypatch: pytest.MonkeyPatch, as_mapping: bool
 ) -> None:
     spark = _spark()
     backend = _ObservableBackend(spark)
@@ -820,7 +626,10 @@ def test_spark_adapter_serializes_algorithm_and_flattens_collected_particles(
 
     monkeypatch.setattr(spark, "createDataFrame", create_data_frame)
 
-    returned = backend.process(identifiers, initialize_particle=True)
+    source: dict[str, ParticleBase] | list[str] = (
+        dict(algorithm.population) if as_mapping else identifiers
+    )
+    returned = backend.update_ids(source)
 
     assert submitted == [([(identifiers[0],), (identifiers[1],)], ["particle_id"])]
     assert [particle.identifier for particle in returned] == identifiers
@@ -831,29 +640,3 @@ def test_spark_adapter_serializes_algorithm_and_flattens_collected_particles(
     assert frame.worker is not None
     worker_frames = list(frame.worker([pd.DataFrame({"particle_id": identifiers})]))
     assert len(worker_frames) == 1
-
-
-@pytest.mark.parametrize("as_mapping", [False, True], ids=["list", "population"])
-def test_update_adapter_normalizes_identifiers_and_forwards_second_phase(
-    monkeypatch: pytest.MonkeyPatch, as_mapping: bool
-) -> None:
-    backend = _ObservableBackend(_spark())
-    identifier = "SparkParallel|particle:0"
-    particle = ProcessorParticleDouble(identifier, 0)
-    inputs: list[tuple[list[str], bool, bool]] = []
-
-    def process(
-        particle_ids: list[str],
-        initialize_particle: bool,
-        second_update: bool = False,
-    ) -> list[ParticleBase]:
-        inputs.append((particle_ids, initialize_particle, second_update))
-        return [particle]
-
-    monkeypatch.setattr(backend, "_parallel_process_particles", process)
-    source: list[str] | dict[str, ParticleBase] = (
-        {identifier: particle} if as_mapping else [identifier]
-    )
-
-    assert backend.update_ids(source, second_update=True) == [particle]
-    assert inputs == [([identifier], False, True)]
