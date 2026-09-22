@@ -1,8 +1,8 @@
 import warnings
 
 import pytest
-
 from _support.numerics import seed_for
+
 from tyrannis.space import Binary
 
 

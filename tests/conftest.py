@@ -1,7 +1,6 @@
 """Global pytest configuration for the Tyrannis test suite."""
 
 import pytest
-
 from _support.objectives import CountingObjective
 
 

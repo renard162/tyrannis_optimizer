@@ -9,10 +9,9 @@ from typing import Any
 
 import numpy as np
 
+from _support.numerics import BASE_SEED
 from tyrannis.core.processor import ProcessorBase
 from tyrannis.core.results import HistoryConfig
-
-from _support.numerics import BASE_SEED
 
 
 @dataclass
@@ -23,8 +22,8 @@ class ProcessorParticleDouble:
     item: int
     new_particle: bool = True
     updates: int = 0
-    fitness: np.float64 = np.float64(0.0)
-    candidate_fitness: np.float64 | None = np.float64(0.0)
+    fitness: np.float64 = np.float64(0.0)  # noqa: RUF009
+    candidate_fitness: np.float64 | None = np.float64(0.0)  # noqa: RUF009
     error_fitness: np.float64 | None = None
     candidate_variables: dict[str, float] | None = None
     random_cache: dict[str, Any] = field(default_factory=dict)
@@ -88,9 +87,7 @@ class ProcessorAlgorithmDouble:
     def second_update_particle(self, identifier: str) -> ProcessorParticleDouble:
         raise AssertionError(f"unexpected second update: {identifier}")
 
-    def create_random_cache(
-        self, particle_ids: list[str], initialize: bool
-    ) -> None:
+    def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
         del particle_ids, initialize
 
     def update_population(self, particles: list[ProcessorParticleDouble]) -> None:

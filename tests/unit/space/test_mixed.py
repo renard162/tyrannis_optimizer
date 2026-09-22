@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
-
 from _support.numerics import STRICT_ATOL, STRICT_RTOL, seed_for
 from _support.objectives import constant_objective
+
 from tyrannis.space import Binary, Categorical, Continuous, Integer, Mixed
 
 

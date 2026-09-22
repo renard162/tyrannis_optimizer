@@ -2,9 +2,9 @@ import warnings
 
 import numpy as np
 import pytest
-
 from _support.assertions import assert_valid_permutation
 from _support.numerics import seed_for
+
 from tyrannis.space import Permutation
 
 
@@ -13,7 +13,9 @@ def _encoded_inputs(space: Permutation) -> dict[str, float]:
     return {name: 0.0 for name in space.encoded_variable_names}
 
 
-def test_named_random_keys_initialization_exposes_one_encoded_value_per_choice() -> None:
+def test_named_random_keys_initialization_exposes_one_encoded_value_per_choice() -> (
+    None
+):
     space = Permutation({"route": ["A", "B", "C"]}, decoder="random-keys")
 
     space.initialize_context(seed=seed_for(401))
@@ -77,7 +79,11 @@ def test_gumbel_sinkhorn_configuration_keeps_custom_bounds_and_parameters() -> N
     ("choices", "inputs", "result_type"),
     [
         (["A", "B", "C"], {"0-A": 0.2, "0-B": 0.1, "0-C": 0.3}, list),
-        ({"route": ["A", "B", "C"]}, {"route-A": 0.2, "route-B": 0.1, "route-C": 0.3}, dict),
+        (
+            {"route": ["A", "B", "C"]},
+            {"route-A": 0.2, "route-B": 0.1, "route-C": 0.3},
+            dict,
+        ),
     ],
     ids=["positional", "keyword"],
 )

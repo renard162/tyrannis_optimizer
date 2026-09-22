@@ -2,8 +2,8 @@ import warnings
 
 import numpy as np
 import pytest
-
 from _support.numerics import seed_for
+
 from tyrannis.space import Categorical
 
 
@@ -30,7 +30,9 @@ def test_named_one_hot_initialization_exposes_one_encoded_value_per_choice() -> 
     }
 
 
-def test_scalar_initialization_uses_one_encoded_value_per_variable_and_custom_bounds() -> None:
+def test_scalar_initialization_uses_one_encoded_value_per_variable_and_custom_bounds() -> (
+    None
+):
     space = Categorical(
         [["small", "large"], ["red", "blue", "green"]],
         decoder="scalar",

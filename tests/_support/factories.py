@@ -5,12 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from _support.numerics import BASE_SEED
+from _support.objectives import encoded_sphere
 from tyrannis import Optimizer
 from tyrannis.core.algorithm import AlgorithmBase, CostFunctionWrapperBase
 from tyrannis.core.space import SpaceBase
-
-from _support.numerics import BASE_SEED
-from _support.objectives import encoded_sphere
 
 
 def configure_algorithm(
