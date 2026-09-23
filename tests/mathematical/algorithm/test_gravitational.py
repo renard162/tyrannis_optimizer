@@ -11,17 +11,18 @@ endpoints; configurable Lp distance and distance power; float64 epsilon added
 AFTER that power; uniform masses for equal fitness; position-only clipping.
 These choices are not all prescribed by the paper. Cancellation of equal
 passive/inertial masses extends the acceleration formula to zero-mass agents.
-Near-equal/nonfinite fitness fallbacks and migration are outside this suite.
+Near-equal fitness fallbacks and migration are outside this suite.
 """
 
 import json
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
-from math import ceil, exp, fsum, sqrt
+from math import ceil, exp, fsum, isfinite, sqrt
 from sys import float_info
 from typing import override
 
+import numpy as np
 import pytest
 
 from tests._support import factories
@@ -29,7 +30,7 @@ from tests._support.assertions import (
     assert_optimizer_result_consistent,
     assert_particle_state_consistent,
 )
-from tests._support.numerics import BASE_SEED, STRICT_ATOL, STRICT_RTOL
+from tests._support.numerics import BASE_SEED, STRICT_ATOL, STRICT_RTOL, seed_for
 from tests._support.objectives import constant_objective, sphere
 from tyrannis.algorithm.gravitational import GSA, GSAParticle
 from tyrannis.processor.serial import Serial
@@ -56,6 +57,7 @@ class ObservedGSA(GSA):
         if actual_iter == 0:
             self.inputs: dict[tuple[int, str], UpdateInputs] = {}
             self.states: dict[int, dict[str, GSAParticle]] = {}
+            self.best: dict[int, GSAParticle] = {}
 
     @override
     def update_particle(self, identifier: str) -> GSAParticle:
@@ -76,6 +78,8 @@ class ObservedGSA(GSA):
     def post_iteration(self, actual_iter: int) -> None:
         super().post_iteration(actual_iter)
         self.states[actual_iter] = deepcopy(self.population)
+        assert self.local_best is not None
+        self.best[actual_iter] = deepcopy(self.local_best)
 
 
 def run_swarm(
@@ -84,15 +88,17 @@ def run_swarm(
     *,
     n_iterations: int = 5,
     objective: Callable[..., float] = sphere,
+    n_particles: int = 5,
+    seed: int = BASE_SEED,
 ) -> ObservedGSA:
     processor = Serial()
     optimizer = factories.make_optimizer(
         Continuous(bounds, cost_function=objective),
         algorithm,
         processor=processor,
-        n_particles=5,
+        n_particles=n_particles,
         n_iterations=n_iterations,
-        seed=BASE_SEED,
+        seed=seed,
         history="iteration",
     ).fit()
     (executor,) = processor.processors_pool.values()
@@ -102,7 +108,7 @@ def run_swarm(
     assert executed is not algorithm
     states = executed.states
     assert set(states) == set(range(n_iterations + 1))
-    assert all(len(population) == 5 for population in states.values())
+    assert all(len(population) == n_particles for population in states.values())
     assert set(executed.inputs) == {
         (iteration, key)
         for iteration, population in states.items()
@@ -122,7 +128,7 @@ def run_swarm(
                 "acceleration": particle.acceleration,
             }
         )
-    assert len(rows) == 5 * (n_iterations + 1)
+    assert len(rows) == n_particles * (n_iterations + 1)
     for iteration, population in states.items():
         for particle in population.values():
             assert_particle_state_consistent(particle, bounds)
@@ -142,6 +148,21 @@ def run_swarm(
 
 
 def expected_masses(population: dict[str, GSAParticle]) -> dict[str, float]:
+    finite = {
+        key: float(p.fitness) for key, p in population.items() if isfinite(p.fitness)
+    }
+    if finite and any(p.fitness == np.inf for p in population.values()):
+        # Tyrannis' finite-subset extension of (15)/(16): infeasible agents
+        # contribute zero; the common (worst-best) factor cancels on normalization.
+        # This is not the limit worst -> infinity in the published equation.
+        worst_finite = max(finite.values())
+        deficits = {
+            key: worst_finite - finite[key] if key in finite else 0.0
+            for key in population
+        }
+        total = fsum(deficits.values())
+        assert total > 0, "The mixed finite plateau needs its own contract assertion"
+        return {key: deficit / total for key, deficit in deficits.items()}
     best = min(p.fitness for p in population.values())
     worst = max(p.fitness for p in population.values())
     if best == worst:
@@ -398,3 +419,136 @@ def test_zero_alpha_keeps_gravitational_constant(
     algorithm = run_swarm(ObservedGSA(g_zero=1, alpha=0), small_bounds)
     _ = assert_transitions(algorithm, small_bounds, g_zero=1, alpha=0)
     assert {observed.gravity for observed in algorithm.inputs.values()} == {1}
+
+
+def assert_infinite_fitness_state(algorithm: ObservedGSA) -> None:
+    """Check relevant numeric state and historical minima, including setup."""
+    for iteration, population in algorithm.states.items():
+        assert all(isfinite(p.mass) and p.mass >= 0 for p in population.values())
+        assert fsum(p.mass for p in population.values()) == pytest.approx(
+            1, rel=STRICT_RTOL, abs=STRICT_ATOL
+        )
+        for particle in population.values():
+            assert particle.acceleration is not None and particle.velocity is not None
+            for vector in (
+                particle.variables,
+                particle.velocity,
+                particle.acceleration,
+            ):
+                assert all(isfinite(value) for value in vector.values())
+        history = [
+            p
+            for t, pop in algorithm.states.items()
+            if t <= iteration
+            for p in pop.values()
+        ]
+        best = algorithm.best[iteration]
+        assert best.fitness == min(p.fitness for p in history)
+        assert any(
+            p.identifier == best.identifier
+            and p.variables == best.variables
+            and p.fitness == best.fitness
+            for p in history
+        )
+    assert all(isfinite(observed.gravity) for observed in algorithm.inputs.values())
+
+
+def test_mixed_infinite_fitness_preserves_masses_and_transitions(
+    small_bounds: dict[str, tuple[float, float]],
+) -> None:
+    def objective(**variables: float) -> float:
+        return np.inf if variables["x"] > 0 else sphere(**variables)
+
+    algorithm = run_swarm(
+        ObservedGSA(g_zero=12, alpha=2),
+        small_bounds,
+        objective=objective,
+        n_iterations=3,
+        seed=seed_for(0),
+    )
+    initial = algorithm.states[0]
+    assert sum(p.fitness == np.inf for p in initial.values()) >= 2
+    assert len({p.fitness for p in initial.values() if isfinite(p.fitness)}) >= 2
+    assert_infinite_fitness_state(algorithm)
+    _ = assert_transitions(algorithm, small_bounds, g_zero=12, alpha=2)
+    for population in algorithm.states.values():
+        finite = sorted(
+            (p for p in population.values() if isfinite(p.fitness)),
+            key=lambda p: p.fitness,
+        )
+        assert len({p.fitness for p in finite}) >= 2
+        assert [p.mass for p in finite] == sorted(
+            (p.mass for p in finite), reverse=True
+        )
+        assert finite[0].mass > finite[-1].mass == 0
+        assert all(p.mass == 0 for p in population.values() if p.fitness == np.inf)
+    assert all(isfinite(best.fitness) for best in algorithm.best.values())
+    assert any(
+        p.fitness == np.inf and isfinite(algorithm.states[t + 1][key].fitness)
+        for t, population in algorithm.states.items()
+        if t < 3
+        for key, p in population.items()
+    ), "A real crossing must exercise masses and ranking at different time indices"
+
+
+def test_all_infinite_fitness_uses_uniform_masses_and_defined_dynamics(
+    small_bounds: dict[str, tuple[float, float]],
+) -> None:
+    def objective(**variables: float) -> float:
+        del variables
+        return np.inf
+
+    algorithm = run_swarm(
+        ObservedGSA(g_zero=12, alpha=2),
+        small_bounds,
+        objective=objective,
+        n_iterations=2,
+    )
+    assert_infinite_fitness_state(algorithm)
+    _ = assert_transitions(algorithm, small_bounds, g_zero=12, alpha=2)
+    for population in algorithm.states.values():
+        assert all(p.fitness == np.inf for p in population.values())
+        assert {key: p.mass for key, p in population.items()} == pytest.approx(
+            dict.fromkeys(population, 1 / len(population)),
+            rel=STRICT_RTOL,
+            abs=STRICT_ATOL,
+        )
+    assert any(
+        algorithm.states[1][key].variables != p.variables
+        for key, p in algorithm.states[0].items()
+    ), "The symmetric fallback must permit actual movement"
+
+
+def test_infinite_fitness_does_not_share_mass_with_better_finite_plateau(
+    small_bounds: dict[str, tuple[float, float]],
+) -> None:
+    def objective(**variables: float) -> float:
+        return np.inf if variables["x"] > 0 else constant_objective(**variables)
+
+    # Smallest population with two equal finite agents and an infeasible one.
+    algorithm = run_swarm(
+        ObservedGSA(g_zero=1, alpha=0),
+        small_bounds,
+        objective=objective,
+        n_particles=3,
+        n_iterations=1,
+    )
+    initial = algorithm.states[0]
+    finite = [p for p in initial.values() if isfinite(p.fitness)]
+    infinite = [p for p in initial.values() if p.fitness == np.inf]
+    assert len(finite) == 2 and len(infinite) == 1
+    assert {p.fitness for p in finite} == {1.0}
+    assert_infinite_fitness_state(algorithm)
+    assert algorithm.best[0].fitness == 1.0
+    for observed in algorithm.inputs.values():
+        assert set(observed.k_best) == set(initial)
+        assert [initial[key].fitness for key in observed.k_best] == [1.0, 1.0, np.inf]
+        assert observed.masses == {key: p.mass for key, p in initial.items()}
+    # GSA's documented ordering: better objective values have larger masses.
+    # Equal finite fitness is not a tie with +inf; no documented extension
+    # justifies applying the all-equal fallback to this mixed population.
+    assert min(p.mass for p in finite) > max(p.mass for p in infinite), (
+        "PRODUCTION_CONTRACT_VIOLATION [GSA mass / np.inf]: finite fitness 1 "
+        "and +inf receive equal mass despite the documented larger mass for "
+        "better solutions. The finite plateau is not an all-population tie."
+    )

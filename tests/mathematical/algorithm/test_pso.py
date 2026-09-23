@@ -7,11 +7,13 @@ Clipping, synchronous sweeps and inclusive update endpoints are Tyrannis contrac
 """
 
 import json
+from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
-from math import sqrt
+from math import isfinite, sqrt
 from typing import override
 
+import numpy as np
 import pytest
 
 from tests._support import factories
@@ -44,6 +46,7 @@ class ObservedPSO(PSO):
         if actual_iter == 0:
             self.inputs: dict[tuple[int, str], UpdateInputs] = {}
             self.states: dict[tuple[int, str], PSOParticle] = {}
+            self.best: dict[int, PSOParticle] = {}
 
     @override
     def update_particle(self, identifier: str) -> PSOParticle:
@@ -63,6 +66,8 @@ class ObservedPSO(PSO):
         self.states.update(
             {(actual_iter, key): deepcopy(p) for key, p in self.population.items()}
         )
+        assert self.local_best is not None
+        self.best[actual_iter] = deepcopy(self.local_best)
 
 
 def run_swarm(
@@ -70,11 +75,12 @@ def run_swarm(
     bounds: dict[str, tuple[float, float]],
     *,
     n_iterations: int = 5,
+    objective: Callable[..., float] = sphere,
 ) -> tuple[ObservedPSO, dict[tuple[int, str], PSOParticle]]:
     n_particles = 5
     processor = Serial()
     optimizer = factories.make_optimizer(
-        Continuous(bounds, cost_function=sphere),
+        Continuous(bounds, cost_function=objective),
         algorithm,
         processor=processor,
         n_particles=n_particles,
@@ -107,7 +113,7 @@ def run_swarm(
     for (iteration, _), particle in states.items():
         assert_particle_state_consistent(particle, bounds)
         assert particle.fitness == pytest.approx(
-            sphere(**particle.variables), rel=STRICT_RTOL, abs=STRICT_ATOL
+            objective(**particle.variables), rel=STRICT_RTOL, abs=STRICT_ATOL
         )
         if iteration == 0:
             assert particle.personal_best_variables == particle.variables
@@ -166,11 +172,18 @@ def assert_transitions(
             clipping.add(not lower <= x + velocity <= upper)
         improved = bool(after.fitness < before.personal_best_fitness)
         improvements.add(improved)
-        assert after.personal_best_variables == pytest.approx(
-            after.variables if improved else before.personal_best_variables,
-            rel=STRICT_RTOL,
-            abs=STRICT_ATOL,
-        )
+        if before.personal_best_fitness == after.fitness == np.inf:
+            # An infinite tie may retain either visited position as personal best.
+            assert after.personal_best_variables in (
+                before.personal_best_variables,
+                after.variables,
+            )
+        else:
+            assert after.personal_best_variables == pytest.approx(
+                after.variables if improved else before.personal_best_variables,
+                rel=STRICT_RTOL,
+                abs=STRICT_ATOL,
+            )
         assert after.personal_best_fitness == pytest.approx(
             after.fitness if improved else before.personal_best_fitness,
             rel=STRICT_RTOL,
@@ -241,3 +254,84 @@ def test_clerc_kennedy_constriction_ignores_supplied_inertia(
     assert {key: p() for key, p in states.items()} == {
         key: p() for key, p in other_states.items()
     }
+
+
+def test_mixed_infinite_fitness_preserves_bests_and_social_dynamics(
+    small_bounds: dict[str, tuple[float, float]],
+) -> None:
+    def objective(**variables: float) -> float:
+        return np.inf if variables["x"] > 0 else sphere(**variables)
+
+    algorithm, states = run_swarm(
+        ObservedPSO(), small_bounds, objective=objective, n_iterations=3
+    )
+    initial = [p for (t, _), p in states.items() if t == 0]
+    assert sum(p.fitness == np.inf for p in initial) >= 2
+    assert any(np.isfinite(p.fitness) for p in initial)
+    assert_transitions(algorithm, states, small_bounds, [0.7] * 3, 1.5, 1.5)
+    directions: set[tuple[bool, bool]] = set()
+    for iteration, identifier in algorithm.inputs:
+        before, after = states[iteration - 1, identifier], states[iteration, identifier]
+        directions.add(
+            (isfinite(before.personal_best_fitness), isfinite(after.fitness))
+        )
+    assert {(False, True), (True, False)} <= directions
+    for iteration, best in algorithm.best.items():
+        history = [p for (t, _), p in states.items() if t <= iteration]
+        assert np.isfinite(best.fitness)
+        assert best.fitness == min(p.fitness for p in history)
+        assert any(
+            p.variables == best.variables and p.fitness == best.fitness for p in history
+        )
+        assert all(np.isfinite(value) for value in best.variables.values())
+    for particle in states.values():
+        assert particle.velocity is not None
+        assert particle.personal_best_variables is not None
+        for vector in (
+            particle.variables,
+            particle.velocity,
+            particle.personal_best_variables,
+        ):
+            assert all(np.isfinite(value) for value in vector.values())
+
+
+def test_all_infinite_fitness_keeps_swarm_defined(
+    small_bounds: dict[str, tuple[float, float]],
+) -> None:
+    def objective(**variables: float) -> float:
+        del variables
+        return np.inf
+
+    algorithm, states = run_swarm(
+        ObservedPSO(), small_bounds, objective=objective, n_iterations=2
+    )
+    for (iteration, identifier), particle in states.items():
+        assert particle.fitness == particle.personal_best_fitness == np.inf
+        assert particle.velocity is not None
+        assert particle.personal_best_variables is not None
+        for vector in (
+            particle.variables,
+            particle.velocity,
+            particle.personal_best_variables,
+        ):
+            assert all(np.isfinite(value) for value in vector.values())
+        assert any(
+            p.variables == particle.personal_best_variables
+            for (t, key), p in states.items()
+            if t <= iteration and key == identifier
+        )
+    for iteration, best in algorithm.best.items():
+        assert best.fitness == np.inf
+        assert any(
+            p.identifier == best.identifier and p.variables == best.variables
+            for (t, _), p in states.items()
+            if t <= iteration
+        )
+        assert all(np.isfinite(value) for value in best.variables.values())
+    for (iteration, _), observed in algorithm.inputs.items():
+        assert observed.social == algorithm.best[iteration - 1].variables
+    assert any(
+        states[1, key].variables != p.variables
+        for (t, key), p in states.items()
+        if t == 0
+    ), "Infinite fitness must still permit actual movement"
