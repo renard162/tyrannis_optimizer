@@ -46,6 +46,7 @@ from tests._support.factories import make_optimizer
 from tests._support.numerics import BASE_SEED, STRICT_ATOL, STRICT_RTOL, seed_for
 from tests._support.objectives import constant_objective, sphere
 from tyrannis.algorithm.psogsa import PSOGSA, PSOGSAParticle
+from tyrannis.core.algorithm import FITNESS_UNDEFINED
 from tyrannis.processor.serial import Serial
 from tyrannis.space.continuous import Continuous
 
@@ -640,3 +641,81 @@ def test_mixed_single_finite_level_preserves_mass_ordering(
         "receive equal mass. Neither the published finite-fitness equation "
         "nor a documented Tyrannis exception justifies this mixed fallback."
     )
+
+
+def test_negative_infinite_fitness_is_best_in_both_hybrid_components(
+    small_bounds: dict[str, tuple[float, float]],
+) -> None:
+    # MATHTESTS 34.3: both hybrid components must respect -inf < finite < +inf.
+    def objective(**variables: float) -> float:
+        x = variables["x"]
+        return -np.inf if -1 < x < 1 else np.inf if x > 1 else sphere(**variables)
+
+    assert np.isposinf(FITNESS_UNDEFINED) and -np.inf != FITNESS_UNDEFINED
+    algorithm = run_swarm(
+        ObservedPSOGSA(k_agents_percent=0),
+        small_bounds,
+        objective=objective,
+        n_iterations=2,
+        seed=seed_for(6),
+    )
+    initial = algorithm.states[0]
+    assert sum(np.isneginf(p.fitness) for p in initial.values()) == 2
+    assert sum(isfinite(p.fitness) for p in initial.values()) == 2
+    assert sum(np.isposinf(p.fitness) for p in initial.values()) == 1
+    for iteration, population in algorithm.states.items():
+        best = algorithm.best[iteration]
+        assert np.isneginf(best.fitness)
+        assert best.variables == algorithm.best[0].variables
+        assert all(isfinite(v) for v in best.variables.values())
+        assert all(not p.new_particle for p in population.values())
+        assert fsum(p.mass for p in population.values()) == pytest.approx(
+            1, rel=STRICT_RTOL, abs=STRICT_ATOL
+        )
+        ranked = sorted(p.fitness for p in population.values())
+        k_best = algorithm.k_best[iteration]
+        assert [population[key].fitness for key in k_best] == ranked[: len(k_best)]
+
+    active_social = False
+    for (iteration, key), observed in algorithm.inputs.items():
+        before = algorithm.states[iteration - 1][key]
+        after = algorithm.states[iteration][key]
+        assert observed.social == algorithm.best[iteration - 1].variables
+        assert np.isneginf(objective(**observed.social))
+        assert before.velocity is not None and after.velocity is not None
+        assert after.acceleration is not None
+        for name, (lower, upper) in small_bounds.items():
+            # Isolate the published global term from the observed gravitational term.
+            social = (
+                1.5
+                * observed.random["global-best"]
+                * (observed.social[name] - before.variables[name])
+            )
+            active_social |= abs(social) > STRICT_ATOL
+            velocity = (
+                observed.random["inertia"] * before.velocity[name]
+                + 0.5 * observed.random["gravitational"] * after.acceleration[name]
+                + social
+            )
+            assert after.velocity[name] == pytest.approx(
+                velocity, rel=STRICT_RTOL, abs=STRICT_ATOL
+            )
+            assert after.variables[name] == pytest.approx(
+                min(upper, max(lower, before.variables[name] + velocity)),
+                rel=STRICT_RTOL,
+                abs=STRICT_ATOL,
+            )
+    assert active_social
+    # run_swarm has checked finite mass/acceleration/velocity/position at every t.
+    # Check masses last so the independent global component is exercised as well.
+    for population in algorithm.states.values():
+        minimizers = {key for key, p in population.items() if np.isneginf(p.fitness)}
+        assert minimizers
+        expected = {
+            key: 1 / len(minimizers) if key in minimizers else 0.0 for key in population
+        }
+        assert {key: p.mass for key, p in population.items()} == pytest.approx(
+            expected, rel=STRICT_RTOL, abs=STRICT_ATOL
+        ), (
+            "PRODUCTION_CONTRACT_VIOLATION [PSOGSA / -np.inf]: only minimizers share mass"
+        )

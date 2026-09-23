@@ -45,6 +45,7 @@ from tests._support.assertions import (
 from tests._support.numerics import BASE_SEED, STRICT_ATOL, STRICT_RTOL, seed_for
 from tests._support.objectives import sphere
 from tyrannis.algorithm.whale_algorithm import WhaleAlgorithm, WhaleParticle
+from tyrannis.core.algorithm import FITNESS_UNDEFINED
 from tyrannis.processor.serial import Serial
 from tyrannis.space.continuous import Continuous
 
@@ -555,3 +556,57 @@ def test_all_infinite_population_has_a_usable_best_and_defined_movements() -> No
         candidate.candidate_variables != candidate.variables
         for candidate in algorithm.candidates.values()
     )
+
+
+def test_negative_infinite_fitness_is_preserved_as_historical_best(
+    small_bounds: dict[str, tuple[float, float]],
+) -> None:
+    # MATHTESTS 34.3 protects historical minima; WOA's current moves are non-greedy.
+    def objective(**variables: float) -> float:
+        x = variables["x"]
+        return -np.inf if -1 < x < 1 else np.inf if x > 1 else sphere(**variables)
+
+    assert np.isposinf(FITNESS_UNDEFINED) and -np.inf != FITNESS_UNDEFINED
+    algorithm = run_whales(
+        small_bounds, objective=objective, seed=seed_for(125), n_iterations=5
+    )
+    assert isfinite(algorithm.best[0].fitness)
+    assert any(np.isposinf(p.fitness) for p in algorithm.states[0].values())
+    evidence = assert_movement_equations(algorithm, small_bounds)
+    assert {
+        "encircling",
+        "search",
+        "spiral",
+        "best_improved",
+        "best_preserved",
+    } <= evidence
+    first = min(t for t, best in algorithm.best.items() if np.isneginf(best.fitness))
+    assert first > 0
+    assert any(
+        isfinite(algorithm.states[first - 1][key].fitness) and np.isneginf(p.fitness)
+        for key, p in algorithm.states[first].items()
+    ), "A finite whale must discover the first -inf solution"
+    for iteration, population in algorithm.states.items():
+        assert all(not p.new_particle for p in population.values())
+        if iteration >= first:
+            best = algorithm.best[iteration]
+            assert np.isneginf(best.fitness)
+            assert best.variables == algorithm.best[first].variables
+            assert np.isneginf(objective(**best.variables))
+            assert all(isfinite(value) for value in best.variables.values())
+
+    departures: set[str] = set()
+    for (iteration, key), candidate in algorithm.candidates.items():
+        before = algorithm.states[iteration - 1][key]
+        after = algorithm.states[iteration][key]
+        assert candidate.candidate_fitness is not None
+        if np.isneginf(before.fitness):
+            if isfinite(candidate.candidate_fitness):
+                departures.add("finite")
+            elif np.isposinf(candidate.candidate_fitness):
+                departures.add("+inf")
+            # Movement is accepted while the historical optimum remains protected.
+            assert after.variables == candidate.candidate_variables
+            assert after.fitness == candidate.candidate_fitness
+            assert np.isneginf(algorithm.best[iteration].fitness)
+    assert departures == {"finite", "+inf"}

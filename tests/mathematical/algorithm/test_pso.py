@@ -24,6 +24,7 @@ from tests._support.assertions import (
 from tests._support.numerics import BASE_SEED, STRICT_ATOL, STRICT_RTOL
 from tests._support.objectives import sphere
 from tyrannis.algorithm.pso import PSO, PSOParticle
+from tyrannis.core.algorithm import FITNESS_UNDEFINED
 from tyrannis.processor.serial import Serial
 from tyrannis.space.continuous import Continuous
 
@@ -335,3 +336,85 @@ def test_all_infinite_fitness_keeps_swarm_defined(
         for (t, key), p in states.items()
         if t == 0
     ), "Infinite fitness must still permit actual movement"
+
+
+def test_negative_infinite_fitness_is_preserved_as_best_possible(
+    small_bounds: dict[str, tuple[float, float]],
+) -> None:
+    # MATHTESTS 34.3: -inf is an evaluated minimum, never the +inf sentinel.
+    def objective(**variables: float) -> float:
+        x = variables["x"]
+        return -np.inf if -1 < x < 1 else np.inf if x > 1 else sphere(**variables)
+
+    assert np.isposinf(FITNESS_UNDEFINED) and -np.inf != FITNESS_UNDEFINED
+    algorithm, states = run_swarm(
+        ObservedPSO(), small_bounds, objective=objective, n_iterations=3
+    )
+    initial = [p.fitness for (t, _), p in states.items() if t == 0]
+    assert -np.inf in initial and np.inf in initial
+    assert any(-np.inf < fitness < np.inf for fitness in initial)
+    for iteration, best in algorithm.best.items():
+        history = [p for (t, _), p in states.items() if t <= iteration]
+        assert best.fitness == min(p.fitness for p in history) == -np.inf
+        assert best.variables == algorithm.best[0].variables
+        assert all(isfinite(value) for value in best.variables.values())
+
+    promoted = False
+    later_fitness: set[str] = set()
+    violations: list[str] = []
+    for (iteration, identifier), after in states.items():
+        assert not after.new_particle
+        assert after.velocity is not None and after.personal_best_variables is not None
+        for vector in (after.variables, after.velocity, after.personal_best_variables):
+            assert all(isfinite(value) for value in vector.values())
+        history = [
+            p for (t, key), p in states.items() if key == identifier and t <= iteration
+        ]
+        minimum = min(p.fitness for p in history)
+        if after.personal_best_fitness != minimum or not any(
+            p.fitness == minimum and p.variables == after.personal_best_variables
+            for p in history
+        ):
+            violations.append(
+                f"iteration={iteration}, particle={identifier}, expected={minimum}, "
+                + f"pbest={after.personal_best_fitness}, current={after.fitness}"
+            )
+        if iteration == 0:
+            continue
+        before = states[iteration - 1, identifier]
+        assert (
+            before.velocity is not None and before.personal_best_variables is not None
+        )
+        observed = algorithm.inputs[iteration, identifier]
+        assert observed.social == algorithm.best[iteration - 1].variables
+        # Shi-Eberhart geometry uses positions, even when their fitness is -inf.
+        for name, (lower, upper) in small_bounds.items():
+            x = before.variables[name]
+            velocity = (
+                0.7 * before.velocity[name]
+                + 1.5
+                * observed.random[f"{name}-cognitive"]
+                * (before.personal_best_variables[name] - x)
+                + 1.5 * observed.random[f"{name}-social"] * (observed.social[name] - x)
+            )
+            assert after.velocity[name] == pytest.approx(
+                velocity, rel=STRICT_RTOL, abs=STRICT_ATOL
+            )
+            assert after.variables[name] == pytest.approx(
+                min(upper, max(lower, x + velocity)), rel=STRICT_RTOL, abs=STRICT_ATOL
+            )
+        if isfinite(before.personal_best_fitness) and np.isneginf(after.fitness):
+            promoted = True
+            assert np.isneginf(after.personal_best_fitness)
+            assert after.personal_best_variables == after.variables
+        if np.isneginf(before.personal_best_fitness):
+            if isfinite(after.fitness):
+                later_fitness.add("finite")
+            elif np.isposinf(after.fitness):
+                later_fitness.add("+inf")
+    assert promoted and later_fitness == {"finite", "+inf"}
+    assert not violations, (
+        "PRODUCTION_CONTRACT_VIOLATION [PSO / -np.inf]: pbest must retain "
+        + "the minimum of evaluated history; "
+        + "; ".join(violations)
+    )

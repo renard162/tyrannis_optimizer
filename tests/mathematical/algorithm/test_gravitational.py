@@ -33,6 +33,7 @@ from tests._support.assertions import (
 from tests._support.numerics import BASE_SEED, STRICT_ATOL, STRICT_RTOL, seed_for
 from tests._support.objectives import constant_objective, sphere
 from tyrannis.algorithm.gravitational import GSA, GSAParticle
+from tyrannis.core.algorithm import FITNESS_UNDEFINED
 from tyrannis.processor.serial import Serial
 from tyrannis.space.continuous import Continuous
 
@@ -552,3 +553,61 @@ def test_infinite_fitness_does_not_share_mass_with_better_finite_plateau(
         "and +inf receive equal mass despite the documented larger mass for "
         "better solutions. The finite plateau is not an all-population tie."
     )
+
+
+def test_negative_infinite_fitness_receives_best_possible_mass(
+    small_bounds: dict[str, tuple[float, float]],
+) -> None:
+    # Tyrannis' -inf extension: only the k tied minimizers share unit mass.
+    def objective(**variables: float) -> float:
+        x = variables["x"]
+        return -np.inf if -1 < x < 1 else np.inf if x > 1 else sphere(**variables)
+
+    assert np.isposinf(FITNESS_UNDEFINED) and -np.inf != FITNESS_UNDEFINED
+    for bounds, count in (
+        (small_bounds, 5),
+        ({"x": (-0.9, 0.9), "y": (-3.0, 3.0)}, 3),
+    ):
+        algorithm = run_swarm(
+            ObservedGSA(g_zero=1, alpha=0),
+            bounds,
+            objective=objective,
+            n_particles=count,
+            n_iterations=2,
+            seed=seed_for(2),
+        )
+        initial = algorithm.states[0]
+        assert sum(np.isneginf(p.fitness) for p in initial.values()) == (
+            2 if count == 5 else count
+        )
+        if count == 5:
+            assert any(np.isposinf(p.fitness) for p in initial.values())
+            assert any(-np.inf < p.fitness < np.inf for p in initial.values())
+        assert_infinite_fitness_state(algorithm)
+        for iteration, population in algorithm.states.items():
+            minimizers = {
+                key for key, p in population.items() if np.isneginf(p.fitness)
+            }
+            assert minimizers
+            assert np.isneginf(algorithm.best[iteration].fitness)
+            assert all(not p.new_particle for p in population.values())
+            assert {key: p.mass for key, p in population.items()} == pytest.approx(
+                {
+                    key: 1 / len(minimizers) if key in minimizers else 0.0
+                    for key in population
+                },
+                rel=STRICT_RTOL,
+                abs=STRICT_ATOL,
+            )
+        for (iteration, _), observed in algorithm.inputs.items():
+            previous = algorithm.states[iteration - 1]
+            ranked = sorted(p.fitness for p in previous.values())
+            assert [previous[key].fitness for key in observed.k_best] == ranked[
+                : len(observed.k_best)
+            ]
+            assert np.isneginf(previous[observed.k_best[0]].fitness)
+            assert observed.masses == {key: p.mass for key, p in previous.items()}
+        assert any(
+            algorithm.states[1][key].variables != p.variables
+            for key, p in initial.items()
+        ), "The mass fallback must remain valid after real movement"

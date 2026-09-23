@@ -30,6 +30,7 @@ from tests._support.factories import make_optimizer
 from tests._support.numerics import BASE_SEED, STRICT_ATOL, STRICT_RTOL, seed_for
 from tests._support.objectives import constant_objective, sphere
 from tyrannis.algorithm.differential_evolution import DEParticle, DifferentialEvolution
+from tyrannis.core.algorithm import FITNESS_UNDEFINED
 from tyrannis.processor.serial import Serial
 from tyrannis.space.continuous import Continuous
 
@@ -435,3 +436,78 @@ def test_all_infinite_fitness_keeps_equations_defined_and_preserves_tied_targets
             f"target={before.variables}, trial={algorithm.candidates[1, key].candidate_variables}, "
             f"consolidated={after.variables}"
         )
+
+
+def test_negative_infinite_fitness_is_best_under_de_selection(
+    small_bounds: dict[str, tuple[float, float]],
+) -> None:
+    # Strict DE selection and MATHTESTS 34.3 apply to evaluated -inf targets too.
+    def objective(**variables: float) -> float:
+        x = variables["x"]
+        return -np.inf if -1 < x < 1 else np.inf if x > 1 else sphere(**variables)
+
+    assert np.isposinf(FITNESS_UNDEFINED) and -np.inf != FITNESS_UNDEFINED
+    # Two independent first generations cover all comparisons without relying
+    # on a trajectory already changed by a wrong consolidation. 0 denotes finite.
+    required = {
+        (0.0, -np.inf),
+        (np.inf, -np.inf),
+        (-np.inf, 0.0),
+        (-np.inf, np.inf),
+        (-np.inf, -np.inf),
+        (np.inf, 0.0),
+    }
+    witnessed: set[tuple[float, float]] = set()
+    negative_donor = False
+    violations: list[str] = []
+    for case in (6, 10):
+        algorithm = run_de(
+            small_bounds, objective=objective, n_iterations=1, seed=seed_for(case)
+        )
+        _ = assert_trial_equations(
+            algorithm, small_bounds, factor=0.8, rate=0.5, objective=objective
+        )
+        initial = algorithm.states[0]
+        assert any(np.isneginf(p.fitness) for p in initial.values())
+        assert any(np.isposinf(p.fitness) for p in initial.values())
+        assert any(-np.inf < p.fitness < np.inf for p in initial.values())
+        assert all(np.isneginf(best.fitness) for best in algorithm.best.values())
+        for (iteration, key), trial in algorithm.candidates.items():
+            before, after = initial[key], algorithm.states[iteration][key]
+            assert not before.new_particle and not after.new_particle
+            assert trial.candidate_fitness is not None
+            cache: dict[str, object] = trial.random_cache
+            for index in (1, 2, 3):
+                donor = cache[f"donor-{index}"]
+                assert isinstance(donor, str)
+                negative_donor |= bool(np.isneginf(initial[donor].fitness))
+            pair = (
+                0.0 if isfinite(before.fitness) else float(before.fitness),
+                0.0
+                if isfinite(trial.candidate_fitness)
+                else float(trial.candidate_fitness),
+            )
+            if pair not in required:
+                continue  # Other comparisons have their existing dedicated tests.
+            assert trial.candidate_variables != before.variables
+            witnessed.add(pair)
+            improved = trial.candidate_fitness < before.fitness
+            expected_variables = (
+                trial.candidate_variables if improved else before.variables
+            )
+            expected_fitness = trial.candidate_fitness if improved else before.fitness
+            if (
+                after.variables != expected_variables
+                or after.fitness != expected_fitness
+            ):
+                violations.append(
+                    f"case={case}, {key}, target={before.fitness}, "
+                    + f"candidate={trial.candidate_fitness}, consolidated={after.fitness}, "
+                    + f"expected_variables={expected_variables}, actual={after.variables}"
+                )
+    assert witnessed == required and negative_donor
+    assert not violations, (
+        "PRODUCTION_CONTRACT_VIOLATION [DE / -np.inf]: strict selection rejects "
+        + "worse or tied candidates; -inf is not FITNESS_UNDEFINED; "
+        + "; ".join(violations)
+    )
