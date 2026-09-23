@@ -169,11 +169,21 @@ class Permutation(SpaceBase):
                 key: self._to_choices(value) for key, value in choices.items()
             }
             self._is_kwargs = True
-        elif self._is_choices_collection(choices):
-            self._boundaries = [self._to_choices(choices)]
-            self._is_kwargs = False
         else:
-            self._boundaries = [self._to_choices(value) for value in choices]
+            materialized_choices = choices
+
+            if isinstance(choices, Iterable) and not isinstance(
+                choices, (str, bytes, np.ndarray)
+            ):
+                materialized_choices = list(choices)
+
+            if self._is_choices_collection(materialized_choices):
+                self._boundaries = [self._to_choices(materialized_choices)]
+            else:
+                self._boundaries = [
+                    self._to_choices(value) for value in materialized_choices
+                ]
+
             self._is_kwargs = False
 
         if not self._boundaries:
@@ -223,51 +233,29 @@ class Permutation(SpaceBase):
         if bounds is None:
             bounds = (0.0, 1.0)
 
-        if isinstance(self._boundaries, dict):
-            self._encoded_boundaries = {}
+        self._encoded_boundaries = {}
 
-            for key, choices in self._boundaries.items():
-                if self._decoder == "gumbel-sinkhorn":
-                    for row in choices:
-                        row_str = str(row)
+        if self._decoder == "gumbel-sinkhorn":
+            encoded_matrix_keys = self._encoded_matrix_keys()
 
-                        for column in choices:
-                            column_str = str(column)
-                            encoded_key = f"{key}-{row_str}-{column_str}"
-                            self._encoded_boundaries[encoded_key] = bounds
-                else:
-                    for choice in choices:
-                        choice_str = str(choice)
-                        encoded_key = f"{key}-{choice_str}"
+            for matrix_keys in encoded_matrix_keys.values():
+                for row_keys in matrix_keys:
+                    for encoded_key in row_keys:
                         self._encoded_boundaries[encoded_key] = bounds
         else:
-            self._encoded_boundaries = {}
+            encoded_choice_keys = self._encoded_choice_keys()
 
-            for index, choices in enumerate(self._boundaries):
-                variable = str(index)
-
-                if self._decoder == "gumbel-sinkhorn":
-                    for row in choices:
-                        row_str = str(row)
-
-                        for column in choices:
-                            column_str = str(column)
-                            encoded_key = f"{variable}-{row_str}-{column_str}"
-                            self._encoded_boundaries[encoded_key] = bounds
-                else:
-                    for choice in choices:
-                        choice_str = str(choice)
-                        encoded_key = f"{variable}-{choice_str}"
-                        self._encoded_boundaries[encoded_key] = bounds
+            for keys in encoded_choice_keys.values():
+                for encoded_key in keys:
+                    self._encoded_boundaries[encoded_key] = bounds
 
         self._variable_names = [key for key, _ in self._iter_choices()]
         self._rng = np.random.default_rng(seed)
 
-        if self._decoder in {
-            "gumbel-random-keys",
-            "plackett-luce",
-            "gumbel-sinkhorn",
-        } and (seed is None):
+        if (
+            self._decoder in {"gumbel-random-keys", "plackett-luce", "gumbel-sinkhorn"}
+            and seed is None
+        ):
             warnings.warn(
                 "A stochastic decoding method was selected without a seed. "
                 "Different evaluations may produce different results",
@@ -332,11 +320,13 @@ class Permutation(SpaceBase):
         self, float_inputs: dict[str, float]
     ) -> dict[str, list[Any]]:
         decoded = {}
+        encoded_choice_keys = self._encoded_choice_keys()
+
         for key, choices in self._iter_choices():
             values = []
-            for choice in choices:
-                choice_str = str(choice)
-                values.append(float_inputs[f"{key}-{choice_str}"])
+
+            for encoded_key in encoded_choice_keys[key]:
+                values.append(float_inputs[encoded_key])
 
             order = np.argsort(values, kind="stable")
             decoded[key] = [choices[index] for index in order]
@@ -348,11 +338,13 @@ class Permutation(SpaceBase):
     ) -> dict[str, list[Any]]:
         temperature = self._params.get("temperature", 1.0)
         decoded = {}
+        encoded_choice_keys = self._encoded_choice_keys()
+
         for key, choices in self._iter_choices():
             values = []
-            for choice in choices:
-                choice_str = str(choice)
-                values.append(float_inputs[f"{key}-{choice_str}"])
+
+            for encoded_key in encoded_choice_keys[key]:
+                values.append(float_inputs[encoded_key])
 
             gumbel_g = gumbel_r.rvs(size=len(choices), random_state=self._rng)
             scores = np.asarray(values) + temperature * gumbel_g
@@ -366,14 +358,17 @@ class Permutation(SpaceBase):
     ) -> dict[str, list[Any]]:
         temperature = self._params.get("temperature", 1.0)
         decoded = {}
+        encoded_choice_keys = self._encoded_choice_keys()
+
         for key, choices in self._iter_choices():
             values = []
-            for choice in choices:
-                choice_str = str(choice)
-                values.append(float_inputs[f"{key}-{choice_str}"])
+
+            for encoded_key in encoded_choice_keys[key]:
+                values.append(float_inputs[encoded_key])
 
             remaining = list(range(len(choices)))
             permutation = []
+
             while remaining:
                 remaining_values = np.asarray([values[index] for index in remaining])
                 probabilities = softmax(remaining_values / temperature)
@@ -390,17 +385,15 @@ class Permutation(SpaceBase):
         temperature = self._params.get("temperature", 1.0)
         iterations = self._params.get("sinkhorn_iterations", 20)
         decoded = {}
+        encoded_matrix_keys = self._encoded_matrix_keys()
 
         for key, choices in self._iter_choices():
             size = len(choices)
             values = np.empty((size, size), dtype=float)
+            matrix_keys = encoded_matrix_keys[key]
 
-            for row_index, row in enumerate(choices):
-                row_str = str(row)
-
-                for column_index, column in enumerate(choices):
-                    column_str = str(column)
-                    matrix_key = f"{key}-{row_str}-{column_str}"
+            for row_index, row_keys in enumerate(matrix_keys):
+                for column_index, matrix_key in enumerate(row_keys):
                     values[row_index, column_index] = float_inputs[matrix_key]
 
             gumbel_g = gumbel_r.rvs(size=(size, size), random_state=self._rng)
@@ -417,6 +410,7 @@ class Permutation(SpaceBase):
     def _sinkhorn(matrix: np.ndarray, iterations: int) -> np.ndarray:
         matrix = matrix - np.max(matrix)
         matrix = np.exp(matrix)
+
         for _ in range(iterations):
             row_sums = matrix.sum(axis=1, keepdims=True)
             matrix /= row_sums
@@ -424,6 +418,56 @@ class Permutation(SpaceBase):
             matrix /= column_sums
 
         return matrix
+
+    def _encoded_choice_keys(self) -> dict[str, list[str]]:
+        encoded_choice_keys = {}
+        used_keys = set()
+
+        for key, choices in self._iter_choices():
+            keys = []
+
+            for choice in choices:
+                base_key = f"{key}-{choice}"
+                encoded_key = self._unique_encoded_key(base_key, used_keys)
+                used_keys.add(encoded_key)
+                keys.append(encoded_key)
+
+            encoded_choice_keys[key] = keys
+
+        return encoded_choice_keys
+
+    def _encoded_matrix_keys(self) -> dict[str, list[list[str]]]:
+        encoded_matrix_keys = {}
+        used_keys = set()
+
+        for key, choices in self._iter_choices():
+            matrix_keys = []
+
+            for row in choices:
+                row_keys = []
+
+                for column in choices:
+                    base_key = f"{key}-{row}-{column}"
+                    encoded_key = self._unique_encoded_key(base_key, used_keys)
+                    used_keys.add(encoded_key)
+                    row_keys.append(encoded_key)
+
+                matrix_keys.append(row_keys)
+
+            encoded_matrix_keys[key] = matrix_keys
+
+        return encoded_matrix_keys
+
+    @staticmethod
+    def _unique_encoded_key(base_key: str, used_keys: set[str]) -> str:
+        encoded_key = base_key
+        suffix = 1
+
+        while encoded_key in used_keys:
+            encoded_key = f"{base_key}-{suffix}"
+            suffix += 1
+
+        return encoded_key
 
     def _iter_choices(self) -> list[tuple[str, list[Any]]]:
         if isinstance(self._boundaries, dict):
