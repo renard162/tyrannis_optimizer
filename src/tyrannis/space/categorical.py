@@ -169,11 +169,21 @@ class Categorical(SpaceBase):
                 key: self._to_choices(value) for key, value in choices.items()
             }
             self._is_kwargs = True
-        elif self._is_choices_collection(choices):
-            self._boundaries = [self._to_choices(choices)]
-            self._is_kwargs = False
         else:
-            self._boundaries = [self._to_choices(value) for value in choices]
+            materialized_choices = choices
+
+            if isinstance(choices, Iterable) and not isinstance(
+                choices, (str, bytes, np.ndarray)
+            ):
+                materialized_choices = list(choices)
+
+            if self._is_choices_collection(materialized_choices):
+                self._boundaries = [self._to_choices(materialized_choices)]
+            else:
+                self._boundaries = [
+                    self._to_choices(value) for value in materialized_choices
+                ]
+
             self._is_kwargs = False
 
         if not self._boundaries:
@@ -207,6 +217,20 @@ class Categorical(SpaceBase):
         self._decoder = decoder
         self._params = {} if params is None else params
         self._params = dict(sorted(self._params.items()))
+
+        if self._decoder == "gumbel-softmax":
+            temperature = self._params.get("temperature", 1.0)
+
+            if (
+                isinstance(temperature, (bool, np.bool_))
+                or not isinstance(temperature, (int, float, np.integer, np.floating))
+                or not np.isfinite(temperature)
+                or temperature <= 0
+            ):
+                raise ValueError(
+                    "temperature must be a finite number greater than zero."
+                )
+
         self._type = "categorical"
         self._configs = {"decoder": decoder, "bounds": bounds, "params": self._params}
 
@@ -227,28 +251,20 @@ class Categorical(SpaceBase):
         if bounds is None:
             raise RuntimeError("bounds cannot be None")
 
-        if isinstance(self._boundaries, dict):
-            if self._decoder == "scalar":
+        if self._decoder == "scalar":
+            if isinstance(self._boundaries, dict):
                 self._encoded_boundaries = {key: bounds for key in self._boundaries}
             else:
-                self._encoded_boundaries = {}
-                for key, choices in self._boundaries.items():
-                    for choice in choices:
-                        choice_str = str(choice)
-                        encoded_key = f"{key}-{choice_str}"
-                        self._encoded_boundaries[encoded_key] = bounds
-        else:
-            if self._decoder == "scalar":
                 self._encoded_boundaries = {
                     str(index): bounds for index in range(len(self._boundaries))
                 }
-            else:
-                self._encoded_boundaries = {}
-                for index, choices in enumerate(self._boundaries):
-                    for choice in choices:
-                        choice_str = str(choice)
-                        encoded_key = f"{index}-{choice_str}"
-                        self._encoded_boundaries[encoded_key] = bounds
+        else:
+            self._encoded_boundaries = {}
+            encoded_choice_keys = self._encoded_choice_keys()
+
+            for keys in encoded_choice_keys.values():
+                for encoded_key in keys:
+                    self._encoded_boundaries[encoded_key] = bounds
 
         self._variable_names = [key for key, _ in self._iter_choices()]
         self._rng = np.random.default_rng(seed)
@@ -307,13 +323,13 @@ class Categorical(SpaceBase):
 
     def _decode_one_hot(self, float_inputs: dict[str, float]) -> dict[str, Any]:
         decoded = {}
+        encoded_choice_keys = self._encoded_choice_keys()
 
         for key, choices in self._iter_choices():
             values = []
 
-            for choice in choices:
-                choice_str = str(choice)
-                values.append(float_inputs[f"{key}-{choice_str}"])
+            for encoded_key in encoded_choice_keys[key]:
+                values.append(float_inputs[encoded_key])
 
             index = int(np.argmax(values))
             decoded[key] = choices[index]
@@ -322,13 +338,13 @@ class Categorical(SpaceBase):
 
     def _decode_softmax(self, float_inputs: dict[str, float]) -> dict[str, Any]:
         decoded = {}
+        encoded_choice_keys = self._encoded_choice_keys()
 
         for key, choices in self._iter_choices():
             values = []
 
-            for choice in choices:
-                choice_str = str(choice)
-                values.append(float_inputs[f"{key}-{choice_str}"])
+            for encoded_key in encoded_choice_keys[key]:
+                values.append(float_inputs[encoded_key])
 
             probabilities = softmax(values)
             index = int(self._rng.choice(len(choices), p=probabilities))
@@ -339,11 +355,13 @@ class Categorical(SpaceBase):
     def _decode_gumbel_softmax(self, float_inputs: dict[str, float]) -> dict[str, Any]:
         temperature = self._params.get("temperature", 1.0)
         decoded = {}
+        encoded_choice_keys = self._encoded_choice_keys()
+
         for key, choices in self._iter_choices():
             values = []
-            for choice in choices:
-                choice_str = str(choice)
-                values.append(float_inputs[f"{key}-{choice_str}"])
+
+            for encoded_key in encoded_choice_keys[key]:
+                values.append(float_inputs[encoded_key])
 
             gumbel_gi = gumbel_r.rvs(size=len(choices), random_state=self._rng)
             gumbel = (np.asarray(values) + gumbel_gi) / temperature
@@ -368,6 +386,29 @@ class Categorical(SpaceBase):
             decoded[key] = choices[index]
 
         return decoded
+
+    def _encoded_choice_keys(self) -> dict[str, list[str]]:
+        encoded_choice_keys = {}
+        used_keys = set()
+
+        for key, choices in self._iter_choices():
+            keys = []
+
+            for choice in choices:
+                base_key = f"{key}-{choice}"
+                encoded_key = base_key
+                suffix = 1
+
+                while encoded_key in used_keys:
+                    encoded_key = f"{base_key}-{suffix}"
+                    suffix += 1
+
+                used_keys.add(encoded_key)
+                keys.append(encoded_key)
+
+            encoded_choice_keys[key] = keys
+
+        return encoded_choice_keys
 
     def _iter_choices(self) -> list[tuple[str, list[Any]]]:
         if isinstance(self._boundaries, dict):
