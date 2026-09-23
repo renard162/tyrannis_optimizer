@@ -195,21 +195,34 @@ def run_swarm(
 
 
 def expected_masses(population: dict[str, PSOGSAParticle]) -> dict[str, float]:
-    """Normalized fitness deficits; no surrogate value is assigned to infinity."""
-    finite = {
-        key: float(p.fitness) for key, p in population.items() if isfinite(p.fitness)
+    """Return normalized masses for finite and infinite minimization fitness."""
+    negative_infinite = {
+        key for key, particle in population.items() if np.isneginf(particle.fitness)
     }
-    if not finite or len({p.fitness for p in population.values()}) == 1:
-        # Symmetric fallback for a genuinely tied population, finite or all-inf.
+
+    if negative_infinite:
+        share = 1 / len(negative_infinite)
+        return {key: share if key in negative_infinite else 0.0 for key in population}
+
+    finite = {
+        key: float(particle.fitness)
+        for key, particle in population.items()
+        if isfinite(particle.fitness)
+    }
+
+    if not finite:
         return dict.fromkeys(population, 1 / len(population))
-    assert len(set(finite.values())) > 1, "Mixed single-level fitness needs a contract"
+
+    if len(set(finite.values())) == 1:
+        share = 1 / len(finite)
+        return {key: share if key in finite else 0.0 for key in population}
+
     worst = max(finite.values())
     deficits = {
         key: worst - finite[key] if key in finite else 0.0 for key in population
     }
-    # (best-worst) cancels in Rashedi (15)/(16). The finite-only extension
-    # discards infeasible agents; it is NOT the limit worst -> infinity.
-    return {key: value / fsum(deficits.values()) for key, value in deficits.items()}
+    total = fsum(deficits.values())
+    return {key: value / total for key, value in deficits.items()}
 
 
 def assert_masses(population: dict[str, PSOGSAParticle]) -> None:
@@ -709,13 +722,18 @@ def test_negative_infinite_fitness_is_best_in_both_hybrid_components(
     # run_swarm has checked finite mass/acceleration/velocity/position at every t.
     # Check masses last so the independent global component is exercised as well.
     for population in algorithm.states.values():
+        assert_masses(population)
         minimizers = {key for key, p in population.items() if np.isneginf(p.fitness)}
-        assert minimizers
+
+        if not minimizers:
+            continue
+
         expected = {
             key: 1 / len(minimizers) if key in minimizers else 0.0 for key in population
         }
         assert {key: p.mass for key, p in population.items()} == pytest.approx(
             expected, rel=STRICT_RTOL, abs=STRICT_ATOL
         ), (
-            "PRODUCTION_CONTRACT_VIOLATION [PSOGSA / -np.inf]: only minimizers share mass"
+            "PRODUCTION_CONTRACT_VIOLATION [PSOGSA / -np.inf]: only current "
+            "minimizers share mass while they are present"
         )
