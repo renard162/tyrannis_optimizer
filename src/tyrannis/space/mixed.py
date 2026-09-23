@@ -65,8 +65,8 @@ class Mixed(SpaceBase):
             local to the current runtime and are not preserved through serialization.
             - ``"lfu"``: Least Frequently Used cache. Requires the optional
             dependencies for advanced caching.
-            - ``"fifo"``: First In, First Out cache. Requires the optional
-            dependencies for advanced caching.
+            - ``"fifo"``: First In, First Out cache. Requires the optional dependencies
+            for advanced caching.
             - ``"rr"``: Random Replacement cache. Requires the optional dependencies
             for advanced caching.
 
@@ -109,6 +109,9 @@ class Mixed(SpaceBase):
 
         for key, space in spaces.items():
             arguments = space.input_arguments
+
+            if arguments["space"] == "mixed":
+                raise ValueError("A Mixed space cannot contain another Mixed space.")
 
             grouping_arguments = {
                 "space": arguments["space"],
