@@ -1,9 +1,20 @@
+from typing import Protocol
+
 import numpy as np
 import pytest
 
 from tests._support.numerics import STRICT_ATOL, STRICT_RTOL, seed_for
 from tests._support.objectives import CountingObjective, constant_objective
 from tyrannis.space import Binary, Categorical, Continuous, Integer, Mixed
+
+
+class _MetadataView(Protocol):
+    @property
+    def input_arguments(self) -> dict[str, object]: ...
+
+
+def _input_arguments(space: _MetadataView) -> dict[str, object]:
+    return space.input_arguments
 
 
 def test_mixed_aggregates_named_spaces_and_routes_decoding_to_cost_function() -> None:
@@ -18,7 +29,7 @@ def test_mixed_aggregates_named_spaces_and_routes_decoding_to_cost_function() ->
         cost_function=add,
     )
 
-    assert space.input_arguments == {
+    assert _input_arguments(space) == {
         "space": "mixed",
         "boundaries": [],
         "configs": {},
@@ -192,5 +203,5 @@ def test_mixed_rejects_nested_mixed_space() -> None:
         spaces={"position": Continuous((-1.0, 1.0))}, cost_function=constant_objective
     )
 
-    with pytest.raises((ValueError, IndexError)):
+    with pytest.raises(ValueError):
         _ = Mixed(spaces={"nested": nested_space}, cost_function=constant_objective)

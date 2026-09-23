@@ -51,6 +51,16 @@ def _driver(
     return driver, communication
 
 
+def test_driver_rejects_initial_iteration_below_one() -> None:
+    with pytest.raises(ValueError):
+        _ = GlobalBest(initial_iter=0)
+
+
+def test_driver_rejects_non_positive_check_interval() -> None:
+    with pytest.raises(ValueError):
+        _ = GlobalBest(check_interval=0)
+
+
 def test_processor_lifecycle_connects_signal_and_delegates_communication() -> None:
     communication = NoCommunicationProcessor("island:a")
     processor = GlobalBestProcessor(2, 2, False, communication, None)

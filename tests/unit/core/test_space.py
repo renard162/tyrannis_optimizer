@@ -199,6 +199,33 @@ def test_lru_cache_reuses_same_key_and_evaluates_new_key(
     assert counting_objective.calls == 2
 
 
+@pytest.mark.parametrize(
+    ("cache_type", "dependency"),
+    [
+        pytest.param("lfu", "cachetools", marks=pytest.mark.optional, id="lfu"),
+        pytest.param("fifo", "cachetools", marks=pytest.mark.optional, id="fifo"),
+        pytest.param("rr", "cachetools", marks=pytest.mark.optional, id="rr"),
+        pytest.param("disk", None, id="disk"),
+    ],
+)
+def test_configured_cache_reuses_same_key_and_evaluates_new_key(
+    cache_type: str, dependency: str | None, counting_objective: CountingObjective
+) -> None:
+    if dependency is not None:
+        pytest.importorskip(dependency)
+    space = SimpleSpace(
+        cost_function=counting_objective, use_cache=True, cache_type=cache_type
+    )
+    space.initialize_context()
+
+    assert space({"x": 0.0, "y": 1.0}) == 1.0
+    assert counting_objective.calls == 1
+    assert space({"x": 0.0, "y": 1.0}) == 1.0
+    assert counting_objective.calls == 1
+    assert space({"x": 1.0, "y": 1.0}) == 1.0
+    assert counting_objective.calls == 2
+
+
 def test_serialized_state_excludes_runtime_cache(
     counting_objective: CountingObjective,
 ) -> None:

@@ -9,7 +9,6 @@ from unittest.mock import Mock
 
 import numpy as np
 import pytest
-from pyspark.sql import SparkSession
 
 from tests._support.numerics import BASE_SEED
 from tests._support.objectives import encoded_sphere
@@ -17,6 +16,11 @@ from tests._support.processors import (
     ProcessorAlgorithmDouble,
     ProcessorMigrationDriverDouble,
 )
+
+pytest.importorskip("pyspark")
+
+from pyspark.sql import SparkSession
+
 from tyrannis.backend.distributed.communication.spark_communication import (
     SparkCommunicationProcessor,
 )
@@ -29,6 +33,8 @@ from tyrannis.core.algorithm import CostFunctionWrapperBase
 from tyrannis.core.processor import ProcessorBase
 from tyrannis.core.results import HistoryConfig, ProcessorResult
 from tyrannis.core.signals import EventProtocol
+
+pytestmark = pytest.mark.optional
 
 
 class _SparkContext(Protocol):

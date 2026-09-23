@@ -119,6 +119,23 @@ def test_configuration_rejects_invalid_policy(
         _ = factory()
 
 
+def test_driver_start_and_stop_manage_communication_and_router() -> None:
+    migration = _ObservableIslandMigration()
+    communication = _driver(migration)
+
+    with (
+        patch.object(migration, "_routing_loop") as route,
+        patch.object(communication, "start") as start,
+        patch.object(communication, "stop") as stop,
+    ):
+        migration.start()
+        migration.stop()
+
+    start.assert_called_once_with()
+    stop.assert_called_once_with()
+    route.assert_called_once_with()
+
+
 def test_processor_lifecycle_connects_signal_and_communication() -> None:
     communication = NoCommunicationProcessor("a")
     processor = IslandMigrationProcessor(
