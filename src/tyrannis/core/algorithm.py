@@ -53,6 +53,13 @@ class ParticleBase(ABC):
     hold a candidate state produced by the algorithm. The algorithm is
     responsible for determining how particles interact and for deciding when
     candidate states are consolidated into the current state.
+
+    Fitness values follow minimization semantics. ``-np.inf`` is therefore a
+    valid evaluated fitness representing the best possible value, while
+    ``+np.inf`` represents the worst possible value and is also used by
+    ``FITNESS_UNDEFINED`` as the initial value for unevaluated particles. Code
+    that distinguishes evaluated state must not use ``np.isinf``, because that
+    would incorrectly classify ``-np.inf`` as undefined.
     """
 
     def __init__(
@@ -71,7 +78,7 @@ class ParticleBase(ABC):
         self._random_values_cache = {}
         self._error_fitness = None
 
-        if not np.isinf(fitness):
+        if fitness != FITNESS_UNDEFINED:
             self._candidate_variables = self._variables
             self._candidate_fitness = self._fitness
 
@@ -163,15 +170,17 @@ class ParticleBase(ABC):
 
         self._error_fitness = None
 
-        if self._new_particle and (not np.isinf(self._fitness)):
+        if self._new_particle:
             self._new_particle = False
-            self._candidate_variables = None
-            self._candidate_fitness = None
-            return
 
-        self._new_particle = False
+            if self._fitness != FITNESS_UNDEFINED:
+                self._candidate_variables = None
+                self._candidate_fitness = None
+                return
 
-        if consolidate_new or np.isinf(self._fitness):
+            self._variables = self._candidate_variables
+            self._fitness = self._candidate_fitness
+        elif consolidate_new:
             self._variables = self._candidate_variables
             self._fitness = self._candidate_fitness
 

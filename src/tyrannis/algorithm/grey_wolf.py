@@ -326,7 +326,7 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
                 f"Particle '{identifier}' must be an instance of GreyWolfParticle."
             )
 
-        if np.isinf(particle.fitness):
+        if particle.fitness == FITNESS_UNDEFINED:
             particle.update(
                 variables=particle.variables, fitness_function=self._fitness_function
             )
@@ -349,11 +349,7 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
         if self._alpha is None or self._beta is None or self._delta is None:
             raise RuntimeError("Grey wolf leaders have not been initialized.")
 
-        leaders = {
-            "alpha": self._alpha,
-            "beta": self._beta,
-            "delta": self._delta,
-        }
+        leaders = {"alpha": self._alpha, "beta": self._beta, "delta": self._delta}
 
         random_particle = None
 

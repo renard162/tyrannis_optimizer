@@ -633,7 +633,7 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
                 f"Particle '{identifier}' must be an instance of GAParticle."
             )
 
-        if np.isinf(particle.fitness):
+        if particle.fitness == FITNESS_UNDEFINED:
             particle.update(
                 variables=particle.variables, fitness_function=self._fitness_function
             )

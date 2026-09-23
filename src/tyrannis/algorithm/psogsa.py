@@ -360,7 +360,7 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
                 f"Particle '{identifier}' must be an instance of PSOGSAParticle."
             )
 
-        if np.isinf(particle.fitness):
+        if particle.fitness == FITNESS_UNDEFINED:
             particle.update(
                 variables=particle.variables,
                 fitness_function=self._fitness_function,
@@ -479,34 +479,31 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
             dtype=float,
         )
 
+        negative_infinite = np.isneginf(fitness)
         finite = np.isfinite(fitness)
 
-        if not np.any(finite):
+        if np.any(negative_infinite):
+            masses = negative_infinite.astype(float)
+            masses /= np.sum(masses)
+        elif not np.any(finite):
             masses = np.full(len(particles), 1.0 / len(particles))
         else:
             finite_fitness = fitness[finite]
             best_fitness = np.min(finite_fitness)
             worst_fitness = np.max(finite_fitness)
+            masses = np.zeros(len(particles), dtype=float)
 
             if np.isclose(best_fitness, worst_fitness):
-                masses = np.full(len(particles), 1.0 / len(particles))
+                masses[finite] = 1.0 / np.count_nonzero(finite)
             else:
-                adjusted_fitness = fitness.copy()
-
-                scale = max(abs(worst_fitness), abs(best_fitness), 1.0)
-
-                adjusted_fitness[~finite] = worst_fitness + scale
-
-                masses = (adjusted_fitness - worst_fitness) / (
+                masses[finite] = (finite_fitness - worst_fitness) / (
                     best_fitness - worst_fitness
                 )
-
                 masses = np.maximum(masses, 0.0)
-
                 total_mass = np.sum(masses)
 
                 if not np.isfinite(total_mass) or total_mass <= 0:
-                    masses = np.full(len(particles), 1.0 / len(particles))
+                    masses[finite] = 1.0 / np.count_nonzero(finite)
                 else:
                     masses /= total_mass
 

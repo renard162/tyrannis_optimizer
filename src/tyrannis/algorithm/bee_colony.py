@@ -319,11 +319,18 @@ class BeeColony(AlgorithmBase[ABCParticle]):
             [particle.abc_fitness for particle in particles], dtype=float
         )
 
-        abc_fitness = np.where(
-            np.isfinite(abc_fitness) & (abc_fitness > 0), abc_fitness, 0.0
-        )
+        positive_infinite = np.isposinf(abc_fitness)
+        finite_positive = np.isfinite(abc_fitness) & (abc_fitness > 0)
+        abc_fitness = np.where(finite_positive, abc_fitness, 0.0)
 
-        if self._improved_probability:
+        if np.any(positive_infinite):
+            if self._improved_probability:
+                probabilities = np.full(len(particles), 0.1, dtype=float)
+                probabilities[positive_infinite] = 1.0
+            else:
+                probabilities = positive_infinite.astype(float)
+                probabilities /= np.sum(probabilities)
+        elif self._improved_probability:
             best_fitness = np.max(abc_fitness)
 
             if not np.isfinite(best_fitness) or best_fitness <= 0:
@@ -428,7 +435,7 @@ class BeeColony(AlgorithmBase[ABCParticle]):
                 f"Particle '{identifier}' must be an instance of ABCParticle."
             )
 
-        if np.isinf(particle.fitness):
+        if particle.fitness == FITNESS_UNDEFINED:
             particle.update(
                 variables=particle.variables, fitness_function=self._fitness_function
             )
@@ -464,14 +471,7 @@ class BeeColony(AlgorithmBase[ABCParticle]):
     def _is_improvement(
         candidate_fitness: np.float64, current_fitness: np.float64
     ) -> bool:
-        candidate_abc_fitness = ABCParticle._calculate_abc_fitness(candidate_fitness)
-        current_abc_fitness = ABCParticle._calculate_abc_fitness(current_fitness)
-
-        return bool(
-            np.isfinite(candidate_abc_fitness)
-            and np.isfinite(current_abc_fitness)
-            and candidate_abc_fitness > current_abc_fitness
-        )
+        return bool(candidate_fitness < current_fitness)
 
     def update_particle(self, identifier: str) -> ABCParticle:
         particle = self._population[identifier]

@@ -306,7 +306,7 @@ class WhaleAlgorithm(AlgorithmBase[WhaleParticle]):
                 f"Particle '{identifier}' must be an instance of WhaleParticle."
             )
 
-        if np.isinf(particle.fitness):
+        if particle.fitness == FITNESS_UNDEFINED:
             particle.update(
                 variables=particle.variables, fitness_function=self._fitness_function
             )

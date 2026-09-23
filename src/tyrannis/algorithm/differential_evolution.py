@@ -16,9 +16,7 @@ class DifferentialEvolution(AlgorithmBase[DEParticle]):
     """Differential Evolution algorithm."""
 
     def __init__(
-        self,
-        mutation_factor: float = 0.5,
-        crossover_rate: float = 0.9,
+        self, mutation_factor: float = 0.5, crossover_rate: float = 0.9
     ) -> None:
         """
         Differential Evolution algorithm (DE).
@@ -212,7 +210,7 @@ class DifferentialEvolution(AlgorithmBase[DEParticle]):
                 f"Particle '{identifier}' must be an instance of DEParticle."
             )
 
-        if np.isinf(particle.fitness):
+        if particle.fitness == FITNESS_UNDEFINED:
             particle.update(
                 variables=particle.variables, fitness_function=self._fitness_function
             )

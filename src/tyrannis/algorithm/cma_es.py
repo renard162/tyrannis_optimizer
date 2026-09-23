@@ -315,7 +315,7 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
                 "CMAESCandidateSolution."
             )
 
-        if np.isinf(particle.fitness):
+        if particle.fitness == FITNESS_UNDEFINED:
             particle.update(
                 variables=particle.variables, fitness_function=self._fitness_function
             )
@@ -512,7 +512,10 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         self._gamma_c = gamma_c
         self._double_check_ids = [center_identifier]
 
-    def second_update_particle(self, identifier: str) -> CMAESCandidateSolution:
+    def second_update_particle(
+        self,
+        identifier: str,
+    ) -> CMAESCandidateSolution:
         particle = self._population[identifier]
 
         if not isinstance(particle, CMAESCandidateSolution):

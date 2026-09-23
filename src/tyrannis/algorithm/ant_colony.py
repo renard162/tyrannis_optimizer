@@ -322,7 +322,7 @@ class AntColony(AlgorithmBase[ACORParticle]):
         migrated_particles = [
             particle
             for particle in self._population.values()
-            if particle.new_particle and np.isfinite(particle.fitness)
+            if particle.new_particle and particle.fitness != FITNESS_UNDEFINED
         ]
 
         if migrated_particles:
@@ -380,7 +380,7 @@ class AntColony(AlgorithmBase[ACORParticle]):
                 f"Particle '{identifier}' must be an instance of ACORParticle."
             )
 
-        if np.isinf(particle.fitness):
+        if particle.fitness == FITNESS_UNDEFINED:
             particle.update(
                 variables=particle.variables, fitness_function=self._fitness_function
             )

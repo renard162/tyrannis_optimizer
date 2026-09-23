@@ -57,7 +57,7 @@ class PSOParticle(ParticleBase):
 
     def update_personal_best(self) -> None:
         if (
-            np.isinf(self._personal_best_fitness)
+            self._personal_best_variables is None
             or self.fitness < self._personal_best_fitness
         ):
             self._personal_best_variables = deepcopy(self.variables)
@@ -313,7 +313,7 @@ class PSO(AlgorithmBase[PSOParticle]):
                 f"Particle '{identifier}' must be an instance of PSOParticle."
             )
 
-        if np.isinf(particle.fitness):
+        if particle.fitness == FITNESS_UNDEFINED:
             particle.update(
                 variables=particle.variables, fitness_function=self._fitness_function
             )
@@ -359,8 +359,8 @@ class PSO(AlgorithmBase[PSOParticle]):
             personal_best_variable = personal_best_variables[name]
             global_best_variable = global_best_variables[name]
 
-            cognitive_random = particle.random_cache[(f"{name}-cognitive")]
-            social_random = particle.random_cache[(f"{name}-social")]
+            cognitive_random = particle.random_cache[f"{name}-cognitive"]
+            social_random = particle.random_cache[f"{name}-social"]
 
             velocity = self._constriction * (
                 self._inertia * current_velocity
