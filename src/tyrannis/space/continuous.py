@@ -62,8 +62,8 @@ class Continuous(SpaceBase):
             local to the current runtime and are not preserved through serialization.
             - ``"lfu"``: Least Frequently Used cache. Requires the optional
             dependencies for advanced caching.
-            - ``"fifo"``: First In, First Out cache. Requires the optional
-            dependencies for advanced caching.
+            - ``"fifo"``: First In, First Out cache. Requires the optional dependencies
+            for advanced caching.
             - ``"rr"``: Random Replacement cache. Requires the optional dependencies
             for advanced caching.
 
@@ -78,6 +78,7 @@ class Continuous(SpaceBase):
             cache_type=cache_type,
             cache_size=cache_size,
         )
+
         if isinstance(boundaries, dict):
             self._boundaries = boundaries
             self._is_kwargs = True
@@ -87,6 +88,17 @@ class Continuous(SpaceBase):
         else:
             self._boundaries = cast(Boundaries, boundaries)
             self._is_kwargs = False
+
+        if isinstance(self._boundaries, dict):
+            boundary_values = self._boundaries.values()
+        else:
+            boundary_values = self._boundaries
+
+        for lower, upper in boundary_values:
+            if lower >= upper:
+                raise ValueError(
+                    "The lower boundary must be smaller than the upper boundary."
+                )
 
         self._type = "continuous"
         self._configs = {}
@@ -111,8 +123,7 @@ class Continuous(SpaceBase):
         return [float_inputs[str(index)] for index in range(len(self._boundaries))]
 
     def encode_cache(
-        self,
-        inputs: list[float] | dict[str, float],
+        self, inputs: list[float] | dict[str, float]
     ) -> tuple[float, ...] | tuple[tuple[str, float], ...]:
         if isinstance(inputs, dict):
             return tuple(sorted(inputs.items()))
@@ -120,8 +131,7 @@ class Continuous(SpaceBase):
         return tuple(inputs)
 
     def decode_cache(
-        self,
-        inputs: tuple[float, ...] | tuple[tuple[str, float], ...],
+        self, inputs: tuple[float, ...] | tuple[tuple[str, float], ...]
     ) -> list[float] | dict[str, float]:
         if self._is_kwargs:
             return dict(cast(tuple[tuple[str, float], ...], inputs))
