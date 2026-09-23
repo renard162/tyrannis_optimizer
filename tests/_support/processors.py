@@ -10,7 +10,6 @@ from typing import Any, final, override
 import numpy as np
 from numpy.random import SeedSequence
 
-from _support.numerics import BASE_SEED
 from tyrannis.core.algorithm import (
     FITNESS_UNDEFINED,
     AlgorithmBase,
@@ -25,6 +24,8 @@ from tyrannis.core.backend_migration import (
 from tyrannis.core.processor import ProcessorBase
 from tyrannis.core.results import HistoryConfig
 from tyrannis.core.signals import EventProtocol
+
+from .numerics import BASE_SEED
 
 
 @final
@@ -223,6 +224,14 @@ class ProcessorMigrationDriverDouble(MigrationDriverBase):
 
     def __init__(self, initial_iter: int = 1, *args: object, **kwargs: object) -> None:
         del initial_iter, args, kwargs
+        self.created_identifiers: list[str] = []
+
+    @override
+    def create_processor_module(self, identifier: str) -> MigrationProcessorBase:
+        self.created_identifiers.append(identifier)
+        if hasattr(self, "_processor_class"):
+            return super().create_processor_module(identifier)
+        return ProcessorMigrationDouble()
 
     @override
     def start(self) -> None:
