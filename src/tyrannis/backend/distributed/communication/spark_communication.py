@@ -434,6 +434,9 @@ class SparkCommunicationDriver(CommunicationDriverBase):
             if not self._register_connection(connection, message):
                 self._route_message(connection, message)
 
+            if connection not in self._receive_buffers:
+                return
+
         self._receive_buffers[connection] = buffer
 
     def _register_connection(self, connection: socket.socket, message: str) -> bool:
