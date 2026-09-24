@@ -16,7 +16,9 @@ class DifferentialEvolution(AlgorithmBase[DEParticle]):
     """Differential Evolution algorithm."""
 
     def __init__(
-        self, mutation_factor: float = 0.5, crossover_rate: float = 0.9
+        self,
+        mutation_factor: float = 0.5,
+        crossover_rate: float = 0.9,
     ) -> None:
         """
         Differential Evolution algorithm (DE).

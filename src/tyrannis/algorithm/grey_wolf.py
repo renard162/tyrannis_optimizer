@@ -19,7 +19,9 @@ class GreyWolf(AlgorithmBase[GreyWolfParticle]):
     """Grey Wolf Optimization algorithm."""
 
     def __init__(
-        self, convergence_exponent: float = 1, exploration_enhanced: bool = False
+        self,
+        convergence_exponent: float = 1,
+        exploration_enhanced: bool = False,
     ) -> None:
         """
         Grey Wolf Optimization (GWO).
