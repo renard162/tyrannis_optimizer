@@ -1,6 +1,7 @@
 import json
 import warnings
 from collections.abc import Callable, Iterable
+from itertools import pairwise
 from typing import Any, TypeAlias, cast
 
 import numpy as np
@@ -12,8 +13,12 @@ from . import register_space
 Choice: TypeAlias = Any
 Choices: TypeAlias = Iterable[Choice]
 Boundaries: TypeAlias = list[Choices] | dict[str, Choices]
+MaterializedBoundaries: TypeAlias = list[list[Choice]] | dict[str, list[Choice]]
+
 Positions: TypeAlias = Iterable[float]
 PositionBoundaries: TypeAlias = list[Positions] | dict[str, Positions]
+MaterializedPositions: TypeAlias = list[list[float]] | dict[str, list[float]]
+
 OrdinalInput: TypeAlias = list[Any] | dict[str, Any]
 CacheKey: TypeAlias = str
 
@@ -21,9 +26,9 @@ CacheKey: TypeAlias = str
 class Ordinal(SpaceBase):
     """Ordinal optimization search space."""
 
-    _boundaries: Boundaries
-    _positions: list[list[float]] | dict[str, list[float]]
-    _positions_config: list[float] | list[list[float]] | dict[str, list[float]] | None
+    _boundaries: MaterializedBoundaries
+    _positions: MaterializedPositions
+    _positions_config: list[float] | MaterializedPositions | None
     _decoder: str
     _params: dict[str, Any]
     _rng: np.random.Generator
@@ -393,7 +398,7 @@ class Ordinal(SpaceBase):
         ]
 
     def _decode_rank(self, float_inputs: dict[str, float]) -> dict[str, Any]:
-        decoded = {}
+        decoded: dict[str, Any] = {}
         choices_by_key = dict(self._iter_choices())
 
         for key, positions in self._iter_positions():
@@ -406,7 +411,7 @@ class Ordinal(SpaceBase):
     def _decode_nearest_stochastic(
         self, float_inputs: dict[str, float]
     ) -> dict[str, Any]:
-        decoded = {}
+        decoded: dict[str, Any] = {}
         choices_by_key = dict(self._iter_choices())
 
         for key, positions in self._iter_positions():
@@ -456,7 +461,7 @@ class Ordinal(SpaceBase):
         temperature: float,
         cumulative_function: Callable[[np.ndarray], np.ndarray],
     ) -> dict[str, Any]:
-        decoded = {}
+        decoded: dict[str, Any] = {}
         choices_by_key = dict(self._iter_choices())
 
         for key, positions in self._iter_positions():
@@ -492,7 +497,7 @@ class Ordinal(SpaceBase):
     ) -> dict[str, Any]:
         temperature = float(self._params.get("temperature", 1.0))
 
-        decoded = {}
+        decoded: dict[str, Any] = {}
         choices_by_key = dict(self._iter_choices())
 
         for key, positions in self._iter_positions():
@@ -514,22 +519,22 @@ class Ordinal(SpaceBase):
         *,
         choices_are_single: bool,
     ) -> tuple[
-        list[list[float]] | dict[str, list[float]],
-        list[float] | list[list[float]] | dict[str, list[float]] | None,
+        MaterializedPositions,
+        list[float] | MaterializedPositions | None,
     ]:
         if positions is None:
             if isinstance(self._boundaries, dict):
-                generated = {
+                generated_positions: MaterializedPositions = {
                     key: self._equidistant_positions(len(choices))
                     for key, choices in self._boundaries.items()
                 }
             else:
-                generated = [
+                generated_positions = [
                     self._equidistant_positions(len(choices))
                     for choices in self._boundaries
                 ]
 
-            return generated, None
+            return generated_positions, None
 
         if isinstance(self._boundaries, dict):
             if not isinstance(positions, dict):
@@ -537,45 +542,54 @@ class Ordinal(SpaceBase):
                     "positions must be a dictionary when choices is a dictionary."
                 )
 
-            if set(positions) != set(self._boundaries):
+            position_mapping = cast(dict[str, Positions], positions)
+
+            if set(position_mapping) != set(self._boundaries):
                 raise ValueError(
                     "positions must contain exactly the same keys as choices."
                 )
 
-            materialized = {
-                key: self._to_positions(positions[key]) for key in self._boundaries
+            materialized_positions = {
+                key: self._to_positions(position_mapping[key])
+                for key in self._boundaries
             }
 
-            return materialized, materialized.copy()
+            positions_config = {
+                key: values.copy() for key, values in materialized_positions.items()
+            }
+
+            return materialized_positions, positions_config
 
         if isinstance(positions, dict):
             raise TypeError(
                 "positions cannot be a dictionary when choices is not a dictionary."
             )
 
-        materialized_positions: object = positions
+        materialized_input: object = positions
 
         if isinstance(positions, Iterable) and not isinstance(
             positions, (str, bytes, np.ndarray)
         ):
-            materialized_positions = list(positions)
+            materialized_input = list(positions)
 
-        positions_are_single = self._is_positions_collection(materialized_positions)
+        positions_are_single = self._is_positions_collection(materialized_input)
 
         if choices_are_single != positions_are_single:
             raise ValueError("positions must have the same structure as choices.")
 
         if choices_are_single:
-            single = self._to_positions(materialized_positions)
+            single_positions = self._to_positions(materialized_input)
 
-            return [single], single.copy()
+            return [single_positions], single_positions.copy()
 
-        nested = [
+        nested_positions = [
             self._to_positions(value)
-            for value in cast(Iterable[object], materialized_positions)
+            for value in cast(Iterable[object], materialized_input)
         ]
 
-        return nested, [values.copy() for values in nested]
+        positions_config = [values.copy() for values in nested_positions]
+
+        return nested_positions, positions_config
 
     def _validate_positions(self) -> None:
         choices_by_key = dict(self._iter_choices())
@@ -605,21 +619,21 @@ class Ordinal(SpaceBase):
 
     def _iter_choices(self) -> list[tuple[str, list[Any]]]:
         if isinstance(self._boundaries, dict):
-            return [(key, list(choices)) for key, choices in self._boundaries.items()]
+            return [(key, choices.copy()) for key, choices in self._boundaries.items()]
 
         return [
-            (str(index), list(choices))
+            (str(index), choices.copy())
             for index, choices in enumerate(self._boundaries)
         ]
 
     def _iter_positions(self) -> list[tuple[str, list[float]]]:
         if isinstance(self._positions, dict):
             return [
-                (key, list(positions)) for key, positions in self._positions.items()
+                (key, positions.copy()) for key, positions in self._positions.items()
             ]
 
         return [
-            (str(index), list(positions))
+            (str(index), positions.copy())
             for index, positions in enumerate(self._positions)
         ]
 
@@ -638,15 +652,18 @@ class Ordinal(SpaceBase):
         for index, choice in enumerate(choices):
             try:
                 equality = value == choice
-            except Exception:
-                continue
+            except (TypeError, ValueError):
+                equality = False
 
             if isinstance(equality, (bool, np.bool_)) and bool(equality):
                 return index
 
-            if isinstance(equality, np.ndarray) and equality.shape != ():
-                if bool(np.all(equality)):
-                    return index
+            if (
+                isinstance(equality, np.ndarray)
+                and equality.shape != ()
+                and bool(np.all(equality))
+            ):
+                return index
 
         raise ValueError(
             f"Value {value!r} is not a configured choice for variable {key!r}."
@@ -672,10 +689,7 @@ class Ordinal(SpaceBase):
 
     @staticmethod
     def _thresholds(positions: list[float]) -> list[float]:
-        return [
-            lower + ((upper - lower) / 2.0)
-            for lower, upper in zip(positions[:-1], positions[1:], strict=True)
-        ]
+        return [lower + ((upper - lower) / 2.0) for lower, upper in pairwise(positions)]
 
     @staticmethod
     def _position_bounds(positions: list[float]) -> tuple[float, float]:
@@ -784,7 +798,7 @@ class Ordinal(SpaceBase):
 
             values = list(value)
 
-        positions = []
+        positions: list[float] = []
 
         for position in values:
             if isinstance(position, (bool, np.bool_)) or not isinstance(
