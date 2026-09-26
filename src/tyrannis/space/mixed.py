@@ -30,10 +30,11 @@ class Mixed(SpaceBase):
         component search-space instance, allowing continuous, integer,
         categorical, binary, and permutation variables to coexist.
 
-        The component spaces are grouped according to their type and
+        Groupable component spaces are grouped according to their type and
         configuration and are internally combined into the representation
-        exposed to the optimization algorithm. Decoding is delegated to the
-        corresponding component spaces, preserving the user-facing
+        exposed to the optimization algorithm. Non-groupable component spaces
+        are reconstructed individually in keyword form. Decoding is delegated
+        to the corresponding component spaces, preserving the user-facing
         representation of each variable.
 
         Parameters
@@ -113,10 +114,22 @@ class Mixed(SpaceBase):
             if arguments["space"] == "mixed":
                 raise ValueError("A Mixed space cannot contain another Mixed space.")
 
+            configs = arguments["configs"].copy()
+            groupable = configs.pop("groupable", True)
+
+            if not isinstance(groupable, bool):
+                raise TypeError(
+                    "The 'groupable' space configuration must be a boolean."
+                )
+
             grouping_arguments = {
                 "space": arguments["space"],
-                "configs": arguments["configs"],
+                "configs": configs,
             }
+
+            if not groupable:
+                grouping_arguments["variable"] = key
+
             group_key = json.dumps(grouping_arguments, sort_keys=True)
 
             if group_key not in grouped_spaces:
@@ -161,6 +174,7 @@ class Mixed(SpaceBase):
     def initialize_context(self, seed: int | None = None) -> None:
         self._encoded_boundaries = {}
         self._space_encoded_variables = []
+
         for space in self._spaces:
             space.initialize_context(seed)
             encoded_boundaries = space.encoded_boundaries
@@ -168,6 +182,7 @@ class Mixed(SpaceBase):
             self._space_encoded_variables.append(list(encoded_boundaries))
 
         self._variable_names = []
+
         for variables in self._space_variables:
             self._variable_names.extend(variables)
 
@@ -192,10 +207,12 @@ class Mixed(SpaceBase):
                 self._spaces, self._space_variables, strict=True
             )
         )
+
         return encoded
 
     def decode_cache(self, inputs: tuple[Any, ...]) -> dict[str, Any]:
         decoded = {}
+
         for space, cache_key in zip(self._spaces, inputs, strict=True):
             decoded.update(space.decode_cache(cache_key))
 
