@@ -16,7 +16,9 @@ from .categorical import Categorical
 from .continuous import Continuous
 from .integer import Integer
 from .mixed import Mixed
+from .ordinal import Ordinal
 from .permutation import Permutation
+from .sequence import Sequence
 
 __all__ = [
     "Binary",
@@ -24,5 +26,7 @@ __all__ = [
     "Continuous",
     "Integer",
     "Mixed",
+    "Ordinal",
     "Permutation",
+    "Sequence",
 ]
