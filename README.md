@@ -231,10 +231,6 @@ The roadmap below lists capabilities that are **not yet part of the current publ
 * Ray
 * Dask
 
-#### Migration
-
-* Diffusion
-
 #### Testing
 
 * Construction and maintenance of unit tests
