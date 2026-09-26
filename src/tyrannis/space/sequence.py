@@ -14,6 +14,9 @@ Choices: TypeAlias = Collection[Choice]
 Boundaries: TypeAlias = Choices | dict[str, Choices]
 Positions: TypeAlias = Collection[float]
 PositionBoundaries: TypeAlias = list[Iterable[float]]
+BaseChoices: TypeAlias = list[list[Any]] | dict[str, Iterable[Any]]
+BasePositions: TypeAlias = PositionBoundaries | dict[str, Iterable[float]] | None
+BaseInput: TypeAlias = list[Any] | dict[str, Any]
 StopPositions: TypeAlias = float | Collection[float]
 SequenceInput: TypeAlias = list[list[Any]] | dict[str, list[Any]]
 CacheKey: TypeAlias = tuple[Any, ...] | str
@@ -145,11 +148,7 @@ class Sequence(SpaceBase):
     def decode(self, float_inputs: dict[str, float]) -> SequenceInput:
         self._check_input_bounds(float_inputs)
         decoded = self._base_space.decode(float_inputs)
-
-        if not isinstance(decoded, list):
-            raise TypeError("Sequence base space must decode positional inputs.")
-
-        sequence = self._truncate_at_stop(decoded)
+        sequence = self._truncate_at_stop(self._base_values(decoded))
 
         if self._input_name is None:
             return [sequence]
@@ -158,7 +157,8 @@ class Sequence(SpaceBase):
 
     def encode_cache(self, inputs: SequenceInput) -> CacheKey:
         sequence = self._validate_sequence_inputs(inputs)
-        base_inputs = self._pad_with_stop(sequence)
+        padded = self._pad_with_stop(sequence)
+        base_inputs = self._base_inputs(padded)
 
         return self._base_space.encode_cache(base_inputs)
 
@@ -174,10 +174,7 @@ class Sequence(SpaceBase):
 
             decoded = self._base_space.decode_cache(inputs)
 
-        if not isinstance(decoded, list):
-            raise TypeError("Sequence base space must decode positional cache inputs.")
-
-        sequence = self._truncate_at_stop(decoded)
+        sequence = self._truncate_at_stop(self._base_values(decoded))
 
         if self._input_name is None:
             return [sequence]
@@ -187,7 +184,7 @@ class Sequence(SpaceBase):
     def _create_categorical_space(self, decoder: str) -> Categorical:
         base_params = self._params.copy()
         bounds = base_params.pop("bounds", None)
-        boundaries = self._categorical_boundaries()
+        boundaries = self._base_choices(self._categorical_boundaries())
 
         return Categorical(
             choices=boundaries,
@@ -211,14 +208,67 @@ class Sequence(SpaceBase):
             )
 
         return Ordinal(
-            choices=choices,
-            positions=positions,
+            choices=self._base_choices(choices),
+            positions=self._base_positions(positions),
             decoder=decoder,
             params=self._params,
             use_cache=self._use_cache,
             cache_type=self._cache_type,
             cache_size=self._cache_size,
         )
+
+    def _base_choices(self, choices: list[list[Any]]) -> BaseChoices:
+        if self._input_name is None:
+            return choices
+
+        boundaries: dict[str, Iterable[Any]] = {}
+
+        for index, step_choices in enumerate(choices):
+            boundaries[self._step_key(index)] = step_choices
+
+        return boundaries
+
+    def _base_positions(self, positions: PositionBoundaries | None) -> BasePositions:
+        if self._input_name is None or positions is None:
+            return positions
+
+        boundaries: dict[str, Iterable[float]] = {}
+
+        for index, step_positions in enumerate(positions):
+            boundaries[self._step_key(index)] = step_positions
+
+        return boundaries
+
+    def _base_inputs(self, values: list[Any]) -> BaseInput:
+        if self._input_name is None:
+            return values
+
+        return {self._step_key(index): value for index, value in enumerate(values)}
+
+    def _base_values(self, values: BaseInput) -> list[Any]:
+        if self._input_name is None:
+            if not isinstance(values, list):
+                raise TypeError("Sequence base space must decode positional inputs.")
+
+            return values
+
+        if not isinstance(values, dict):
+            raise TypeError("Sequence base space must decode keyword inputs.")
+
+        step_keys = [self._step_key(index) for index in range(self._max_choices)]
+
+        if set(values) != set(step_keys):
+            raise ValueError(
+                "Sequence base space decoded unexpected internal variables."
+            )
+
+        return [values[key] for key in step_keys]
+
+    def _step_key(self, index: int) -> str:
+        if self._input_name is None:
+            return str(index)
+
+        return f"{self._input_name}-{index}"
 
     def _categorical_boundaries(self) -> list[list[Any]]:
         boundaries = []
