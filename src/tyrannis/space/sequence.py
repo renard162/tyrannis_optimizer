@@ -68,6 +68,247 @@ class Sequence(SpaceBase):
         cache_type: str = "lru",
         cache_size: int = 100_000,
     ) -> None:
+        """
+        Initialize the user-facing sequence search space.
+
+        The sequence space represents an ordered collection of choices whose length
+        may vary between configured minimum and maximum limits. Elements can appear
+        multiple times in the decoded sequence, and their order is significant.
+
+        The available choices can be provided as a single collection or as a
+        dictionary containing exactly one named collection. A single collection
+        represents one positional input of the cost function, while a dictionary
+        represents one keyword input.
+
+        The concrete collection type is not relevant to the search-space interface.
+        Lists, tuples, NumPy arrays, and other collection types can be used to
+        represent the available choices.
+
+        Sequences can use either categorical or ordinal decoding. Categorical
+        decoding treats the available choices as distinct nominal alternatives,
+        without assuming any ordering or distance relationship between them.
+        Ordinal decoding instead places the choices on an ordered continuous scale,
+        so their relative order and spacing become part of the search-space
+        geometry. Although an ordinal sequence with equally spaced positions may
+        look similar to a categorical sequence from the public API, the two
+        represent mathematically different optimization domains and can therefore
+        lead to substantially different search behavior.
+
+        Parameters
+        ----------
+        choices:
+            Elements available at every position of the sequence. A single
+            collection represents one positional sequence input. A dictionary may
+            be used to define a keyword input, but it must contain exactly one key
+            mapping the input name to its collection of available choices. Elements
+            may occur multiple times in the decoded sequence.
+
+            When multiple independent sequence inputs are required in the same cost
+            function, use a ``Mixed`` space containing one ``Sequence`` instance for
+            each input instead of providing multiple keys to a single ``Sequence``.
+
+        max_choices:
+            Maximum number of elements in the decoded sequence. The value must be
+            an integer greater than or equal to one and greater than or equal to
+            ``min_choices``.
+
+        min_choices:
+            Minimum number of elements in the decoded sequence. The value must be
+            a non-negative integer no greater than ``max_choices``. Sequence
+            termination is not allowed before this number of elements has been
+            selected.
+
+        positions:
+            Continuous positions associated one-to-one with ``choices`` when using
+            an ordinal decoder. Positions are always provided as a single
+            collection, including when ``choices`` is provided as a dictionary.
+            Each position must be finite and the positions must be strictly
+            increasing.
+
+            When ``None`` and an ordinal decoder is explicitly selected, equally
+            spaced positions are generated automatically. In this case,
+            ``stop_positions`` must also be ``None``. This argument must be
+            ``None`` when using a categorical decoder.
+
+        stop_positions:
+            Continuous position or positions associated with sequence termination
+            when explicit ordinal ``positions`` are provided. A single finite value
+            assigns the same termination position to every optional sequence
+            position. A collection assigns an individual termination position to
+            each optional sequence position and must therefore contain exactly
+            ``max_choices - min_choices`` values.
+
+            Each termination position must be finite and must not coincide with a
+            position assigned to an element in ``choices``. This argument is
+            required when explicit ``positions`` are provided and
+            ``min_choices < max_choices``. It must be ``None`` when positions are
+            generated automatically, when using a categorical decoder, or when
+            ``min_choices == max_choices``.
+
+        decoder:
+            Method used to decode the continuous solver representation into the
+            sequence. The decoder name follows the ``"<space>-<decoder>"`` format,
+            where the prefix selects either categorical or ordinal decoding.
+            Supported methods include:
+
+            - ``"categorical-one-hot"``: Selects the category with the highest
+            encoded value at each sequence position.
+            - ``"categorical-softmax"``: Stochastically samples each sequence
+            position according to softmax probabilities.
+            - ``"categorical-gumbel-softmax"``: Stochastically samples each
+            sequence position using Gumbel noise and softmax.
+            - ``"categorical-scalar"``: Represents each sequence position with a
+            single continuous value.
+            - ``"ordinal-rank"``: Selects the ordinal choice whose continuous
+            position is nearest to the solver value.
+            - ``"ordinal-nearest-stochastic"``: Stochastically selects between the
+            two ordinal positions adjacent to the solver value.
+            - ``"ordinal-cumulative-logit"``: Stochastically samples an ordinal
+            level using a cumulative logistic model.
+            - ``"ordinal-cumulative-probit"``: Stochastically samples an ordinal
+            level using a cumulative normal model.
+            - ``"ordinal-distance-softmax"``: Stochastically samples among all
+            ordinal levels using a softmax distribution over their distances
+            from the solver value.
+
+            When ``None``, ``"categorical-one-hot"`` is used if ``positions`` is
+            ``None``. When explicit ``positions`` are provided,
+            ``"ordinal-rank"`` is used instead. To use ordinal decoding with
+            automatically generated positions, an ordinal decoder must be selected
+            explicitly.
+
+        params:
+            Parameters used by the selected decoding method. Parameters are
+            provided as a dictionary where each key is the name of a parameter and
+            its value is the corresponding parameter value. Supported parameters
+            depend on the selected categorical or ordinal decoder and include:
+
+            ``bounds``:
+                Continuous search interval exposed to the optimization algorithm
+                when using a categorical decoder. When omitted, decoder-specific
+                default bounds are used. ``"categorical-scalar"`` defaults to
+                ``(0.0, 1.0)`` while the remaining categorical decoders default to
+                ``(-1.0, 1.0)``. This parameter is not supported by ordinal
+                decoders.
+
+            ``temperature``:
+                Controls the stochasticity of the
+                ``"categorical-gumbel-softmax"``,
+                ``"ordinal-cumulative-logit"``,
+                ``"ordinal-cumulative-probit"``, and
+                ``"ordinal-distance-softmax"`` decoders. Lower values concentrate
+                probability more strongly around favored choices, while higher
+                values produce broader probability distributions. The value must
+                be finite and greater than zero. Defaults to ``1.0``.
+
+        cost_function:
+            User-defined cost function evaluated after decoding the solver
+            inputs into their user-facing representation. This argument is
+            required when the space is used independently. It does not need
+            to be provided when the space is used as a component of a
+            ``Mixed`` space, because in that case the cost function is
+            provided to the ``Mixed`` space itself.
+
+        use_cache:
+            Whether cost-function evaluations should be cached. When
+            ``False``, no cache is created or used.
+
+        cache_type:
+            Cache strategy to use when caching is enabled. Supported strategies are:
+
+            - ``"lru"``: Least Recently Used cache. (default)
+            - ``"disk"``: Temporary disk-backed runtime cache. Its contents are
+            local to the current runtime and are not preserved through serialization.
+            - ``"lfu"``: Least Frequently Used cache. Requires the optional
+            dependencies for advanced caching.
+            - ``"fifo"``: First In, First Out cache. Requires the optional dependencies
+            for advanced caching.
+            - ``"rr"``: Random Replacement cache. Requires the optional dependencies
+            for advanced caching.
+
+        cache_size:
+            Maximum cache size for in-memory caches, expressed as the maximum
+            number of cached records. This parameter has no effect when
+            ``cache_type="disk"``.
+
+        Notes
+        -----
+        Let ``C`` denote the collection of available choices, ``m`` the configured
+        ``min_choices``, and ``M`` the configured ``max_choices``. The user-facing
+        search domain is the set of all finite ordered sequences over ``C`` whose
+        length is between these limits:
+
+        ``S(C, m, M) = union(C^k, k=m,...,M)``.
+
+        Unlike a permutation, membership in ``C^k`` does not impose uniqueness.
+        Consequently, the same element may occupy multiple positions and sequences
+        such as ``(A, B, A, C)`` are valid whenever their length satisfies the
+        configured limits.
+
+        A bounded variable-length sequence can be represented by ``M`` ordered
+        decision positions together with a distinguished termination symbol
+        ``STOP``. For positions up to ``m``, the admissible domain is ``C``. For
+        the remaining optional positions, the admissible domain is
+        ``C union {STOP}``:
+
+        ``D_i = C`` for ``i <= m``,
+
+        ``D_i = C union {STOP}`` for ``m < i <= M``.
+
+        For a decoded vector ``z = (z_1, ..., z_M)``, the first occurrence of
+        ``STOP`` determines the sequence length. If ``STOP`` occurs at position
+        ``j``, the resulting sequence is ``(z_1, ..., z_(j-1))``. If no
+        termination symbol occurs, all ``M`` elements form the resulting sequence.
+        Because ``STOP`` is unavailable in the first ``m`` positions, the decoded
+        length is always contained in ``[m, M]``.
+
+        Under categorical decoding, each decision position represents a categorical
+        choice, with ``STOP`` acting as an additional category only in optional
+        positions.
+
+        Under ordinal decoding, each element ``c_j`` in ``C`` is associated with a
+        continuous position ``p_j``. Optional sequence positions additionally
+        associate ``STOP`` with a termination position. A scalar
+        ``stop_positions`` value defines the same termination position for every
+        optional decision, while a collection defines positions
+        ``s_1, ..., s_(M-m)`` independently. This allows the continuous geometry of
+        the termination level to vary along the sequence without changing the
+        discrete sequence domain.
+
+        When ordinal positions are generated automatically, each decision position
+        uses equally spaced ordinal levels. Optional positions therefore contain
+        one additional equally spaced level corresponding to ``STOP``.
+
+        This formulation combines a fixed-dimensional continuous optimization
+        representation with a variable-length discrete decoded domain. It follows
+        ideas used in variable-length chromosome representations, random-key
+        sequence encodings, and fixed-length encodings containing inactive or
+        do-nothing alternatives; the particular formulation above is a unified
+        search-space definition rather than a single representation adopted
+        verbatim from one reference.
+
+        References
+        ----------
+        Bean, J. C. (1994). Genetic Algorithms and Random Keys for Sequencing and
+        Optimization. ORSA Journal on Computing, 6(2), 154-160.
+        https://doi.org/10.1287/ijoc.6.2.154
+
+        Zhang, Q., & Ding, L. (2016). A New Crossover Mechanism for Genetic
+        Algorithms with Variable-Length Chromosomes for Path Optimization Problems.
+        Expert Systems with Applications, 60, 183-189.
+        https://doi.org/10.1016/j.eswa.2016.04.005
+
+        Beke, L., Weiszer, M., & Chen, J. (2021). A Comparison of Genetic
+        Representations and Initialisation Methods for the Multi-objective Shortest
+        Path Problem on Multigraphs. SN Computer Science, 2, 176.
+        https://doi.org/10.1007/s42979-021-00512-z
+
+        Ni, Y., Du, X., Ye, P., Minku, L. L., Yao, X., Harman, M., & Xiao, R.
+        (2021). Multi-objective Software Performance Optimisation at the
+        Architecture Level Using Randomised Search Rules. Information and Software
+        Technology, 135, 106565.
+        https://doi.org/10.1016/j.infsof.2021.106565
+        """
         super().__init__(
             cost_function,
             use_cache=use_cache,
