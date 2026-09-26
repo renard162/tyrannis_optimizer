@@ -79,7 +79,9 @@ Spaces define the search domain, including the variables, their bounds or availa
 | `Integer` | Integer variables bounded by numerical lower and upper limits. |
 | `Binary` | Binary variables restricted to `False` or `True`. |
 | `Categorical` | Categorical variables selected from a finite set of discrete choices. |
+| `Ordinal` | Ordinal variables selected from an ordered set of discrete choices, with optional positions defining their relative distances. |
 | `Permutation` | Permutation variables for ordering and permutation-based optimization problems. |
+| `Sequence` | Variable-length ordered sequences selected from a finite set of choices, with repetition allowed and categorical or ordinal decoding. |
 | `Mixed` | Composition of multiple spaces, allowing heterogeneous variable types in the same optimization problem. |
 
 ### Processors
@@ -221,9 +223,8 @@ The roadmap below lists capabilities that are **not yet part of the current publ
 
 #### Spaces
 
-* Ordinal
 * Set
-* Graph
+* Graph-Constrained Search Spaces
 
 #### Backends
 
