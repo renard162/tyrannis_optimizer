@@ -69,6 +69,8 @@ from tyrannis import algorithm, backend, core, migration, processor, space
                 "Categorical": "tyrannis.space.categorical",
                 "Continuous": "tyrannis.space.continuous",
                 "Integer": "tyrannis.space.integer",
+                "Ordinal": "tyrannis.space.ordinal",
+                "Sequence": "tyrannis.space.sequence",
                 "Mixed": "tyrannis.space.mixed",
                 "Permutation": "tyrannis.space.permutation",
             },
