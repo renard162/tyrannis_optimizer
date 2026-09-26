@@ -223,7 +223,6 @@ The roadmap below lists capabilities that are **not yet part of the current publ
 
 #### Spaces
 
-* Set
 * Graph-Constrained Search Spaces
 
 #### Backends
