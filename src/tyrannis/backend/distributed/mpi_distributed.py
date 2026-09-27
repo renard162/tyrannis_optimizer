@@ -9,9 +9,9 @@ from ...core.backend_distributed import DistributedBackendBase
 from ...core.backend_migration import MigrationDriverBase
 from ...core.processor import ProcessorBase
 from ...core.results import HistoryConfig, ProcessorResult
-from .communication.no_communication import (
-    NoCommunicationDriver,
-    NoCommunicationProcessor,
+from .communication.mpi_communication import (
+    MPICommunicationDriver,
+    MPICommunicationProcessor,
 )
 
 if TYPE_CHECKING:
@@ -60,12 +60,10 @@ class MPIDistributed(DistributedBackendBase):
         reached its worker rank through `initialize_execution_context` and are
         released there through `finalize_execution_context`.
 
-        The processor migration lifecycle remains active on every island. Until
-        the MPI communication implementation is connected to this backend, the
-        inactive communication implementation is used only to satisfy the
-        communication contract required when migration processors are created.
-        The distributed backend itself does not impose or inspect a particular
-        migration strategy.
+        The processor migration lifecycle remains active on every island.
+        Driver-side and processor-side migration communication is provided by
+        the MPI communication layer, which routes migration messages between
+        rank 0 and the worker rank executing each island.
         """
         self._check_dependencies("mpi")
 
@@ -118,11 +116,11 @@ class MPIDistributed(DistributedBackendBase):
 
         island_ids = [f"island:{idx}" for idx in range(self._n_executors)]
 
-        communication_driver = NoCommunicationDriver(island_ids=island_ids)
+        communication_driver = MPICommunicationDriver(island_ids=island_ids)
 
         self._migration.initialize_context(
             communication_driver=communication_driver,
-            communication_processor_class=NoCommunicationProcessor,
+            communication_processor_class=MPICommunicationProcessor,
             communication_processor_kargs={},
             history_config=self._history_config,
             seed=self._seed,
