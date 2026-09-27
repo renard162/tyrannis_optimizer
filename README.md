@@ -238,6 +238,10 @@ The roadmap below lists capabilities that are **not yet part of the current publ
 * Ray
 * Dask
 
+#### Compatibility
+
+* Sysidentpy - MetaMSS
+
 #### Testing
 
 * Construction and maintenance of unit tests
