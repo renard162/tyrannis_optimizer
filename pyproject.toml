@@ -77,9 +77,9 @@ spark = [
     "pyarrow>=19.0.1",
 ]
 
-# mpi = [
-#     "mpi4py>=4.1.2",
-# ]
+mpi = [
+    "mpi4py>=4.1.2",
+]
 
 # ray = [ #Future implementation
 #     "ray>=2.58.0",
