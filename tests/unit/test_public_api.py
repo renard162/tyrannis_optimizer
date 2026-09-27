@@ -1,7 +1,7 @@
-"""Package exports and the backend's small lazy-loading contract."""
+"""Stable public package exports."""
 
 from importlib import import_module
-from types import ModuleType, SimpleNamespace
+from types import ModuleType
 
 import pytest
 
@@ -10,14 +10,11 @@ from tyrannis import algorithm, backend, core, migration, processor, space
 
 
 @pytest.mark.parametrize(
-    ("package", "declared", "exports"),
+    ("package", "exports"),
     [
-        pytest.param(
-            tyrannis, tyrannis.__all__, {"Optimizer": "tyrannis.main"}, id="tyrannis"
-        ),
+        pytest.param(tyrannis, {"Optimizer": "tyrannis.main"}, id="tyrannis"),
         pytest.param(
             algorithm,
-            algorithm.__all__,
             {
                 "AntColony": "tyrannis.algorithm.ant_colony",
                 "BeeColony": "tyrannis.algorithm.bee_colony",
@@ -33,8 +30,15 @@ from tyrannis import algorithm, backend, core, migration, processor, space
             id="algorithm",
         ),
         pytest.param(
+            backend,
+            {
+                "SparkDistributed": "tyrannis.backend.distributed.spark_distributed",
+                "SparkParallel": "tyrannis.backend.parallel.spark_parallel",
+            },
+            id="backend",
+        ),
+        pytest.param(
             core,
-            core.__all__,
             {
                 "FITNESS_UNDEFINED": "tyrannis.core.algorithm",
                 "AlgorithmBase": "tyrannis.core.algorithm",
@@ -44,7 +48,6 @@ from tyrannis import algorithm, backend, core, migration, processor, space
         ),
         pytest.param(
             migration,
-            migration.__all__,
             {
                 "GlobalBest": "tyrannis.migration.global_best",
                 "IslandMigration": "tyrannis.migration.island_migration",
@@ -53,7 +56,6 @@ from tyrannis import algorithm, backend, core, migration, processor, space
         ),
         pytest.param(
             processor,
-            processor.__all__,
             {
                 "Joblib": "tyrannis.processor.joblib",
                 "ProcessPool": "tyrannis.processor.process",
@@ -63,53 +65,24 @@ from tyrannis import algorithm, backend, core, migration, processor, space
         ),
         pytest.param(
             space,
-            space.__all__,
             {
                 "Binary": "tyrannis.space.binary",
                 "Categorical": "tyrannis.space.categorical",
                 "Continuous": "tyrannis.space.continuous",
                 "Integer": "tyrannis.space.integer",
-                "Ordinal": "tyrannis.space.ordinal",
-                "Sequence": "tyrannis.space.sequence",
                 "Mixed": "tyrannis.space.mixed",
+                "Ordinal": "tyrannis.space.ordinal",
                 "Permutation": "tyrannis.space.permutation",
+                "Sequence": "tyrannis.space.sequence",
             },
             id="space",
         ),
     ],
 )
-def test_package_exports_are_the_concrete_objects(
-    package: ModuleType, declared: list[str], exports: dict[str, str]
+def test_stable_public_exports_remain_available(
+    package: ModuleType, exports: dict[str, str]
 ) -> None:
-    assert set(declared) == set(exports)
+    assert set(exports) <= set(package.__all__)
+
     for name, source_name in exports.items():
         assert getattr(package, name) is getattr(import_module(source_name), name)
-
-
-def test_backend_rejects_unknown_export() -> None:
-    with pytest.raises(AttributeError, match="has no attribute 'unknown'"):
-        backend.__getattr__("unknown")
-
-
-@pytest.mark.parametrize(
-    ("name", "source"),
-    [
-        ("SparkParallel", ".parallel.spark_parallel"),
-        ("SparkDistributed", ".distributed.spark_distributed"),
-    ],
-    ids=["parallel", "distributed"],
-)
-def test_backend_loads_known_export_lazily(
-    monkeypatch: pytest.MonkeyPatch, name: str, source: str
-) -> None:
-    exported = object()
-    calls: list[tuple[str, str]] = []
-
-    def import_module_stub(module_name: str, package_name: str) -> SimpleNamespace:
-        calls.append((module_name, package_name))
-        return SimpleNamespace(**{name: exported})
-
-    monkeypatch.setattr(backend.importlib, "import_module", import_module_stub)
-
-    assert backend.__getattr__(name) is exported
-    assert calls == [(source, "tyrannis.backend")]

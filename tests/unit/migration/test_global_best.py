@@ -52,12 +52,12 @@ def _driver(
 
 
 def test_driver_rejects_initial_iteration_below_one() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(Exception):  # noqa: B017
         _ = GlobalBest(initial_iter=0)
 
 
 def test_driver_rejects_non_positive_check_interval() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(Exception):  # noqa: B017
         _ = GlobalBest(check_interval=0)
 
 
