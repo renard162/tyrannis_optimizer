@@ -410,7 +410,9 @@ class SpaceBase(ABC):
 
         if dependency is not None and find_spec(dependency) is None:
             raise ImportError(
-                f"cache_type={self._cache_type!r} requires the {dependency!r} package."
+                "Cache support is not installed. "
+                "Install Tyrannis with cache support using "
+                "'pip install \"tyrannis[cache]\"'."
             )
 
     @staticmethod
