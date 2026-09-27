@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from importlib.util import find_spec
+from typing import Any, ClassVar
 
 from .algorithm import AlgorithmBase, CostFunctionWrapperBase
 from .backend_migration import MigrationDriverBase
@@ -55,6 +56,8 @@ class BackendBase(ABC):
     produced by the backend.
     """
 
+    _DEPENDENCIES: ClassVar[tuple[str, ...]] = ()
+
     _identifier: str
     _cost_function_wrapper: type[CostFunctionWrapperBase]
     _result: ProcessorResult
@@ -90,6 +93,25 @@ class BackendBase(ABC):
         A standalone backend may therefore require neither a processor nor a
         migration strategy, while a distributed backend may use both.
         """
+
+    def _check_dependencies(self, *install_arguments: str) -> None:
+        """
+        Validate that all optional dependencies required by the backend exist.
+
+        Parameters
+        ----------
+        *install_arguments:
+            Tyrannis optional-dependency groups that install the dependencies
+            required by the backend. Multiple groups are combined in the same
+            pip extras specification.
+        """
+        if any(find_spec(dependency) is None for dependency in self._DEPENDENCIES):
+            arguments = ",".join(install_arguments)
+            raise ImportError(
+                "Backend support is not installed. "
+                "Install Tyrannis with this backend support using "
+                f"'pip install \"tyrannis[{arguments}]\"'."
+            )
 
     @abstractmethod
     def execute(self) -> None:

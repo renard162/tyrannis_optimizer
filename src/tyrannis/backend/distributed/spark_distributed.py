@@ -1,8 +1,8 @@
+from __future__ import annotations
+
 import warnings
 from pathlib import Path
-from typing import Any
-
-from pyspark.sql import SparkSession
+from typing import TYPE_CHECKING, Any
 
 from ...core.algorithm import AlgorithmBase, CostFunctionWrapperBase
 from ...core.backend_distributed import DistributedBackendBase
@@ -14,6 +14,9 @@ from .communication.spark_communication import (
     SparkCommunicationProcessor,
 )
 
+if TYPE_CHECKING:
+    from pyspark.sql import SparkSession
+
 
 class SparkDistributedCostFunctionWrapper(CostFunctionWrapperBase):
     """Spark distributed cost-function wrapper."""
@@ -21,6 +24,8 @@ class SparkDistributedCostFunctionWrapper(CostFunctionWrapperBase):
 
 class SparkDistributed(DistributedBackendBase):
     """Spark backend for distributed processor execution."""
+
+    _DEPENDENCIES = ("pyspark", "pandas", "pyarrow")
 
     def __init__(
         self,
@@ -156,6 +161,8 @@ class SparkDistributed(DistributedBackendBase):
         the communication overhead associated with fine-grained particle-level
         distribution.
         """
+        self._check_dependencies("spark")
+
         if spark is None:
             raise ValueError("Spark session cannot be None.")
 
@@ -225,7 +232,8 @@ class SparkDistributed(DistributedBackendBase):
         island_ids = [f"island:{idx}" for idx in range(self._n_executors)]
 
         communication_driver = SparkCommunicationDriver(
-            island_ids=island_ids, port=self._communication_port
+            island_ids=island_ids,
+            port=self._communication_port,
         )
 
         driver_ip = self._spark.conf.get("spark.driver.host")

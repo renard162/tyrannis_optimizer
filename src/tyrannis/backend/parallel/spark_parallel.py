@@ -2,18 +2,48 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
-import pandas as pd
 from joblib import Parallel, delayed
 from joblib.parallel import BACKENDS
-from pyspark import cloudpickle
-from pyspark.sql import SparkSession
-from pyspark.sql.types import BinaryType, StructField, StructType
 
 from ...core.algorithm import FITNESS_UNDEFINED, CostFunctionWrapperBase, ParticleBase
 from ...core.backend_parallel import ParallelBackendBase
+
+if TYPE_CHECKING:
+    from pandas import DataFrame
+    from pyspark.sql import SparkSession
+
+pd: Any = None
+cloudpickle: Any = None
+BinaryType: Any = None
+StructField: Any = None
+StructType: Any = None
+
+_SPARK_DEPENDENCIES_LOADED = False
+
+
+def _load_spark_dependencies() -> None:
+    global _SPARK_DEPENDENCIES_LOADED
+    global BinaryType, StructField, StructType, cloudpickle, pd
+
+    if _SPARK_DEPENDENCIES_LOADED:
+        return
+
+    import pandas as pandas_module
+    from pyspark import cloudpickle as cloudpickle_module
+    from pyspark.sql.types import BinaryType as binary_type
+    from pyspark.sql.types import StructField as struct_field
+    from pyspark.sql.types import StructType as struct_type
+
+    pd = pandas_module
+    cloudpickle = cloudpickle_module
+    BinaryType = binary_type
+    StructField = struct_field
+    StructType = struct_type
+
+    _SPARK_DEPENDENCIES_LOADED = True
 
 
 class SparkParallelCostFunctionWrapper(CostFunctionWrapperBase):
@@ -21,9 +51,7 @@ class SparkParallelCostFunctionWrapper(CostFunctionWrapperBase):
 
 
 class SparkParallel(ParallelBackendBase):
-    _particle_schema = StructType(
-        [StructField("particles", BinaryType(), nullable=False)]
-    )
+    _DEPENDENCIES = ("pyspark", "pandas", "pyarrow")
 
     def __init__(
         self,
@@ -154,6 +182,13 @@ class SparkParallel(ParallelBackendBase):
         availability, task scheduling, serialization, and data movement
         therefore have a direct influence on the performance of the backend.
         """
+        self._check_dependencies("spark")
+        _load_spark_dependencies()
+
+        self._particle_schema = StructType(
+            [StructField("particles", BinaryType(), nullable=False)]
+        )
+
         if spark is None:
             raise ValueError("Spark session cannot be None.")
         if not isinstance(n_aux_jobs, int) or isinstance(n_aux_jobs, bool):
@@ -267,12 +302,10 @@ class SparkParallel(ParallelBackendBase):
 
                         if double_check_ids:
                             self._algorithm.create_random_cache(
-                                particle_ids=double_check_ids,
-                                initialize=False,
+                                particle_ids=double_check_ids, initialize=False
                             )
                             processed_particles = self._parallel_update_particles(
-                                double_check_ids,
-                                second_update=True,
+                                double_check_ids, second_update=True
                             )
                             self.error_log(
                                 actual_iter=actual_iter,
@@ -323,7 +356,7 @@ class SparkParallel(ParallelBackendBase):
 
         fitness_failure_strategy = self._fitness_failure_strategy
 
-        def worker(batches: Iterable[pd.DataFrame]) -> Iterator[pd.DataFrame]:
+        def worker(batches: Iterable[DataFrame]) -> Iterator[DataFrame]:
             return _process_particle_batches(
                 batches=iter(batches),
                 serialized_algorithm=serialized_algorithm,
@@ -344,12 +377,14 @@ class SparkParallel(ParallelBackendBase):
 
 
 def _process_particle_batches(
-    batches: Iterator[pd.DataFrame],
+    batches: Iterator[DataFrame],
     serialized_algorithm: bytes,
     initialize_particle: bool,
     second_update: bool,
     fitness_failure_strategy: str,
-) -> Iterator[pd.DataFrame]:
+) -> Iterator[DataFrame]:
+    _load_spark_dependencies()
+
     algorithm = cloudpickle.loads(serialized_algorithm)
 
     particles: list[ParticleBase] = []
