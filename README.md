@@ -221,6 +221,13 @@ The roadmap below lists capabilities that are **not yet part of the current publ
 
 ### Roadmap
 
+#### Algorithms
+
+* Age-Layered Population Structure
+* Invasive Weed Optimization
+* Coral Reefs Optimization
+* Prey-Predator Algorithm
+
 #### Spaces
 
 * Graph-Constrained Search Spaces
