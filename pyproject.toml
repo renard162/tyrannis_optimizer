@@ -97,7 +97,7 @@ Repository = "https://github.com/renard162/tyrannis_optimizer"
 Issues = "https://github.com/renard162/tyrannis_optimizer/issues"
 
 [project.scripts]
-tyrannis-mpi = "tyrannis.cli.mpi:main"
+tyrannis-mpi-parallel = "tyrannis.cli.mpi:main"
 
 [build-system]
 requires = ["uv_build>=0.12.5,<0.13.0"]
