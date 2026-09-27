@@ -1,0 +1,2 @@
+class MPIParallel:
+    """MPIParallel placeholder"""

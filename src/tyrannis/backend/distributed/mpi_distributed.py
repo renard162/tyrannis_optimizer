@@ -1,0 +1,2 @@
+class MPIDistributed:
+    """MPIDistributed placeholder"""
