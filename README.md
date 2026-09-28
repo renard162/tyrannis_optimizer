@@ -108,6 +108,8 @@ Backends define how optimization execution is organized across machines and, for
 | --- | --- |
 | `SparkParallel` | Distributes particle initialization and updates through Spark while keeping the optimization as a single population without islands. |
 | `SparkDistributed` | Distributes independent optimization islands across Spark executors and supports inter-island migration. |
+| `MPIParallel` | Distributes particle initialization and updates through MPI while keeping the optimization as a single population without islands. |
+| `MPIDistributed` | Distributes independent optimization islands across MPI worker nodes and supports inter-island migration. |
 
 When no backend is provided, `Optimizer` uses the local backend and executes the optimization on a single machine.
 
@@ -234,7 +236,6 @@ The roadmap below lists capabilities that are **not yet part of the current publ
 
 #### Backends
 
-* MPI
 * Ray
 * Dask
 
