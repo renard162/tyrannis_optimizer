@@ -8,41 +8,32 @@ Tyrannis is a Python framework for solving optimization problems with population
 
 ### Basic installation
 
-For a local installation with the standard execution capabilities:
+Install Tyrannis with its standard local execution capabilities:
 
 ```bash
 pip install tyrannis
 ```
 
-This installation provides the core framework, including local execution and the basic LRU and disk caching mechanisms.
+The base installation includes the core optimization framework, local execution, and the basic LRU and disk caching mechanisms.
 
-### Advanced caching
+### Optional features
 
-To enable the additional caching capabilities:
+Additional capabilities are available through optional dependency groups:
 
-```bash
-pip install "tyrannis[cache]"
-```
+| Extra | Installation | Adds |
+| --- | --- | --- |
+| `cache` | `pip install "tyrannis[cache]"` | Additional dependencies for advanced caching resources. |
+| `spark` | `pip install "tyrannis[spark]"` | Support for the `SparkParallel` and `SparkDistributed` backends. |
+| `mpi` | `pip install "tyrannis[mpi]"` | Support for the `MPIParallel` and `MPIDistributed` backends and the `tyrannis-mpi` launcher. |
+| `all` | `pip install "tyrannis[all]"` | Installs all optional Tyrannis dependencies. |
 
-The `cache` extra installs the additional dependencies required by Tyrannis' advanced cache resources. Without this extra, only the basic LRU and disk cache mechanisms are available.
-
-### Distributed processing with Spark
-
-To enable distributed processing with Spark:
-
-```bash
-pip install "tyrannis[spark]"
-```
-
-This installs the dependencies required by the Spark backend. Distributed execution with Spark requires an appropriate Spark infrastructure to be usable.
-
-### Combining extras
-
-Extras can be installed together:
+Extras can also be combined explicitly in a single installation. For example:
 
 ```bash
-pip install "tyrannis[cache,spark]"
+pip install "tyrannis[cache,spark,mpi]"
 ```
+
+The `spark` and `mpi` extras install the Python dependencies required by their respective backends. A compatible Spark or MPI runtime and execution infrastructure must also be available in the environment where those backends are used.
 
 ## Public API
 
@@ -106,8 +97,8 @@ Backends define how optimization execution is organized across machines and, for
 
 | Import | Description |
 | --- | --- |
-| `SparkParallel` | Distributes particle initialization and updates through Spark while keeping the optimization as a single population without islands. |
-| `SparkDistributed` | Distributes independent optimization islands across Spark executors and supports inter-island migration. |
+| `SparkParallel` | Distributes particle initialization and updates through Spark while keeping the optimization as a single population without islands; compatible with Databricks, including shared-access clusters. |
+| `SparkDistributed` | Distributes independent optimization islands across Spark executors and supports inter-island migration; compatible with Databricks single-user clusters. |
 | `MPIParallel` | Distributes particle initialization and updates through MPI while keeping the optimization as a single population without islands. |
 | `MPIDistributed` | Distributes independent optimization islands across MPI worker nodes and supports inter-island migration. |
 
