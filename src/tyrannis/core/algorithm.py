@@ -156,6 +156,32 @@ class ParticleBase(ABC):
         variables: dict[str, float],
         fitness_function: Callable[[dict[str, float]], np.float64],
     ) -> None:
+        """
+        Evaluate and store a candidate solution.
+
+        This method is the exclusive entry point for cost-function evaluations
+        performed by optimization algorithms. Every fitness evaluation, including
+        evaluations performed during ``initialize_particle``, ``update_particle``,
+        and ``second_update_particle``, must be executed through
+        ``ParticleBase.update`` or the corresponding inherited implementation.
+
+        Algorithm implementations must never invoke the fitness function directly.
+        This requirement also applies when an algorithm evaluates multiple
+        candidate solutions for the same particle during one iteration, performs
+        greedy selection between intermediate candidates, or uses more than one
+        particle-processing phase. Each candidate whose fitness is required must
+        first be passed through this method, and its resulting
+        ``candidate_fitness`` must be used by the algorithm.
+
+        Centralizing evaluation in the particle keeps the evaluated fitness
+        associated with the corresponding candidate state and provides a single
+        evaluation contract for all optimization algorithms. The supplied
+        ``variables`` are stored as ``candidate_variables`` and the result of
+        ``fitness_function`` is stored as ``candidate_fitness``.
+
+        This method does not consolidate the candidate into the particle's current
+        state. Consolidation remains the responsibility of the algorithm lifecycle.
+        """
         if variables is None:
             raise ValueError("Variables cannot be None.")
 

@@ -589,18 +589,29 @@ class BeeColony(AlgorithmBase[ABCParticle]):
             )
 
             particle.increment_trial_count()
-            candidate_fitness = self._fitness_function(candidate_variables)
+            particle.update(
+                variables=candidate_variables, fitness_function=self._fitness_function
+            )
 
-            if np.isnan(candidate_fitness):
-                particle.candidate_variables = candidate_variables
-                particle.candidate_fitness = candidate_fitness
+            if particle.candidate_fitness is None:
+                raise RuntimeError(
+                    f"Particle '{identifier}' has no candidate fitness after update."
+                )
+
+            if np.isnan(particle.candidate_fitness):
                 return particle
 
             if self._is_improvement(
-                candidate_fitness=candidate_fitness, current_fitness=current_fitness
+                candidate_fitness=particle.candidate_fitness,
+                current_fitness=current_fitness,
             ):
-                current_variables = candidate_variables
-                current_fitness = candidate_fitness
+                if particle.candidate_variables is None:
+                    raise RuntimeError(
+                        f"Particle '{identifier}' has no candidate variables after update."
+                    )
+
+                current_variables = dict(particle.candidate_variables)
+                current_fitness = particle.candidate_fitness
                 particle.reset_trial_count()
 
             particle.candidate_variables = current_variables

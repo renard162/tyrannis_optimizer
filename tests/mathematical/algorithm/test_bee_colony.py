@@ -20,10 +20,8 @@ infinity fallbacks, clipping, synchronous shared partners, sequential local
 onlooker acceptance, strict trial > limit, default limit=N*D, scout replacement
 at the NEXT pre_iteration, and max_scouts as an explicit extension. These
 scheduling/extension choices are not attributed to the original paper.
-Initialization, scout and employed evaluations enter through ParticleBase.update.
-Onlooker candidates are evaluated directly through the configured fitness function,
-matching the current sequential acceptance implementation. No RNG, candidate,
-counter or selection is replaced.
+Initialization, scout, employed and onlooker evaluations enter through
+ParticleBase.update. No RNG, candidate, counter or selection is replaced.
 """
 
 from collections.abc import Callable, Mapping
@@ -345,15 +343,12 @@ def assert_evaluation_accounting(run: Run, sources: int, iterations: int) -> Non
             assert after.evaluations - before.evaluations == expected
             if expected:
                 phase_calls = run.calls[before.evaluations : after.evaluations]
-                if before.name in ("initial-before", "employed-before"):
-                    assert all(call.update_index is not None for call in phase_calls)
-                    assert [
-                        run.updates[cast(int, call.update_index)].before.identifier
-                        for call in phase_calls
-                    ] == [before.identifier] * expected
-                else:
-                    assert before.name == "onlooker-before"
-                    assert all(call.update_index is None for call in phase_calls)
+                assert all(call.update_index is not None for call in phase_calls)
+                assert [
+                    run.updates[cast(int, call.update_index)].before.identifier
+                    for call in phase_calls
+                ] == [before.identifier] * expected
+                if before.name == "onlooker-before":
                     assert [
                         attempt.identifier
                         for attempt in run.algorithm.attempts
@@ -558,8 +553,8 @@ def test_cost_function_evaluation_budget_is_exact(
     run = run_bees(monkeypatch, small_bounds)
     assert_update_bijection(run)
     assert len(run.calls) == 3 + 2 * 3 * 3
-    assert sum(call.update_index is not None for call in run.calls) == 3 + 3 * 3
-    assert sum(call.update_index is None for call in run.calls) == 3 * 3
+    assert sum(call.update_index is not None for call in run.calls) == len(run.calls)
+    assert sum(call.update_index is None for call in run.calls) == 0
     for t in range(1, 4):
         pre = run.stage(t, "pre-before")
         employed = run.stage(t, "employed-cache")
@@ -617,15 +612,12 @@ def assert_neighbour(
     assert call.fitness == pytest.approx(
         objective(**expected), rel=STRICT_RTOL, abs=STRICT_ATOL
     )
-    if prefix == "employed":
-        assert call.update_index is not None
-        update = run.updates[call.update_index]
-        assert update.start == attempt.evaluation_index
-        assert update.before.identifier == attempt.identifier
-        assert update.before.trial_count == attempt.particle.trial_count + 1
-        assert update.before.random_cache == update.after.random_cache == cache
-    else:
-        assert call.update_index is None
+    assert call.update_index is not None
+    update = run.updates[call.update_index]
+    assert update.start == attempt.evaluation_index
+    assert update.before.identifier == attempt.identifier
+    assert update.before.trial_count == attempt.particle.trial_count + 1
+    assert update.before.random_cache == update.after.random_cache == cache
     return {"clipping" if raw < lower or raw > upper else "no-clipping"}
 
 
@@ -1181,7 +1173,7 @@ def test_classical_onlookers_allocate_only_to_infinite_minima(
         )
         assert after.evaluations - before.evaluations == 3
         phase_calls = run.calls[before.evaluations : after.evaluations]
-        assert all(call.update_index is None for call in phase_calls)
+        assert all(call.update_index is not None for call in phase_calls)
         assert [
             attempt.identifier
             for attempt in run.algorithm.attempts
