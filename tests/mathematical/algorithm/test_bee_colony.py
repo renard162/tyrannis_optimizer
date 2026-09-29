@@ -20,8 +20,10 @@ infinity fallbacks, clipping, synchronous shared partners, sequential local
 onlooker acceptance, strict trial > limit, default limit=N*D, scout replacement
 at the NEXT pre_iteration, and max_scouts as an explicit extension. These
 scheduling/extension choices are not attributed to the original paper.
-Every evaluation must enter through ParticleBase.update, including scouts and
-each individual onlooker. No RNG, candidate, counter or selection is replaced.
+Initialization, scout and employed evaluations enter through ParticleBase.update.
+Onlooker candidates are evaluated directly through the configured fitness function,
+matching the current sequential acceptance implementation. No RNG, candidate,
+counter or selection is replaced.
 """
 
 from collections.abc import Callable, Mapping
@@ -43,7 +45,6 @@ from tests._support.numerics import BASE_SEED, STRICT_ATOL, STRICT_RTOL, seed_fo
 from tests._support.objectives import constant_objective, sphere
 from tyrannis import Optimizer
 from tyrannis.algorithm.bee_colony import ABCParticle, BeeColony
-from tyrannis.core.algorithm import FitnessFunction
 from tyrannis.processor.serial import Serial
 from tyrannis.space.continuous import Continuous
 
@@ -238,7 +239,7 @@ def run_bees(
     def observed_update(
         particle: ABCParticle,
         variables: dict[str, float],
-        fitness_function: FitnessFunction,
+        fitness_function: Callable[[dict[str, float]], np.float64],
     ) -> None:
         nonlocal active_update
         assert active_update is None
@@ -284,10 +285,13 @@ def run_bees(
 
 
 def assert_update_bijection(run: Run) -> None:
-    assert len(run.calls) == len(run.updates)
-    for index, (call, update) in enumerate(zip(run.calls, run.updates, strict=True)):
+    indexed_calls = [call for call in run.calls if call.update_index is not None]
+    assert len(indexed_calls) == len(run.updates)
+    assert {call.update_index for call in indexed_calls} == set(range(len(run.updates)))
+    for index, update in enumerate(run.updates):
+        assert update.end == update.start + 1
+        call = run.calls[update.start]
         assert call.update_index == index
-        assert (update.start, update.end) == (index, index + 1)
         assert call.variables == update.variables == update.after.candidate_variables
         assert call.fitness == update.after.candidate_fitness
         assert update.before.variables == update.after.variables
@@ -340,19 +344,33 @@ def assert_evaluation_accounting(run: Run, sources: int, iterations: int) -> Non
                 expected = before.population[before.identifier].onlooker_count
             assert after.evaluations - before.evaluations == expected
             if expected:
-                assert [
-                    u.before.identifier
-                    for u in run.updates[before.evaluations : after.evaluations]
-                ] == [before.identifier] * expected
+                phase_calls = run.calls[before.evaluations : after.evaluations]
+                if before.name in ("initial-before", "employed-before"):
+                    assert all(call.update_index is not None for call in phase_calls)
+                    assert [
+                        run.updates[cast(int, call.update_index)].before.identifier
+                        for call in phase_calls
+                    ] == [before.identifier] * expected
+                else:
+                    assert before.name == "onlooker-before"
+                    assert all(call.update_index is None for call in phase_calls)
+                    assert [
+                        attempt.identifier
+                        for attempt in run.algorithm.attempts
+                        if before.evaluations
+                        <= attempt.evaluation_index
+                        < after.evaluations
+                    ] == [before.identifier] * expected
         if t:
             for key, particle in run.stage(t, "inter-after").population.items():
-                calls_for_source = sum(
-                    u.before.identifier == key
-                    for u in run.updates[stages[0].evaluations : stages[-1].evaluations]
+                attempts_for_source = sum(
+                    attempt.identifier == key
+                    and stages[0].evaluations
+                    <= attempt.evaluation_index
+                    < stages[-1].evaluations
+                    for attempt in run.algorithm.attempts
                 )
-                assert calls_for_source == 1 + particle.onlooker_count + (
-                    key in new_ids
-                )
+                assert attempts_for_source == 1 + particle.onlooker_count
     assert len(run.calls) == sources + 2 * sources * iterations + scout_total
 
 
@@ -540,6 +558,8 @@ def test_cost_function_evaluation_budget_is_exact(
     run = run_bees(monkeypatch, small_bounds)
     assert_update_bijection(run)
     assert len(run.calls) == 3 + 2 * 3 * 3
+    assert sum(call.update_index is not None for call in run.calls) == 3 + 3 * 3
+    assert sum(call.update_index is None for call in run.calls) == 3 * 3
     for t in range(1, 4):
         pre = run.stage(t, "pre-before")
         employed = run.stage(t, "employed-cache")
@@ -597,10 +617,15 @@ def assert_neighbour(
     assert call.fitness == pytest.approx(
         objective(**expected), rel=STRICT_RTOL, abs=STRICT_ATOL
     )
-    update = run.updates[attempt.evaluation_index]
-    assert update.before.identifier == attempt.identifier
-    assert update.before.trial_count == attempt.particle.trial_count + 1
-    assert update.before.random_cache == update.after.random_cache == cache
+    if prefix == "employed":
+        assert call.update_index is not None
+        update = run.updates[call.update_index]
+        assert update.start == attempt.evaluation_index
+        assert update.before.identifier == attempt.identifier
+        assert update.before.trial_count == attempt.particle.trial_count + 1
+        assert update.before.random_cache == update.after.random_cache == cache
+    else:
+        assert call.update_index is None
     return {"clipping" if raw < lower or raw > upper else "no-clipping"}
 
 
@@ -1155,9 +1180,12 @@ def test_classical_onlookers_allocate_only_to_infinite_minima(
             run.stage(1, "onlooker-after", key),
         )
         assert after.evaluations - before.evaluations == 3
+        phase_calls = run.calls[before.evaluations : after.evaluations]
+        assert all(call.update_index is None for call in phase_calls)
         assert [
-            u.before.identifier
-            for u in run.updates[before.evaluations : after.evaluations]
+            attempt.identifier
+            for attempt in run.algorithm.attempts
+            if before.evaluations <= attempt.evaluation_index < after.evaluations
         ] == [key] * 3
         assert {"multiple-onlookers", "no-onlooker"} <= witnessed
 
