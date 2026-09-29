@@ -41,9 +41,10 @@ def test_positional_single_interval_preserves_representation_for_decode_cache_an
     assert space.decode(encoded) == [-2.0]
     assert space.decode_cache(space.encode_cache([-2.0])) == [-2.0]
 
-    result = space(encoded)
-    assert result.dtype == np.dtype("float64")
-    assert result == -1.0
+    fitness, adjusted_variables = space(encoded)
+    assert fitness.dtype == np.dtype("float64")
+    assert fitness == -1.0
+    assert adjusted_variables is None
 
 
 def test_named_decode_preserves_mapping_and_accepts_both_boundary_endpoints() -> None:
@@ -91,10 +92,10 @@ def test_named_cache_key_is_canonical_and_cache_is_local_to_each_space(
         "x": -0.5,
         "y": 0.5,
     }
-    assert first({"x": -0.5, "y": 0.5}) == 1.0
-    assert first({"y": 0.5, "x": -0.5}) == 1.0
+    assert first({"x": -0.5, "y": 0.5}) == (np.float64(1.0), None)
+    assert first({"y": 0.5, "x": -0.5}) == (np.float64(1.0), None)
     assert counting_objective.calls == 1
-    assert second({"x": -0.5, "y": 0.5}) == 1.0
+    assert second({"x": -0.5, "y": 0.5}) == (np.float64(1.0), None)
     assert counting_objective.calls == 2
 
 

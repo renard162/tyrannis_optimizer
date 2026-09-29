@@ -48,10 +48,11 @@ def test_mixed_aggregates_named_spaces_and_routes_decoding_to_cost_function() ->
         "count": 2,
     }
 
-    value = space({"position": 1.25, "count": 2.0})
+    fitness, adjusted_variables = space({"position": 1.25, "count": 2.0})
 
-    assert value.dtype == np.dtype("float64")
-    assert value == pytest.approx(3.25, rel=STRICT_RTOL, abs=STRICT_ATOL)
+    assert fitness.dtype == np.dtype("float64")
+    assert fitness == pytest.approx(3.25, rel=STRICT_RTOL, abs=STRICT_ATOL)
+    assert adjusted_variables is None
 
 
 def test_mixed_groups_equivalent_spaces_without_losing_component_boundaries() -> None:
@@ -165,8 +166,8 @@ def test_mixed_cache_uses_the_composed_decoded_values(
     )
     space.initialize_context(seed=seed_for(507))
 
-    assert space({"count": 1.1, "enabled": 0.0}) == 1.0
-    assert space({"count": 1.2, "enabled": 0.0}) == 1.0
+    assert space({"count": 1.1, "enabled": 0.0}) == (np.float64(1.0), None)
+    assert space({"count": 1.2, "enabled": 0.0}) == (np.float64(1.0), None)
     assert counting_objective.calls == 1
 
 

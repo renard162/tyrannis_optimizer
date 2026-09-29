@@ -36,9 +36,10 @@ def test_positional_domain_and_evaluation_preserve_identity() -> None:
         encoded = {"1": y, "0": x}
         assert space.decode(encoded) == [x, y]
 
-        result = space(encoded)
-        assert type(result) is np.float64
-        assert result == 2.0 * x + 7.0 * y
+        fitness, adjusted_variables = space(encoded)
+        assert type(fitness) is np.float64
+        assert fitness == 2.0 * x + 7.0 * y
+        assert adjusted_variables is None
 
 
 def test_named_domain_and_evaluation_preserve_identity() -> None:
@@ -66,6 +67,7 @@ def test_named_domain_and_evaluation_preserve_identity() -> None:
         encoded = {"x": x, "y": y}
         assert space.decode(encoded) == {"x": x, "y": y}
 
-        result = space(encoded)
-        assert type(result) is np.float64
-        assert result == 2.0 * x + 7.0 * y
+        fitness, adjusted_variables = space(encoded)
+        assert type(fitness) is np.float64
+        assert fitness == 2.0 * x + 7.0 * y
+        assert adjusted_variables is None

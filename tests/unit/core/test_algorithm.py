@@ -1,6 +1,5 @@
 """Concrete state management shared by Tyrannis algorithms and particles."""
 
-from collections.abc import Callable
 from operator import methodcaller
 from typing import override
 
@@ -13,6 +12,8 @@ from tyrannis.core.algorithm import (
     FITNESS_UNDEFINED,
     AlgorithmBase,
     CostFunctionWrapperBase,
+    FitnessFunction,
+    FitnessFunctionResult,
     ParticleBase,
 )
 
@@ -35,7 +36,7 @@ class _Algorithm(AlgorithmBase[_Particle]):
         return self._max_iterations, self._n_particles
 
     @property
-    def configured_fitness(self) -> Callable[[dict[str, float]], np.float64]:
+    def configured_fitness(self) -> FitnessFunction:
         return self._fitness_function
 
     @property
@@ -83,8 +84,8 @@ class _Algorithm(AlgorithmBase[_Particle]):
         raise NotImplementedError
 
 
-def _fitness(variables: dict[str, float]) -> np.float64:
-    return np.float64(encoded_sphere(variables))
+def _fitness(variables: dict[str, float]) -> FitnessFunctionResult:
+    return np.float64(encoded_sphere(variables)), None
 
 
 def _initialized_algorithm() -> _Algorithm:
@@ -94,14 +95,16 @@ def _initialized_algorithm() -> _Algorithm:
 
 
 def test_cost_wrapper_forwards_arguments_and_result() -> None:
-    expected = np.float64(5.0)
+    expected: FitnessFunctionResult = np.float64(5.0), None
 
-    def objective(value: float, *, offset: float) -> np.float64:
-        assert value == 2.0
+    def objective(
+        variables: dict[str, float], *, offset: float = 0.0
+    ) -> FitnessFunctionResult:
+        assert variables == {"x": 2.0}
         assert offset == 3.0
         return expected
 
-    result = _CostFunctionWrapper(objective)(2.0, offset=3.0)
+    result = _CostFunctionWrapper(objective)({"x": 2.0}, offset=3.0)
 
     assert result is expected
 
@@ -236,7 +239,7 @@ def test_algorithm_configuration_wraps_fitness_and_propagates_seed() -> None:
     assert first.identifier == second.identifier == "algorithm"
     wrapped_fitness = first.configured_fitness
     assert isinstance(wrapped_fitness, _CostFunctionWrapper)
-    assert wrapped_fitness({"x": 2.0}) == np.float64(4.0)
+    assert wrapped_fitness({"x": 2.0}) == (np.float64(4.0), None)
     assert first.rng.random(3).tolist() == second.rng.random(3).tolist()
 
 

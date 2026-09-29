@@ -83,7 +83,7 @@ def test_disabled_cache_ignores_inert_configuration(
     space = SimpleSpace(use_cache=False, cache_type="disk", cache_size=0)
     space.initialize_context()
 
-    assert space({"x": 0.0, "y": 1.0}) == 1.0
+    assert space({"x": 0.0, "y": 1.0}) == (np.float64(1.0), None)
 
 
 @pytest.mark.parametrize(
@@ -170,10 +170,11 @@ def test_call_decodes_and_normalizes_fitness(is_kwargs: bool) -> None:
     space = SimpleSpace(is_kwargs=is_kwargs)
     space.initialize_context()
 
-    result = space({"x": -1.0, "y": 2.0})
+    fitness, adjusted_variables = space({"x": -1.0, "y": 2.0})
 
-    assert type(result) is np.float64
-    assert result == 5.0
+    assert type(fitness) is np.float64
+    assert fitness == 5.0
+    assert adjusted_variables is None
 
 
 def test_call_requires_cost_function() -> None:
@@ -189,11 +190,11 @@ def test_lru_cache_reuses_same_key_and_evaluates_new_key(
     space = SimpleSpace(cost_function=counting_objective, use_cache=True)
     space.initialize_context()
 
-    assert space({"x": 0.0, "y": 1.0}) == 1.0
+    assert space({"x": 0.0, "y": 1.0}) == (np.float64(1.0), None)
     assert counting_objective.calls == 1
-    assert space({"x": 0.0, "y": 1.0}) == 1.0
+    assert space({"x": 0.0, "y": 1.0}) == (np.float64(1.0), None)
     assert counting_objective.calls == 1
-    assert space({"x": 1.0, "y": 1.0}) == 1.0
+    assert space({"x": 1.0, "y": 1.0}) == (np.float64(1.0), None)
     assert counting_objective.calls == 2
 
 
@@ -216,11 +217,11 @@ def test_configured_cache_reuses_same_key_and_evaluates_new_key(
     )
     space.initialize_context()
 
-    assert space({"x": 0.0, "y": 1.0}) == 1.0
+    assert space({"x": 0.0, "y": 1.0}) == (np.float64(1.0), None)
     assert counting_objective.calls == 1
-    assert space({"x": 0.0, "y": 1.0}) == 1.0
+    assert space({"x": 0.0, "y": 1.0}) == (np.float64(1.0), None)
     assert counting_objective.calls == 1
-    assert space({"x": 1.0, "y": 1.0}) == 1.0
+    assert space({"x": 1.0, "y": 1.0}) == (np.float64(1.0), None)
     assert counting_objective.calls == 2
 
 
