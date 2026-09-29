@@ -1,7 +1,6 @@
-from collections.abc import Callable
 from typing import TypeAlias, cast
 
-from ..core.space import SpaceBase
+from ..core.space import CostFunction, SpaceBase
 from . import register_space
 
 Boundary: TypeAlias = tuple[float, float]
@@ -16,7 +15,7 @@ class Continuous(SpaceBase):
     def __init__(
         self,
         boundaries: Boundaries | Boundary,
-        cost_function: Callable[..., float] | None = None,
+        cost_function: CostFunction | None = None,
         use_cache: bool = False,
         cache_type: str = "lru",
         cache_size: int = 100_000,
@@ -45,10 +44,10 @@ class Continuous(SpaceBase):
         cost_function:
             User-defined cost function evaluated after decoding the solver
             inputs into their user-facing representation. This argument is
-            required when the space is used independently. It does not need
-            to be provided when the space is used as a component of a
-            ``Mixed`` space, because in that case the cost function is
-            provided to the ``Mixed`` space itself.
+            required when the space is used independently. It does not need to
+            be provided when the space is used as a component of a ``Mixed``
+            space, because in that case the cost function is provided to the
+            ``Mixed`` space itself.
 
         use_cache:
             Whether cost-function evaluations should be cached. When

@@ -6,9 +6,12 @@ from multiprocessing import Event, get_all_start_methods, get_context
 from typing import Any
 
 import cloudpickle
-import numpy as np
 
-from ..core.algorithm import CostFunctionWrapperBase
+from ..core.algorithm import (
+    CostFunctionWrapperBase,
+    FitnessFunction,
+    FitnessFunctionResult,
+)
 from ..core.processor import ProcessorBase, evaluate_particle
 from ..core.signals import EventProtocol
 
@@ -16,11 +19,11 @@ from ..core.signals import EventProtocol
 class ProcessPoolCostFunctionWrapper(CostFunctionWrapperBase):
     """Process pool processor cost-function wrapper with cloudpickle-based serialization."""
 
-    def __init__(self, function: Callable[..., float]) -> None:
+    def __init__(self, function: FitnessFunction) -> None:
         self._serialized_function = cloudpickle.dumps(function)
-        self._function: Callable[..., float] | None = None
+        self._function: FitnessFunction | None = None
 
-    def __call__(self, *args: Any, **kwargs: Any) -> np.float64:
+    def __call__(self, *args: Any, **kwargs: Any) -> FitnessFunctionResult:
         if self._function is None:
             self._function = cloudpickle.loads(self._serialized_function)
 

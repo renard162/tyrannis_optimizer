@@ -1,11 +1,10 @@
 import warnings
-from collections.abc import Callable
 from typing import Any, TypeAlias, cast
 
 import numpy as np
 from scipy.special import expit
 
-from ..core.space import SpaceBase
+from ..core.space import CostFunction, SpaceBase
 from . import register_space
 
 CacheKey: TypeAlias = tuple[bool, ...] | tuple[tuple[str, bool], ...]
@@ -25,7 +24,7 @@ class Binary(SpaceBase):
     def __init__(
         self,
         bits: int | list[str] | None = None,
-        cost_function: Callable[..., float] | None = None,
+        cost_function: CostFunction | None = None,
         decoder: str = "angle_modulation",
         bounds: Limits | None = None,
         params: dict[str, Any] | None = None,
@@ -102,8 +101,8 @@ class Binary(SpaceBase):
             local to the current runtime and are not preserved through serialization.
             - ``"lfu"``: Least Frequently Used cache. Requires the optional
             dependencies for advanced caching.
-            - ``"fifo"``: First In, First Out cache. Requires the optional
-            dependencies for advanced caching.
+            - ``"fifo"``: First In, First Out cache. Requires the optional dependencies
+            for advanced caching.
             - ``"rr"``: Random Replacement cache. Requires the optional dependencies
             for advanced caching.
 

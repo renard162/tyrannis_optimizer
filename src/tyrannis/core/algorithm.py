@@ -20,14 +20,17 @@ Serializable: TypeAlias = (
 
 FITNESS_UNDEFINED: np.float64 = np.float64(np.inf)
 
+FitnessFunctionResult: TypeAlias = tuple[np.float64, dict[str, float] | None]
+FitnessFunction: TypeAlias = Callable[[dict[str, float]], FitnessFunctionResult]
+
 
 class CostFunctionWrapperBase(ABC):
     """Neutral wrapper for a cost function."""
 
-    def __init__(self, function: Callable[..., np.float64]) -> None:
+    def __init__(self, function: FitnessFunction) -> None:
         self._function = function
 
-    def __call__(self, *args: Any, **kwargs: Any) -> np.float64:
+    def __call__(self, *args: Any, **kwargs: Any) -> FitnessFunctionResult:
         function = self._function
         return function(*args, **kwargs)
 
@@ -152,17 +155,54 @@ class ParticleBase(ABC):
         return json.dumps(self())
 
     def update(
-        self,
-        variables: dict[str, float],
-        fitness_function: Callable[[dict[str, float]], np.float64],
+        self, variables: dict[str, float], fitness_function: FitnessFunction
     ) -> None:
+        """
+        Evaluate and store a candidate solution.
+
+        This method is the single entry point for every cost-function evaluation
+        performed by an optimization algorithm. All fitness evaluations,
+        including those performed during ``initialize_particle``,
+        ``update_particle``, and ``second_update_particle``, must be executed by
+        calling ``ParticleBase.update`` or the corresponding inherited
+        implementation.
+
+        Algorithm implementations must never invoke the fitness function
+        directly. This requirement also applies when an algorithm performs
+        multiple evaluations of the same particle during one iteration or uses
+        intermediate candidate states, such as greedy selection or a second
+        particle-processing phase. Each candidate that requires evaluation must
+        be passed through this method before its fitness is inspected or used by
+        the algorithm.
+
+        Centralizing evaluation here is required because the fitness function
+        may return both the evaluated fitness and an adjusted version of the
+        candidate variables. When adjusted variables are returned, they
+        represent the candidate associated with the returned fitness and must
+        replace the originally proposed variables. Bypassing this method would
+        therefore allow a fitness value to become associated with a different
+        candidate state from the one that was actually evaluated.
+
+        When no adjusted variables are returned, the original ``variables`` are
+        stored as the candidate state. This preserves the conventional
+        evaluation behavior for cost functions that do not modify the evaluated
+        candidate.
+
+        The method only stores the evaluated candidate state. It does not
+        consolidate that state into the particle's current variables or fitness;
+        consolidation remains the responsibility of the algorithm lifecycle.
+        """
         if variables is None:
             raise ValueError("Variables cannot be None.")
 
         self._candidate_variables = None
         self._candidate_fitness = None
-        self._candidate_variables = variables
-        self._candidate_fitness = fitness_function(variables)
+
+        fitness, adjusted_variables = fitness_function(variables)
+        self._candidate_variables = (
+            variables if adjusted_variables is None else adjusted_variables
+        )
+        self._candidate_fitness = fitness
 
     def consolidate(self, consolidate_new: bool) -> None:
         if (self._candidate_variables is None) or (self._candidate_fitness is None):
@@ -266,7 +306,7 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
 
     def initialize_context(
         self,
-        fitness_function: Callable[[dict[str, float]], np.float64],
+        fitness_function: FitnessFunction,
         boundaries: dict[str, tuple[float, float]],
         n_iter: int,
         n_particles: int,

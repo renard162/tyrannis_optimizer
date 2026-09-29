@@ -1,12 +1,12 @@
 import warnings
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from typing import Any, TypeAlias, cast
 
 import numpy as np
 from scipy.special import softmax
 from scipy.stats import gumbel_r
 
-from ..core.space import SpaceBase
+from ..core.space import CostFunction, SpaceBase
 from . import register_space
 
 Choice: TypeAlias = Any
@@ -28,7 +28,7 @@ class Categorical(SpaceBase):
     def __init__(
         self,
         choices: Choices | Boundaries,
-        cost_function: Callable[..., float] | None = None,
+        cost_function: CostFunction | None = None,
         decoder: str = "one-hot",
         bounds: tuple[float, float] | None = None,
         params: dict[str, Any] | None = None,
@@ -133,8 +133,8 @@ class Categorical(SpaceBase):
             local to the current runtime and are not preserved through serialization.
             - ``"lfu"``: Least Frequently Used cache. Requires the optional
             dependencies for advanced caching.
-            - ``"fifo"``: First In, First Out cache. Requires the optional
-            dependencies for advanced caching.
+            - ``"fifo"``: First In, First Out cache. Requires the optional dependencies
+            for advanced caching.
             - ``"rr"``: Random Replacement cache. Requires the optional dependencies
             for advanced caching.
 

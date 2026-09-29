@@ -1,10 +1,10 @@
-from collections.abc import Callable, Collection, Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from enum import Enum
 from typing import Any, ClassVar, TypeAlias
 
 import numpy as np
 
-from ..core.space import SpaceBase
+from ..core.space import CostFunction, SpaceBase
 from . import register_space
 from .categorical import Categorical
 from .ordinal import Ordinal
@@ -63,7 +63,7 @@ class Sequence(SpaceBase):
         stop_positions: StopPositions | None = None,
         decoder: str | None = None,
         params: dict[str, Any] | None = None,
-        cost_function: Callable[..., float] | None = None,
+        cost_function: CostFunction | None = None,
         use_cache: bool = False,
         cache_type: str = "lru",
         cache_size: int = 100_000,

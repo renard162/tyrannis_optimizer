@@ -7,7 +7,7 @@ from typing import Any, TypeAlias, cast
 import numpy as np
 from scipy.special import expit, ndtr, softmax
 
-from ..core.space import SpaceBase
+from ..core.space import CostFunction, SpaceBase
 from . import register_space
 
 Choice: TypeAlias = Any
@@ -36,7 +36,7 @@ class Ordinal(SpaceBase):
     def __init__(
         self,
         choices: Choices | Boundaries,
-        cost_function: Callable[..., float] | None = None,
+        cost_function: CostFunction | None = None,
         positions: Positions | PositionBoundaries | None = None,
         decoder: str = "rank",
         params: dict[str, Any] | None = None,
@@ -135,7 +135,7 @@ class Ordinal(SpaceBase):
             parameters are:
 
             ``temperature``:
-                Controls the stochasticity of the ``"cumulative-logit"``,
+                Controls the stochasticity of the ``"cumulative-logit"``、
                 ``"cumulative-probit"``, and ``"distance-softmax"`` decoders.
                 Lower values concentrate probability more strongly around
                 nearby ordinal levels, while higher values produce broader
@@ -154,8 +154,8 @@ class Ordinal(SpaceBase):
             local to the current runtime and are not preserved through serialization.
             - ``"lfu"``: Least Frequently Used cache. Requires the optional
             dependencies for advanced caching.
-            - ``"fifo"``: First In, First Out cache. Requires the optional
-            dependencies for advanced caching.
+            - ``"fifo"``: First In, First Out cache. Requires the optional dependencies
+            for advanced caching.
             - ``"rr"``: Random Replacement cache. Requires the optional dependencies
             for advanced caching.
 

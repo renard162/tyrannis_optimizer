@@ -1,9 +1,17 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from importlib.util import find_spec
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypeAlias
 
 import numpy as np
+
+CostFunctionResult: TypeAlias = tuple[np.float64, dict[str, Any] | None]
+CostFunctionOutput: TypeAlias = (
+    float | np.float64 | tuple[float | np.float64, dict[str, Any] | None]
+)
+CostFunction: TypeAlias = Callable[..., CostFunctionOutput]
+CachedCostFunction: TypeAlias = Callable[[Any], CostFunctionResult]
+SpaceResult: TypeAlias = tuple[np.float64, dict[str, float] | None]
 
 
 class SpaceBase(ABC):
@@ -72,7 +80,7 @@ class SpaceBase(ABC):
     _type: str
     _configs: dict[str, Any]
     _boundaries: Any
-    _cost_function: Callable[..., float] | None
+    _cost_function: CostFunction | None
     _args: tuple[Any, ...]
     _kwargs: dict[str, Any]
     _encoded_boundaries: dict[str, tuple[float, float]]
@@ -80,7 +88,7 @@ class SpaceBase(ABC):
     _is_kwargs: bool
     _cache_type: str
     _cache_size: int
-    _cached_cost_function: Callable[[Any], float] | None
+    _cached_cost_function: CachedCostFunction | None
 
     _CACHE_DEPENDENCIES: ClassVar[dict[str, str | None]] = {
         "lru": None,
@@ -100,7 +108,7 @@ class SpaceBase(ABC):
 
     def __init__(
         self,
-        cost_function: Callable[..., float] | None,
+        cost_function: CostFunction | None,
         use_cache: bool = False,
         cache_type: str = "lru",
         cache_size: int = 100_000,
@@ -320,15 +328,81 @@ class SpaceBase(ABC):
                     f"the boundaries ({lower}, {upper})."
                 )
 
-    def __call__(self, float_inputs: dict[str, float]) -> np.float64:
+    def __call__(self, float_inputs: dict[str, float]) -> SpaceResult:
         """
         Evaluate the cost function using the supplied encoded variables.
 
-        The encoded variables are first decoded into the representation
-        expected by the user-defined cost function. When caching is disabled,
-        the cost function is evaluated directly. When caching is enabled, the
-        decoded representation is converted into a canonical cache key and
-        the cached evaluation is used.
+        The input received by this method is always expressed in the continuous
+        representation used internally by the optimization algorithms. Before
+        evaluating the user-defined cost function, these encoded variables are
+        decoded into the representation defined by the concrete search space
+        through :meth:`decode`.
+
+        The decoded values therefore correspond to the actual candidate
+        solution in the domain of the optimization problem. Depending on the
+        concrete space, this representation may contain continuous values,
+        integers, binary values, categories, permutations, or any other
+        representation supported by the space.
+
+        When caching is disabled, the decoded candidate is evaluated directly.
+        When caching is enabled, the decoded representation is first converted
+        into a canonical cache key through :meth:`encode_cache`. The cached
+        evaluation is then retrieved when the key is already known or computed
+        through the normal evaluation path when the key is not present in the
+        cache.
+
+        The cache operates exclusively on the representation received by the
+        cost function rather than on the encoded continuous representation
+        used internally by the optimizer. Consequently, different continuous
+        positions that decode to the same candidate share the same cached
+        evaluation.
+
+        A cost-function evaluation may optionally return an adjusted version of
+        its input candidate in addition to the fitness value. This mechanism is
+        intended for applications in which evaluating a candidate can provide
+        information that legitimately modifies that candidate before its state
+        is consolidated by the optimization algorithm.
+
+        Such adjustments occur in the domain of the cost function. They are
+        therefore not, in general, directly usable as the continuous variables
+        stored by a particle. A concrete space that supports this behavior is
+        responsible for converting the adjusted candidate back into a valid
+        continuous representation before returning it to the optimization
+        core.
+
+        The base implementation does not define such a reverse conversion.
+        Consequently, it returns ``None`` as the second result even when the
+        internal cost-function evaluation is capable of returning adjusted
+        inputs. Concrete spaces that support candidate adjustment must override
+        this method and translate the adjusted cost-function inputs into the
+        corresponding continuous coordinates.
+
+        A relevant example is compatibility with SysIdentPy model-structure
+        selection. A binary candidate may represent the regressors selected for
+        a NARX model. During evaluation, a statistical procedure such as a
+        Student's t-test may determine that some selected regressors should be
+        removed. The cost-function evaluation can return the resulting adjusted
+        binary structure together with its fitness. A specialized binary space
+        can then map that modified structure back into the continuous
+        representation used by the optimization algorithm, allowing the
+        corrected candidate position to be consolidated without requiring the
+        cost function to know how the optimizer internally represents binary
+        variables.
+
+        When the cost function does not modify the candidate, the second return
+        value is ``None`` and the optimization flow remains unchanged. The
+        particle therefore retains the continuous candidate variables originally
+        supplied to this method.
+
+        Returns
+        -------
+        tuple[np.float64, dict[str, float] | None]
+            A tuple containing the evaluated fitness and, optionally, an
+            adjusted candidate expressed in the continuous representation of
+            the space. The second value is ``None`` when no candidate adjustment
+            is produced or when the concrete space does not implement the
+            conversion of adjusted cost-function inputs back into continuous
+            coordinates.
         """
         if self._cost_function is None:
             raise ValueError("cost_function cannot be None.")
@@ -336,33 +410,42 @@ class SpaceBase(ABC):
         inputs = self.decode(float_inputs)
 
         if not self._use_cache:
-            return np.float64(self._evaluate(inputs))
+            fitness, _ = self._evaluate(inputs)
+            return fitness, None
 
         cache_key = self.encode_cache(inputs)
         cached_cost_function = self._get_cached_cost_function()
+        fitness, _ = cached_cost_function(cache_key)
 
-        return np.float64(cached_cost_function(cache_key))
+        return fitness, None
 
-    def _evaluate(self, inputs: Any) -> float:
+    def _evaluate(self, inputs: Any) -> CostFunctionResult:
         """
         Evaluate the user-defined cost function using the configured calling
         convention.
         """
         if self._cost_function is None:
             raise RuntimeError("self._cost_function cannot be None.")
+
         if self._is_kwargs:
-            return self._cost_function(**inputs)
+            result = self._cost_function(**inputs)
+        else:
+            result = self._cost_function(*inputs)
 
-        return self._cost_function(*inputs)
+        if isinstance(result, tuple):
+            fitness, adjusted_inputs = result
+            return np.float64(fitness), adjusted_inputs
 
-    def _evaluate_cache_key(self, cache_key: Any) -> float:
+        return np.float64(result), None
+
+    def _evaluate_cache_key(self, cache_key: Any) -> CostFunctionResult:
         """
         Decode a cache key and evaluate the user-defined cost function.
         """
         inputs = self.decode_cache(cache_key)
         return self._evaluate(inputs)
 
-    def _get_cached_cost_function(self) -> Callable[[Any], float]:
+    def _get_cached_cost_function(self) -> CachedCostFunction:
         """
         Return the runtime cache wrapper, creating it on first use.
         """
@@ -371,7 +454,7 @@ class SpaceBase(ABC):
 
         return self._cached_cost_function
 
-    def _create_cached_cost_function(self) -> Callable[[Any], float]:
+    def _create_cached_cost_function(self) -> CachedCostFunction:
         """
         Create the configured cache wrapper for the cost function.
         """
@@ -417,9 +500,9 @@ class SpaceBase(ABC):
 
     @staticmethod
     def _create_lru_cache(
-        function: Callable[[Any], float],
+        function: CachedCostFunction,
         cache_size: int,
-    ) -> Callable[[Any], float]:
+    ) -> CachedCostFunction:
         """
         Create an LRU cache using the Python standard library.
 
@@ -432,9 +515,9 @@ class SpaceBase(ABC):
 
     @staticmethod
     def _create_lfu_cache(
-        function: Callable[[Any], float],
+        function: CachedCostFunction,
         cache_size: int,
-    ) -> Callable[[Any], float]:
+    ) -> CachedCostFunction:
         """
         Create an LFU cache using cachetools.
 
@@ -460,9 +543,9 @@ class SpaceBase(ABC):
 
     @staticmethod
     def _create_fifo_cache(
-        function: Callable[[Any], float],
+        function: CachedCostFunction,
         cache_size: int,
-    ) -> Callable[[Any], float]:
+    ) -> CachedCostFunction:
         """
         Create a FIFO cache using cachetools.
 
@@ -488,9 +571,9 @@ class SpaceBase(ABC):
 
     @staticmethod
     def _create_rr_cache(
-        function: Callable[[Any], float],
+        function: CachedCostFunction,
         cache_size: int,
-    ) -> Callable[[Any], float]:
+    ) -> CachedCostFunction:
         """
         Create a random-replacement cache using cachetools.
 
@@ -516,9 +599,9 @@ class SpaceBase(ABC):
 
     @staticmethod
     def _create_disk_cache(
-        function: Callable[[Any], float],
+        function: CachedCostFunction,
         cache_size: int,
-    ) -> Callable[[Any], float]:
+    ) -> CachedCostFunction:
         """
         Create a disk-backed cache using joblib.
 
@@ -533,14 +616,14 @@ class SpaceBase(ABC):
         temporary_directory = TemporaryDirectory(prefix="tyrannis_cache_")
         memory = Memory(location=temporary_directory.name, verbose=0)
 
-        def evaluate(cache_key: Any) -> float:
+        def evaluate(cache_key: Any) -> CostFunctionResult:
             return function(cache_key)
 
         cached = memory.cache(evaluate)
 
-        def cached_function(cache_key: Any) -> float:
+        def cached_function(cache_key: Any) -> CostFunctionResult:
             _ = temporary_directory
-            return cast(float, cached(cache_key))
+            return cast(CostFunctionResult, cached(cache_key))
 
         return cached_function
 

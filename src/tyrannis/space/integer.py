@@ -1,11 +1,10 @@
 import warnings
-from collections.abc import Callable
 from typing import Any, TypeAlias, cast
 
 import numpy as np
 from scipy.special import expit
 
-from ..core.space import SpaceBase
+from ..core.space import CostFunction, SpaceBase
 from . import register_space
 
 Boundary: TypeAlias = tuple[int, int]
@@ -26,7 +25,7 @@ class Integer(SpaceBase):
     def __init__(
         self,
         boundaries: Boundaries,
-        cost_function: Callable[..., float] | None = None,
+        cost_function: CostFunction | None = None,
         decoder: str = "round",
         custom_bounds: tuple[float, float] | None = None,
         params: dict[str, Any] | None = None,
@@ -104,8 +103,8 @@ class Integer(SpaceBase):
             local to the current runtime and are not preserved through serialization.
             - ``"lfu"``: Least Frequently Used cache. Requires the optional
             dependencies for advanced caching.
-            - ``"fifo"``: First In, First Out cache. Requires the optional
-            dependencies for advanced caching.
+            - ``"fifo"``: First In, First Out cache. Requires the optional dependencies
+            for advanced caching.
             - ``"rr"``: Random Replacement cache. Requires the optional dependencies
             for advanced caching.
 

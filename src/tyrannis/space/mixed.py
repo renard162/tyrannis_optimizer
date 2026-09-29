@@ -1,8 +1,7 @@
 import json
-from collections.abc import Callable
 from typing import Any
 
-from ..core.space import SpaceBase
+from ..core.space import CostFunction, SpaceBase
 from . import get_space_class
 
 
@@ -17,7 +16,7 @@ class Mixed(SpaceBase):
     def __init__(
         self,
         spaces: dict[str, SpaceBase],
-        cost_function: Callable[..., float],
+        cost_function: CostFunction,
         use_cache: bool = False,
         cache_type: str = "lru",
         cache_size: int = 100_000,
