@@ -1,6 +1,6 @@
 [project]
 name = "tyrannis"
-version = "0.1.0a3"
+version = "0.1.0a4"
 description = "Flexible population-based metaheuristic optimization framework supporting diverse search spaces, parallel and distributed execution, and island-model migration."
 readme = "README.md"
 license = { file = "LICENSE" }

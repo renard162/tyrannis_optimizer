@@ -117,7 +117,7 @@ Migration strategies define how solutions are exchanged between optimization isl
 
 When no migration strategy is provided for an island-based backend, the islands remain isolated and do not exchange solutions.
 
-## Examples
+## Usage
 
 ### Basic optimization
 
@@ -206,6 +206,64 @@ print(optimizer.best_fitness)
 
 In this example, no backend is specified, so the optimization runs locally. The `Joblib` processor parallelizes particle evaluation across the available CPUs.
 
+### Spark backends
+
+The Spark backends require an active `SparkSession`, which is passed directly to the backend. In Databricks, the preconfigured `spark` session can be used directly. `SparkParallel` keeps a single optimization population and is compatible with Databricks compute, including Serverless when `spark_code_archive` is not required. Because updated particle data is collected by the driver during every iteration, communication overhead can become significant; workloads with larger populations and fewer iterations are therefore generally more appropriate.
+
+```python
+from tyrannis.backend import SparkParallel
+
+backend = SparkParallel(spark)
+
+optimizer = Optimizer(
+    space=space,
+    algorithm=algorithm,
+    n_iterations=50,
+    n_particles=300,
+    backend=backend
+)
+```
+
+`SparkDistributed` creates independent optimization islands, with their number explicitly defined by `n_executors`. Since each island performs its optimization locally, it avoids the per-iteration particle-transfer overhead of `SparkParallel`. In Databricks, this backend **does not work with Serverless compute** and therefore requires a cluster. It has been tested with **Access Mode Dedicated** (formerly Single User) and does not work with **Access Mode Shared**. **Access Mode No Isolation** has not been tested. A typical Databricks use case is execution through Jobs using `job_clusters`, which can be configured with Dedicated access mode. When the available executor count is unknown, using the number of worker machines as the initial value for `n_executors` is a reasonable approximation.
+
+```python
+from tyrannis.backend import SparkDistributed
+
+backend = SparkDistributed(spark, n_executors=4)
+```
+
+### MPI backends
+
+MPI backends are configured in the optimizer normally, but the script must be executed through an MPI runtime using the corresponding `tyrannis-mpi` mode. `MPIParallel` keeps a single population on rank 0 and distributes particle processing among the remaining ranks. For this backend, the recommended topology is **one MPI rank per available CPU core**, allowing particle evaluations to be distributed across the available processing capacity.
+
+```python
+from tyrannis.backend import MPIParallel
+
+backend = MPIParallel()
+```
+
+A typical execution with OpenMPI is:
+
+```bash
+mpiexec --map-by core -n <total-ranks> tyrannis-mpi parallel optimizer.py
+```
+
+`MPIDistributed` reserves rank 0 for the driver and assigns one complete optimization island to each remaining MPI rank. For this backend, the recommended topology is **one MPI rank per machine or node**, so each island can use the resources of its machine independently through its configured Tyrannis processor. The number of islands is therefore equal to the total number of MPI ranks minus one.
+
+```python
+from tyrannis.backend import MPIDistributed
+
+backend = MPIDistributed()
+```
+
+A typical distributed execution is:
+
+```bash
+mpiexec --map-by ppr:1:node -n <total-ranks> tyrannis-mpi distributed optimizer.py
+```
+
+For additional execution options and usage details, run `tyrannis-mpi --help`.
+
 ## Status
 
 Tyrannis is currently in the **alpha stage of development**. The core architecture, multiple optimization algorithms, heterogeneous search spaces, local and parallel processors, Spark backends, and migration strategies are already implemented, while the API and implementation continue to evolve.
@@ -234,7 +292,9 @@ The roadmap below lists capabilities that are **not yet part of the current publ
 
 #### Testing
 
-* Construction and maintenance of unit tests
+* Mathematical integrity tests for all algorithms completed
+* Completion and maintenance of mathematical tests for spaces
+* Completion and maintenance of unit tests
 * Construction and maintenance of integration tests
 * Increased coverage of algorithms, spaces, processors, backends, and migration strategies
 * Validation of distributed execution behavior
