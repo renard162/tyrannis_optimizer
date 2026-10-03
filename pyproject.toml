@@ -3,7 +3,8 @@ name = "tyrannis"
 version = "0.1.0a4"
 description = "Flexible population-based metaheuristic optimization framework supporting diverse search spaces, parallel and distributed execution, and island-model migration."
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 authors = [
     { name = "Samuel Carlos Pessoa Oliveira" }
 ]
@@ -12,7 +13,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: BSD License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
