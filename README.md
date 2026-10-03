@@ -230,6 +230,14 @@ optimizer = Optimizer(
 from tyrannis.backend import SparkDistributed
 
 backend = SparkDistributed(spark, n_executors=4)
+
+optimizer = Optimizer(
+    space=space,
+    algorithm=algorithm,
+    n_iterations=300,
+    n_particles=50,
+    backend=backend
+)
 ```
 
 ### MPI backends
