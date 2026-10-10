@@ -179,16 +179,22 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         Experimental Results in Function Optimization with EDAs in Continuous
         Domain. In Estimation of Distribution Algorithms: A New Tool for
         Evolutionary Computation, 181-194. Springer.
-        DOI 10.1007/978-1-4615-1539-5_8
+        https://doi.org/10.1007/978-1-4615-1539-5_8
 
         Geiger, D., & Heckerman, D. (1994). Learning Gaussian Networks.
         Uncertainty Proceedings 1994, 235-243.
-        DOI 10.1016/B978-1-55860-332-5.50035-3
+        https://doi.org/10.1016/B978-1-55860-332-5.50035-3
 
         Smith, P. W. F., & Whittaker, J. (1998). Edge Exclusion Tests for
         Graphical Gaussian Models. In M. I. Jordan (Ed.), Learning in Graphical
         Models, 555-574. Springer.
-        DOI 10.1007/978-94-011-5014-9_21
+        https://doi.org/10.1007/978-94-011-5014-9_21
+
+        Soloviev, V. P., Bielza, C., & Larrañaga, P. (2024).
+        Semiparametric Estimation of Distribution Algorithms for Continuous
+        Optimization. IEEE Transactions on Evolutionary Computation, 28(4),
+        1069-1083.
+        https://doi.org/10.1109/TEVC.2023.3290670
         """
         if not isinstance(selection_fraction, (int, float, np.number)) or isinstance(
             selection_fraction, (bool, np.bool_)
