@@ -736,13 +736,14 @@ class EGNA(AlgorithmBase[EGNAParticle]):
                     -(partial_correlation * partial_correlation)
                 )
                 cdf = float(chi2.cdf(statistic, df=1))
-                correction = (
-                    0.5
-                    * (2 * n_variables + 1)
-                    * statistic
-                    * float(chi2.pdf(statistic, df=1))
-                    / n_samples
+
+                statistic_density_product = np.sqrt(statistic / (2.0 * np.pi)) * np.exp(
+                    -0.5 * statistic
                 )
+                correction = (
+                    0.5 * (2 * n_variables + 1) * statistic_density_product / n_samples
+                )
+
                 corrected_cdf = float(np.clip(cdf - correction, 0.0, 1.0))
                 p_value = 1.0 - corrected_cdf
 
