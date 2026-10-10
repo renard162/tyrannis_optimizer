@@ -174,6 +174,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         Optimization in Continuous Domains by Learning and Simulation of Gaussian
         Networks. Workshop on Optimization by Building and Using Probabilistic
         Models, GECCO 2000, 201-204.
+        https://www.researchgate.net/publication/290129690_Optimization_in_continuous_domains_by_learning_and_simulation_of_Gaussian_networks
 
         Bengoetxea, E., Miquélez, T., Larrañaga, P., & Lozano, J. A. (2002).
         Experimental Results in Function Optimization with EDAs in Continuous

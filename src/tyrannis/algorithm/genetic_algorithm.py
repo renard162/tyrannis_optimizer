@@ -240,6 +240,7 @@ class GeneticAlgorithm(AlgorithmBase[GAParticle]):
 
         Deb, K., & Agrawal, R. B. (1995). Simulated binary crossover for continuous
         search space. Complex Systems, 9, 115-148.
+        https://www.complex-systems.com/abstracts/v09_i02_a02
 
         Deb, K., & Deb, D. (2014). Analysing mutation schemes for real-parameter
         genetic algorithms. International Journal of Artificial Intelligence and Soft

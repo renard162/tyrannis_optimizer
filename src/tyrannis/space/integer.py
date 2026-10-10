@@ -121,10 +121,12 @@ class Integer(SpaceBase):
         Swarm Intelligence Symposium, 1-7.
         https://doi.org/10.1109/SIS.2008.4668293
 
-        Pampara, G., Franken, N., & Engelbrecht, A. P. (2009). Novel
-        Mutative Particle Swarm Optimization Algorithm for Discrete
-        Optimization. Proceedings of the 2009 IEEE Congress on Evolutionary
-        Computation.
+        Yassin, I. M., Tahir, N. M., Mohd Salleh, M. K., Hassan, H. A.,
+        Zabidi, A., & Zainol Abidin, H. (2009). Novel Mutative Particle
+        Swarm Optimization Algorithm for Discrete Optimization.
+        Proceedings of the 2009 International Conference on Genetic and
+        Evolutionary Methods (GEM 2009), 137-142.
+        https://www.researchgate.net/publication/220862316_Novel_Mutative_Particle_Swarm_Optimization_Algorithm_for_Discrete_Optimization
 
         Connolly, M. P., Higham, N. J., & Mary, T. (2021). Stochastic rounding
         and its probabilistic backward error analysis. SIAM Journal on
@@ -133,7 +135,8 @@ class Integer(SpaceBase):
 
         Chen, C.-H. (2010). Hierarchical Swarm Model: A New Approach to
         Optimization. Discrete Dynamics in Nature and Society, 2010,
-        379649. https://doi.org/10.1155/2010/379649
+        379649.
+        https://doi.org/10.1155/2010/379649
         """
         super().__init__(
             cost_function=cost_function,
