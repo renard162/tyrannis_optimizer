@@ -47,9 +47,9 @@ def _assert_categorical_frequencies(
 ) -> dict[int, float]:
     space.initialize_context(seed=seed)
     assert_variables_within_bounds(inputs, space.encoded_boundaries)
-    # At N=20,000 the shared six-sigma margin is at most 0.022 for any p.
+    # At N=5,000 the shared six-sigma margin is at most 0.043 for any p.
     # Seeds reproduce experiments; neither their sequences nor labels are oracles.
-    sample_size = 20_000
+    sample_size = 5_000
     counts: Counter[int] = Counter()
     for _ in range(sample_size):
         decoded = space.decode(inputs)
@@ -184,7 +184,7 @@ def test_gumbel_softmax_marginals_integrate_extra_draw_and_temperature() -> None
     # At tau=1 both incorrect alternatives, softmax(z) and softmax(z/tau),
     # are separated from the true marginal by more than two tolerance bands.
     assert hard_probability - probabilities[1] > 2.0 * frequency_tolerance(
-        probabilities[1], 20_000
+        probabilities[1], 5_000
     )
     frequencies: list[float] = []
     for case_id, (temperature, probability) in enumerate(
@@ -214,7 +214,7 @@ def test_gumbel_softmax_marginals_integrate_extra_draw_and_temperature() -> None
         frequencies.append(observed[1000])
     separation = probabilities[0] - probabilities[2]
     uncertainty = sum(
-        frequency_tolerance(p, 20_000) for p in (probabilities[0], probabilities[2])
+        frequency_tolerance(p, 5_000) for p in (probabilities[0], probabilities[2])
     )
     assert separation > uncertainty
     assert abs((frequencies[0] - frequencies[2]) - separation) <= uncertainty

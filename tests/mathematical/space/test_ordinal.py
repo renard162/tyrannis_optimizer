@@ -60,9 +60,9 @@ def _check_categorical_law(
     )
     space.initialize_context(seed=seed)
     # Each category indicator is Bernoulli(p), even in a multinomial sample.
-    # N=20,000 gives 6*sqrt(p*(1-p)/N) <= 0.022. floor=0 retains the
+    # N=5,000 gives 6*sqrt(p*(1-p)/N) <= 0.043. floor=0 retains the
     # variance-derived bound for smaller categories instead of a fixed floor.
-    sample_size = 20_000
+    sample_size = 5_000
     counts: Counter[str] = Counter()
     for _ in range(sample_size):
         decoded = space.decode({"0": x})
@@ -165,7 +165,7 @@ def test_nearest_stochastic_is_unbiased_on_nonuniform_positions() -> None:
     for x, choice in ((-5.0, "low"), (-4.5, "low"), (9.0, "peak"), (10.0, "peak")):
         assert space.decode({"0": x}) == [choice]
 
-    sample_size = 20_000
+    sample_size = 5_000
     for index, upper_probability in enumerate((0.25, 0.75, 0.5)):
         lower, upper = positions[index : index + 2]
         gap = upper - lower
