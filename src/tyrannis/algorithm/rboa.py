@@ -124,62 +124,64 @@ class RBOA(AlgorithmBase[RBOAParticle]):
 
         Notes
         -----
-        Tyrannis optimization algorithms operate on the continuous encoded search
-        space supplied by ``SpaceBase``. rBOA therefore learns dependencies between
-        encoded decision variables rather than between any higher-level decoded
-        values represented by the search space. Before probabilistic modeling, every
-        encoded dimension is affinely mapped to ``[0, 1]``. This preserves Gaussian
-        conditional-independence structure under non-degenerate affine scaling and
-        prevents arbitrary encoded ranges from dominating K-means or covariance
-        conditioning.
+        For a selected population ``S``, rBOA models the joint probability
+        distribution of the decision variables through a Gaussian Bayesian network,
 
-        For a selected population ``S``, the Gaussian Bayesian network factorizes
-        the model as
+        ``p(X) = product_i p(X_i | Pa(X_i))``,
 
-        ``p(X) = product_i p(X_i | Pa(X_i))``.
+        where ``Pa(X_i)`` denotes the set of parents of ``X_i`` in the directed
+        acyclic graph.
 
-        Structure learning starts from the empty graph and repeatedly adds the
-        admissible directed edge that gives the largest strict decrease in the
-        mixture BIC. K-means labels are held fixed during this greedy graph search,
-        and every mixture component uses the same candidate graph. Edges that create
-        a cycle or exceed ``max_parents`` are rejected. Search stops when no
-        admissible edge improves the score.
+        Structure learning starts from an empty graph and proceeds by greedy
+        incremental edge addition. At each step, the admissible directed edge that
+        yields the largest strict improvement in the mixture BIC is added. Candidate
+        edges that create a cycle or violate the prescribed maximum number of parents
+        are excluded. The search terminates when no admissible edge improves the
+        score.
 
-        The direction of an edge is used by the conditional Gaussian factorization,
-        while the maximal connected components of the graph are obtained after
-        ignoring edge direction. Those components are disjoint and define the
-        probabilistic building blocks used by rBOA. Consequently, overlapping local
-        dependencies can be represented inside one Bayesian network component, but
-        overlapping components are merged into the same maximal connected
-        subproblem.
+        When multiple components are used during structure learning, the selected
+        population is partitioned into ``K`` clusters. All components share the same
+        Bayesian-network structure, while their conditional Gaussian contributions
+        are combined in the mixture BIC used to evaluate candidate structures.
 
-        Each subproblem is clustered independently with BEND leader clustering.
-        Cluster probabilities are proportional to cluster cardinality. A local
-        multivariate Gaussian is estimated by maximum likelihood for every cluster,
-        regularized only as required to keep its covariance positive definite. The
-        joint Gaussian is then factorized according to the learned Bayesian-network
-        parents, yielding one univariate conditional Gaussian for each variable.
+        After the Bayesian network is learned, edge directions are ignored to obtain
+        its maximal connected components. These disjoint components define the
+        probabilistic building blocks, or subproblems, used by rBOA. Consequently,
+        overlapping local dependencies are represented within the same connected
+        component rather than as overlapping building blocks.
 
-        Candidate sampling follows the topological order of the learned graph. Since
-        Tyrannis search spaces are bounded, every conditional Gaussian is sampled as
-        its exact truncated-normal counterpart over the encoded variable bounds.
-        This avoids the point masses at boundaries introduced by clipping while
-        preserving the learned conditional Gaussian density inside the feasible
-        interval.
+        Each subproblem is then clustered independently using BEND leader clustering.
+        If ``C_ij`` denotes cluster ``j`` of subproblem ``Z_i``, its mixture weight is
+        proportional to its cardinality,
 
-        Random values consumed by particle processing are generated exclusively in
-        ``create_random_cache``. The number of subproblems may change between
-        iterations, but it is already known when the cache is created, so this
-        implementation stores the required independent uniform variates directly in
-        each particle cache and does not require a worker-local random generator.
+        ``beta_ij = |C_ij| / sum_k |C_ik|``.
 
-        Replacement follows the canonical renewal policy when ``q < n``: the best
-        ``n - q`` parents are retained and all ``q`` evaluated offspring enter the
-        next population. If ``q >= n``, no parent slot remains under that renewal
-        rule, so the best ``n`` offspring are retained from the sampled offspring
-        pool. With ``offspring_size=None``, ``q`` is set to
-        ``n - floor(selection_fraction * n)``, which gives the canonical
-        half-population elitist renewal under ``selection_fraction=0.5``.
+        A multivariate Gaussian distribution is estimated by maximum likelihood for
+        each cluster. The resulting distribution for subproblem ``Z_i`` is therefore
+        represented as
+
+        ``p(Z_i) = sum_j beta_ij p_ij(Z_i)``.
+
+        Within each Gaussian component, the learned Bayesian-network structure
+        factorizes the joint distribution into univariate conditional Gaussian
+        distributions. New values are sampled according to a topological ordering of
+        the graph so that every parent variable is available before sampling its
+        descendants.
+
+        New candidate solutions are formed through probabilistic building-block
+        crossover. A mixture component is selected independently for each subproblem,
+        the corresponding variables are sampled from that component, and the sampled
+        subproblems are combined to form a complete candidate solution. This permits
+        favorable substructures learned from different regions of the selected
+        population to be recombined even when their complete combination has not
+        previously appeared in the population.
+
+        Let ``n`` denote the population size and ``q`` the number of offspring
+        generated in one iteration. Under partial renewal with ``q < n``, the best
+        ``n - q`` individuals from the current population are retained and the
+        ``q`` newly generated offspring complete the next population. When
+        ``q >= n``, the next population is selected from the generated offspring so
+        that its size remains ``n``.
 
         References
         ----------
@@ -188,10 +190,15 @@ class RBOA(AlgorithmBase[RBOAParticle]):
         Continuous World. Genetic and Evolutionary Computation - GECCO 2004,
         840-851. https://doi.org/10.1007/978-3-540-24854-5_86
 
-        Bosman, P. A. N., & Thierens, D. (2001). Advancing Continuous IDEAs with
-        Mixture Distributions and Factorization Selection Metrics. Proceedings of
-        the Optimization by Building and Using Probabilistic Models Workshop,
-        GECCO 2001.
+        Ahn, C. W., Ramakrishna, R. S., & Goldberg, D. E. (2006). Real-Coded
+        Bayesian Optimization Algorithm. Towards a New Evolutionary Computation:
+        Advances on Estimation of Distribution Algorithms, 51-73.
+        https://doi.org/10.1007/3-540-32494-1_3
+
+        Ahn, C. W., & Ramakrishna, R. S. (2008). On the Scalability of Real-Coded
+        Bayesian Optimization Algorithm. IEEE Transactions on Evolutionary
+        Computation, 12(3), 307-322.
+        https://doi.org/10.1109/TEVC.2007.902856
         """
         if not isinstance(selection_fraction, (int, float, np.number)) or isinstance(
             selection_fraction, (bool, np.bool_)
