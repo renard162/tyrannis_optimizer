@@ -7,6 +7,7 @@ from .gravitational import GSA
 from .grey_wolf import GreyWolf
 from .pso import PSO
 from .psogsa import PSOGSA
+from .rboa import RBOA
 from .whale_algorithm import WhaleAlgorithm
 
 __all__ = [
@@ -14,6 +15,7 @@ __all__ = [
     "GSA",
     "PSO",
     "PSOGSA",
+    "RBOA",
     "AntColony",
     "BeeColony",
     "DifferentialEvolution",
