@@ -134,6 +134,20 @@ class ParticleBase(ABC):
 
     @property
     def random_cache(self) -> dict[str, Any]:
+        """Return the temporary random state prepared for this particle.
+
+        The cache contract is ``dict[str, Any]``. Values normally contain
+        materialized random values prepared before particle processing. When the
+        required number of draws is dynamic or pre-materialization would be
+        unnecessarily excessive, a particle-specific ``np.random.Generator`` may
+        instead be stored as a named cache value by
+        ``AlgorithmBase.create_random_cache``.
+
+        A cached generator is part of the cache value space; it does not replace
+        the dictionary itself. Its state must have been derived from fresh state of
+        the algorithm's persistent random-number generator rather than by
+        recreating a generator from the original algorithm seed for each iteration.
+        """
         return self._random_values_cache
 
     @random_cache.setter
@@ -252,8 +266,12 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
     iteration, including, but not limited to, creating or removing particles
     from the population.
 
-    `create_random_cache` generates the random values required by
+    `create_random_cache` prepares the random state required by
     `initialize_particle`, `update_particle`, and `second_update_particle`.
+    Materialized random values are preferred. When a particle requires a
+    dynamic number of draws, or pre-materializing all possible values would
+    be unnecessarily excessive, the cache may instead contain an independent
+    particle-specific ``np.random.Generator`` as one of its named values.
 
     `initialize_particle` performs the algorithm-specific initialization of
     newly created particles, establishing their initial state.
@@ -459,18 +477,19 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         responsible for subsequently identifying new particles and invoking
         ``initialize_particle`` for them.
 
-        Random values required for particle initialization or update must not be
-        generated directly by this method solely for the purpose of making them
+        Random state required for particle initialization or update must not be
+        prepared directly by this method solely for the purpose of making it
         available to ``initialize_particle``, ``update_particle``, or
-        ``second_update_particle``. Random values required during particle
-        processing are prepared separately by
-        ``create_random_cache`` immediately before the corresponding
-        particle-processing phase.
+        ``second_update_particle``. Random state required during particle
+        processing is prepared separately by ``create_random_cache`` immediately
+        before the corresponding particle-processing phase.
 
         This separation is important because particle processing may be
-        executed in parallel. Random values must be generated in the execution
-        context that owns the algorithm's random-number generator and before
-        particle processing is distributed to worker processes or threads.
+        executed in parallel. Materialized random values, or independent
+        particle-specific random-number generators when their use is justified,
+        must be prepared in the execution context that owns the algorithm's
+        persistent random-number generator and before particle processing is
+        distributed to worker processes or threads.
 
         The method may modify the algorithm object and any objects contained by
         it, according to the lifecycle requirements of the concrete algorithm.
@@ -483,61 +502,115 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
     @abstractmethod
     def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
         """
-        Generate and store the random values required by the specified particles.
+        Prepare and store the random state required by the specified particles.
 
         ``particle_ids`` contains the identifiers of the particles that will be
         processed in the immediately following particle-processing phase. The
-        concrete algorithm must generate every random value that its
-        ``initialize_particle``, ``update_particle``, or
-        ``second_update_particle`` implementation requires and store those
-        values in each particle's ``random_cache``.
+        concrete algorithm must prepare every source of randomness required by
+        its ``initialize_particle``, ``update_particle``, or
+        ``second_update_particle`` implementation and store it as named entries
+        in each particle's ``random_cache``. The cache contract remains
+        ``dict[str, Any]``.
+
+        Random values should normally be materialized in advance and stored
+        directly in the cache. This is the preferred strategy whenever the
+        required number of draws is known and reasonably sized, because it makes
+        the randomness consumed by particle processing explicit and independent
+        from the worker execution context.
+
+        When the number of draws required by a particle is only known while that
+        particle is being processed, or when pre-materializing all possible draws
+        would be unnecessarily excessive, the cache may instead contain an
+        independent particle-specific ``np.random.Generator`` as one of its named
+        values. For example, a cache may contain
+        ``{"random_generator": generator}``, and the consuming method may retrieve
+        that entry and draw the dynamically required values from it. The generator
+        is therefore a value stored inside ``random_cache``; it does not replace
+        the cache or alter its dictionary contract.
+
+        A cached generator is an exceptional strategy. Materialized values remain
+        preferred, and a generator should be used only when dynamic draw counts or
+        excessive pre-materialization make it strictly advantageous. It should not
+        be used merely to replace ordinary materialized values with one generator
+        per variable or operation.
+
+        Cached generators must preserve the reproducibility and progression of the
+        algorithm's random stream. The algorithm seed initializes ``self._rng``
+        only once, during algorithm configuration. A cached generator created in a
+        later call to ``create_random_cache`` must derive its seed or entropy from
+        fresh state produced by that persistent, advancing ``self._rng``. The
+        original algorithm seed must not be reused to construct a new
+        ``SeedSequence`` or ``Generator`` for each particle, phase, or iteration,
+        because doing so would restart the same random stream and could make
+        particle updates deterministically repeat across iterations.
+
+        For example, an implementation may draw fresh integer entropy from
+        ``self._rng`` and use that entropy to initialize an independent
+        ``np.random.SeedSequence`` and then an ``np.random.Generator``. The exact
+        derivation strategy is algorithm-specific, but it must consume fresh state
+        from ``self._rng`` each time a new cached generator is required. The
+        persistent ``self._rng`` itself must not be placed in the particle cache.
+
+        Each cached generator must be independent and exclusive to the
+        corresponding particle and particle-processing phase. Generator objects or
+        their initial states must not be reused across particles or phases unless
+        such reuse is explicitly part of the algorithm's mathematical definition.
+        A subsequent execution started with the same algorithm seed should recreate
+        the same complete sequence of derived generators, while successive
+        iterations within that execution must continue advancing through distinct
+        random state.
 
         ``initialize`` indicates whether the particles are about to be
-        initialized. When ``True``, the algorithm may use an initialization-specific
-        random-generation strategy. When ``False``, it must generate the random
-        values required by the immediately following particle-update phase.
+        initialized. When ``True``, the algorithm may use an
+        initialization-specific random-generation strategy. When ``False``, it
+        must prepare the random state required by the immediately following
+        particle-update phase.
 
         If the algorithm uses a second cost-function check during the same
         optimization iteration, ``create_random_cache`` is called separately
         before ``update_particle`` and, when required, before
         ``second_update_particle``. Each call with ``initialize=False`` must
-        therefore generate only the random values required by the immediately
+        therefore prepare only the random state required by the immediately
         following update phase. The second call occurs after ``inter_iteration``
         and receives only the identifiers in ``double_check_ids``, allowing its
         random-generation strategy to depend on algorithm state established
         during the intermediate step. If ``double_check_ids`` is empty, the
         second cache creation is skipped.
 
-        The random cache separates random-number generation from particle
-        processing. This is particularly important when particle processing is
-        executed in parallel, because worker processes may inherit equivalent or
-        otherwise correlated states of a deterministic random-number generator.
-        Random values used during particle processing are therefore generated by
-        this method before the particles are submitted to workers.
+        The random cache separates ownership of random-number generation from
+        particle processing. This is particularly important when particle
+        processing is executed in parallel, because worker processes may inherit
+        equivalent or otherwise correlated states of a deterministic random-number
+        generator. Randomness used during particle processing must therefore
+        originate from state prepared by this method before the particles are
+        submitted to workers.
 
-        The generated values are stored in the particle's ``random_cache`` as
-        named entries. Each entry must have a key that uniquely identifies the
-        random value within the particle and the corresponding particle-processing
-        operation. Algorithms may define their own key convention, but keys must
-        be sufficiently specific to allow the consuming method to retrieve the
-        intended value without relying on insertion order.
+        Entries in ``random_cache`` are identified by keys defined by the concrete
+        algorithm. Each key must uniquely identify the corresponding random value,
+        random object, or particle-processing operation. Algorithms may define
+        their own key convention, but keys must be sufficiently specific to allow
+        the consuming method to retrieve the intended value without relying on
+        insertion order.
 
         The cache is intentionally represented as a flat dictionary rather than
         as a nested structure. This keeps access simple while allowing different
-        algorithms to define keys appropriate to their own random-value
-        requirements.
+        algorithms to define keys appropriate to their own randomness requirements.
+        Values may therefore be scalars, arrays, selections, or, when justified by
+        the dynamic-randomness case described above, a particle-specific
+        ``np.random.Generator``.
 
-        The amount and type of random values required are specific to each
-        algorithm. Implementations must generate the values required by the
-        corresponding particle-processing logic and must not assume that all
-        algorithms require the same number or type of random values. For
-        algorithms that use two particle-processing phases, the caches for the
-        first and second update phases may therefore contain different values
-        according to the requirements of each phase. The second-phase cache is
-        created only for the particles identified by ``double_check_ids``.
+        The amount and type of random state required are specific to each
+        algorithm. Implementations must prepare the values or generator state
+        required by the corresponding particle-processing logic and must not
+        assume that all algorithms require the same number or type of cache
+        entries. For algorithms that use two particle-processing phases, the
+        caches for the first and second update phases may therefore contain
+        different entries according to the requirements of each phase. The
+        second-phase cache is created only for the particles identified by
+        ``double_check_ids``.
 
         The value of ``initialize`` may therefore affect both the amount and the
-        type of random values generated. An algorithm may require one sampling
+        type of random state prepared. An algorithm may require one sampling
         strategy when establishing the initial state of a particle and another
         strategy when transitioning an existing particle from state ``k`` to
         state ``k+1``.
@@ -551,18 +624,26 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         population. Particle Swarm Optimization may require multiple floating
         point values for each variable during updates, while initialization may
         require values generated according to the initial-position strategy of the
-        algorithm.
+        algorithm. An algorithm whose number of random draws depends dynamically
+        on decisions made inside a particle update may instead store an independent
+        generator under a key such as ``"random_generator"``.
 
-        Implementations must ensure that every particle receives its own
-        independently generated set of random values. Random values must not be
-        reused between particles unless such reuse is explicitly part of the
-        algorithm's mathematical definition.
+        Implementations must ensure that every particle receives independent random
+        state. Materialized random values must not be reused between particles, and
+        cached generators must not share mutable generator state, unless such reuse
+        is explicitly part of the algorithm's mathematical definition.
 
         ``initialize_particle``, ``update_particle``, and
-        ``second_update_particle`` must obtain the values from the cache rather
-        than generating new random values themselves. Cached values must not be
-        removed during particle processing. The cache is cleared by the framework
-        when the processed population is updated.
+        ``second_update_particle`` must obtain all randomness from the cache. They
+        must not access the algorithm's ``self._rng`` or another untracked random
+        source while particle processing is underway. When the cache contains a
+        generator, the consuming method may draw the required random values from
+        that cached generator. Cache entries must be accessed by key and must not
+        be removed from the dictionary with ``pop`` or equivalent destructive
+        operations. Drawing from a cached generator may advance that generator's
+        internal state, but the generator object itself remains stored in the
+        cache. The cache is cleared by the framework when the processed population
+        is updated.
         """
         raise NotImplementedError
 
@@ -582,6 +663,16 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         for their first fitness evaluation. Particles recreated with an already
         evaluated fitness must preserve the provided fitness and do not require
         re-evaluation solely because they are new to the population.
+
+        Any randomness required during initialization must be obtained from the
+        particle's ``random_cache``. Materialized values are preferred. If
+        ``create_random_cache`` has instead stored an independent
+        ``np.random.Generator`` because the required number of draws is dynamic
+        or pre-materialization would be excessive, this method may retrieve that
+        generator by key and draw from it locally. It must not access
+        ``self._rng`` directly, recreate a generator from the original algorithm
+        seed, or remove cache entries with ``pop`` or equivalent destructive
+        operations.
 
         This method must not consolidate the particle. Consolidation is performed
         subsequently by ``consolidate_new_particles``.
@@ -648,30 +739,41 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         particle. The returned particle may subsequently be used by the
         processor to replace the corresponding particle in the population.
 
-        Any random values required by the update must be obtained from the
-        particle's ``random_cache``. Random values must not normally be
-        generated directly by this method. The cache is populated by
-        ``create_random_cache`` immediately before the particle-processing
-        phase, while the algorithm is still executing in the context that owns
-        its random-number generator.
+        Any randomness required by the update must be obtained from the
+        particle's ``random_cache``. Materialized random values are preferred and
+        should be used whenever the required draws are known and reasonably sized.
+        The cache is populated by ``create_random_cache`` immediately before the
+        particle-processing phase, while the algorithm is still executing in the
+        context that owns its persistent random-number generator.
 
-        Random values in ``random_cache`` are identified by keys defined by the
-        concrete algorithm. The update implementation must retrieve each value
-        using its corresponding key without removing it from the cache. It must
-        not rely on dictionary insertion order or generate additional random
-        values during the update.
+        Random state in ``random_cache`` is identified by keys defined by the
+        concrete algorithm. The update implementation must retrieve each entry
+        using its corresponding key without removing it from the cache and must
+        not rely on dictionary insertion order.
+
+        If a cache entry contains an independent ``np.random.Generator`` because
+        the required number of draws is dynamic or pre-materialization would be
+        excessive, this method may retrieve that generator by key and draw from it
+        locally. Such a generator must already have been derived by
+        ``create_random_cache`` from fresh state of the persistent ``self._rng``.
+        This method must not access ``self._rng`` directly, recreate a generator
+        from the original algorithm seed, or use another untracked random source.
 
         Key-based access is important because different algorithms require
-        different quantities and types of random values. A cache may therefore
+        different quantities and types of random state. A cache may therefore
         contain entries for different operations, variables, or stages of the
         update. For example, an algorithm may use keys such as
-        ``"x1-selection"`` and ``"x1-mutation"`` to distinguish two random values
-        associated with the same variable.
+        ``"x1-selection"`` and ``"x1-mutation"`` to distinguish two materialized
+        random values associated with the same variable, or a key such as
+        ``"random_generator"`` for a particle-specific generator.
 
         The concrete implementation is responsible for knowing exactly which
-        cached values it requires and which keys identify them. It must not
+        cached entries it requires and which keys identify them. It must not
         assume that the cache has a fixed size or fixed value types shared by all
-        algorithms.
+        algorithms. Cache entries must not be removed from the dictionary with
+        ``pop`` or equivalent destructive operations. Drawing from a cached
+        generator may advance its internal state without removing the generator
+        entry from the cache.
 
         The random cache is temporary state associated with the current
         particle-processing phase. It must not be treated as persistent
@@ -718,11 +820,12 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         or performing other preparations required by the algorithm before the
         second particle-processing phase.
 
-        Random values required for particle processing must not be generated
-        directly by this method solely for the purpose of making them available
+        Random state required for particle processing must not be prepared
+        directly by this method solely for the purpose of making it available
         to ``second_update_particle``. When ``double_check_ids`` is not empty,
-        random values are prepared separately by ``create_random_cache``
-        immediately after this method returns and only for those identifiers.
+        materialized values or independent particle-specific generator state
+        are prepared separately by ``create_random_cache`` immediately after
+        this method returns and only for those identifiers.
 
         The method may modify the algorithm state and the state of existing
         particles according to the lifecycle requirements of the concrete
@@ -750,23 +853,33 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         particle. The returned particle may subsequently be used by the processor
         to replace the corresponding particle in the population.
 
-        Any random values required by the update must be obtained from the
-        particle's ``random_cache``. Random values must not normally be generated
-        directly by this method. The cache is populated by
-        ``create_random_cache`` immediately before the particle-processing phase,
-        while the algorithm is still executing in the context that owns its
-        random-number generator.
+        Any randomness required by the update must be obtained from the
+        particle's ``random_cache``. Materialized random values are preferred and
+        should be used whenever the required draws are known and reasonably sized.
+        The cache is populated by ``create_random_cache`` immediately before the
+        particle-processing phase, while the algorithm is still executing in the
+        context that owns its persistent random-number generator.
 
-        Random values in ``random_cache`` are identified by keys defined by the
-        concrete algorithm. The update implementation must retrieve each value
-        using its corresponding key without removing it from the cache. It must
-        not rely on dictionary insertion order or generate additional random
-        values during the update.
+        Random state in ``random_cache`` is identified by keys defined by the
+        concrete algorithm. The update implementation must retrieve each entry
+        using its corresponding key without removing it from the cache and must
+        not rely on dictionary insertion order.
+
+        If a cache entry contains an independent ``np.random.Generator`` because
+        the required number of draws is dynamic or pre-materialization would be
+        excessive, this method may retrieve that generator by key and draw from it
+        locally. Such a generator must already have been derived by
+        ``create_random_cache`` from fresh state of the persistent ``self._rng``.
+        This method must not access ``self._rng`` directly, recreate a generator
+        from the original algorithm seed, or use another untracked random source.
 
         The concrete implementation is responsible for knowing exactly which
-        cached values it requires and which keys identify them. It must not assume
+        cached entries it requires and which keys identify them. It must not assume
         that the cache has a fixed size or fixed value types shared by all
-        algorithms.
+        algorithms. Cache entries must not be removed from the dictionary with
+        ``pop`` or equivalent destructive operations. Drawing from a cached
+        generator may advance its internal state without removing the generator
+        entry from the cache.
 
         The random cache is temporary state associated with the current
         particle-processing phase. It must not be treated as persistent algorithm
