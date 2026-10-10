@@ -3,7 +3,10 @@ from copy import deepcopy
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.stats import truncnorm
+from scipy.cluster.vq import ClusterError, kmeans2, whiten
+from scipy.linalg import solve
+from scipy.sparse.csgraph import connected_components, shortest_path
+from scipy.stats import multivariate_normal, norm, truncnorm
 
 from ..core.algorithm import FITNESS_UNDEFINED, AlgorithmBase, ParticleBase
 
@@ -465,55 +468,42 @@ class RBOA(AlgorithmBase[RBOAParticle]):
         metric_data = np.zeros_like(data, dtype=float)
 
         if np.any(active_dimensions):
-            metric_data[:, active_dimensions] = (
-                data[:, active_dimensions] / standard_deviations[active_dimensions]
+            metric_data[:, active_dimensions] = whiten(
+                data[:, active_dimensions],
+                check_finite=False,
             )
 
-        initial_indices = self._rng.choice(n_samples, size=n_clusters, replace=False)
-        centroids = metric_data[np.asarray(initial_indices, dtype=int)].copy()
-        labels = np.full(n_samples, -1, dtype=int)
+        unique_observations = len(np.unique(metric_data, axis=0))
 
-        while True:
-            differences = metric_data[:, np.newaxis, :] - centroids[np.newaxis, :, :]
-            squared_distances = np.sum(differences**2, axis=2)
-            new_labels = np.argmin(squared_distances, axis=1)
+        if unique_observations < n_clusters:
+            raise ValueError(
+                "model_selection_clusters cannot exceed the number of distinct "
+                "selected observations after variance scaling."
+            )
 
-            counts = np.bincount(new_labels, minlength=n_clusters)
+        labels: np.ndarray | None = None
+        last_error: ClusterError | None = None
 
-            while np.any(counts == 0):
-                empty_cluster = int(np.flatnonzero(counts == 0)[0])
-                assigned_distances = squared_distances[np.arange(n_samples), new_labels]
-                movable = np.asarray(
-                    [counts[label] > 1 for label in new_labels], dtype=bool
+        for _ in range(10):
+            try:
+                _, labels = kmeans2(
+                    metric_data,
+                    n_clusters,
+                    iter=100,
+                    minit="points",
+                    missing="raise",
+                    check_finite=False,
+                    rng=self._rng,
                 )
-
-                if not np.any(movable):
-                    raise RuntimeError(
-                        "Unable to construct non-empty rBOA K-means components."
-                    )
-
-                candidate_distances = np.where(movable, assigned_distances, -np.inf)
-                moved_index = int(np.argmax(candidate_distances))
-                previous_cluster = int(new_labels[moved_index])
-                new_labels[moved_index] = empty_cluster
-                counts[previous_cluster] -= 1
-                counts[empty_cluster] += 1
-
-            new_centroids = np.asarray(
-                [
-                    np.mean(metric_data[new_labels == cluster], axis=0)
-                    for cluster in range(n_clusters)
-                ],
-                dtype=float,
-            )
-
-            if np.array_equal(new_labels, labels):
-                labels = new_labels
-                centroids = new_centroids
                 break
+            except ClusterError as error:
+                last_error = error
 
-            labels = new_labels
-            centroids = new_centroids
+        if labels is None:
+            raise RuntimeError(
+                "SciPy K-means repeatedly produced an empty rBOA "
+                "model-selection cluster."
+            ) from last_error
 
         return tuple(
             np.flatnonzero(labels == cluster).astype(int)
@@ -542,9 +532,11 @@ class RBOA(AlgorithmBase[RBOAParticle]):
             else:
                 residuals = y - float(np.mean(y))
 
-            residual_sum_squares = float(residuals @ residuals)
-            variance = max(residual_sum_squares / n_samples, self._covariance_floor)
-            conditional_entropy = 0.5 * np.log(2.0 * np.pi * np.e * variance)
+            variance = max(
+                float(np.mean(np.square(residuals))),
+                self._covariance_floor,
+            )
+            conditional_entropy = float(norm.entropy(scale=np.sqrt(variance)))
             weighted_entropy += n_samples * conditional_entropy
 
         n_parameters = len(parents) + 2
@@ -554,32 +546,12 @@ class RBOA(AlgorithmBase[RBOAParticle]):
 
         return float(weighted_entropy + complexity)
 
-    @staticmethod
-    def _would_create_cycle(parent: int, child: int, adjacency: list[set[int]]) -> bool:
-        pending = [child]
-        visited: set[int] = set()
-
-        while pending:
-            node = pending[-1]
-            del pending[-1]
-
-            if node == parent:
-                return True
-
-            if node in visited:
-                continue
-
-            visited.add(node)
-            pending.extend(adjacency[node] - visited)
-
-        return False
-
     def _learn_structure(
         self, data: np.ndarray, mixture_clusters: tuple[np.ndarray, ...]
     ) -> tuple[tuple[int, ...], ...]:
         n_variables = data.shape[1]
         parents: list[set[int]] = [set() for _ in range(n_variables)]
-        adjacency: list[set[int]] = [set() for _ in range(n_variables)]
+        adjacency = np.zeros((n_variables, n_variables), dtype=np.uint8)
         score_cache: dict[tuple[int, tuple[int, ...]], float] = {}
 
         def score(child: int, parent_set: set[int]) -> float:
@@ -599,6 +571,14 @@ class RBOA(AlgorithmBase[RBOAParticle]):
         current_scores = [score(child, set()) for child in range(n_variables)]
 
         while True:
+            reachability = np.isfinite(
+                shortest_path(
+                    adjacency,
+                    directed=True,
+                    unweighted=True,
+                    method="D",
+                )
+            )
             best_edge: tuple[int, int] | None = None
             best_new_score = 0.0
             best_delta = 0.0
@@ -611,9 +591,7 @@ class RBOA(AlgorithmBase[RBOAParticle]):
                     if len(parents[child]) >= self._effective_max_parents:
                         continue
 
-                    if self._would_create_cycle(
-                        parent=parent, child=child, adjacency=adjacency
-                    ):
+                    if reachability[child, parent]:
                         continue
 
                     candidate_parents = set(parents[child])
@@ -637,7 +615,7 @@ class RBOA(AlgorithmBase[RBOAParticle]):
 
             parent, child = best_edge
             parents[child].add(parent)
-            adjacency[parent].add(child)
+            adjacency[parent, child] = 1
             current_scores[child] = best_new_score
 
         return tuple(tuple(sorted(parent_set)) for parent_set in parents)
@@ -676,40 +654,29 @@ class RBOA(AlgorithmBase[RBOAParticle]):
         parents: tuple[tuple[int, ...], ...], topological_order: tuple[int, ...]
     ) -> tuple[tuple[int, ...], ...]:
         n_variables = len(parents)
-        undirected: list[set[int]] = [set() for _ in range(n_variables)]
+        adjacency = np.zeros((n_variables, n_variables), dtype=np.uint8)
 
         for child, parent_set in enumerate(parents):
             for parent in parent_set:
-                undirected[parent].add(child)
-                undirected[child].add(parent)
+                adjacency[parent, child] = 1
 
+        n_components, labels = connected_components(
+            adjacency,
+            directed=False,
+            return_labels=True,
+        )
         topological_position = {
             variable: position for position, variable in enumerate(topological_order)
         }
-        unvisited = set(range(n_variables))
-        components: list[tuple[int, ...]] = []
-
-        while unvisited:
-            start = min(unvisited)
-            pending = [start]
-            component: set[int] = set()
-
-            while pending:
-                node = pending[-1]
-                del pending[-1]
-
-                if node in component:
-                    continue
-
-                component.add(node)
-                unvisited.discard(node)
-                pending.extend(undirected[node] - component)
-
-            ordered_component = tuple(
-                sorted(component, key=lambda variable: topological_position[variable])
+        components = [
+            tuple(
+                sorted(
+                    np.flatnonzero(labels == component).tolist(),
+                    key=lambda variable: topological_position[variable],
+                )
             )
-            components.append(ordered_component)
-
+            for component in range(n_components)
+        ]
         components.sort(
             key=lambda component: min(
                 topological_position[variable] for variable in component
@@ -725,8 +692,7 @@ class RBOA(AlgorithmBase[RBOAParticle]):
             raise ValueError("BEND clustering requires at least one selected solution.")
 
         minimum = np.min(data, axis=0)
-        maximum = np.max(data, axis=0)
-        ranges = maximum - minimum
+        ranges = np.ptp(data, axis=0)
         active_dimensions = ranges > 0
         scaled = np.zeros_like(data, dtype=float)
 
@@ -805,10 +771,11 @@ class RBOA(AlgorithmBase[RBOAParticle]):
         component: tuple[int, ...],
         parents: tuple[tuple[int, ...], ...],
     ) -> _ClusterModel:
-        mean = np.mean(cluster_data, axis=0)
-        centered = cluster_data - mean
-        covariance = centered.T @ centered / len(cluster_data)
-        covariance = self._regularize_covariance(covariance)
+        mean, covariance = multivariate_normal.fit(cluster_data)
+        mean = np.asarray(mean, dtype=float)
+        covariance = self._regularize_covariance(
+            np.atleast_2d(np.asarray(covariance, dtype=float))
+        )
         local_index = {variable: index for index, variable in enumerate(component)}
         conditionals: list[_ConditionalNormal] = []
 
@@ -828,7 +795,12 @@ class RBOA(AlgorithmBase[RBOAParticle]):
                 covariance_py = covariance[
                     np.asarray(parent_local_indices, dtype=int), variable_local_index
                 ]
-                coefficients = np.linalg.solve(covariance_pp, covariance_py)
+                coefficients = solve(
+                    covariance_pp,
+                    covariance_py,
+                    assume_a="pos",
+                    check_finite=False,
+                )
                 covariance_yp = covariance[
                     variable_local_index, np.asarray(parent_local_indices, dtype=int)
                 ]
