@@ -41,9 +41,12 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         self,
         selection_fraction: float = 0.5,
         structure_learning: str = "bic",
+        variance_scaling: str = "ce-avs",
         edge_exclusion_alpha: float = 0.05,
         bge_alpha_mu: float = 1.0,
         bge_alpha_w: float | None = None,
+        sdr_avs_eta_decay: float = 0.9,
+        sdr_avs_threshold: float = 1.0,
     ) -> None:
         """
         Estimation of Gaussian Networks Algorithm (EGNA).
@@ -63,6 +66,14 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         ``"edge-exclusion"`` tests edges in the saturated Gaussian graphical model
         and converts the retained dependencies to an ordered Gaussian network.
 
+        The ``variance_scaling`` argument controls whether the learned Gaussian
+        network is sampled without variance scaling or with one of two published
+        adaptive variance-scaling mechanisms. ``"no-scaling"`` follows the
+        original EGNA formulation without adaptive variance scaling,
+        ``"sdr-avs"`` applies Standard-Deviation Ratio triggered Adaptive Variance
+        Scaling, and ``"ce-avs"`` applies two-stage Cross-Entropy Adaptive
+        Variance Scaling.
+
         Parameters
         ----------
         selection_fraction : float, default=0.5
@@ -77,11 +88,22 @@ class EGNA(AlgorithmBase[EGNAParticle]):
             Defines how the Gaussian network structure is learned.
 
             - ``"bic"``: uses the Bayesian Information Criterion to score candidate
-            network structures during structure learning.
+              network structures during structure learning.
             - ``"bge"``: uses the Bayesian Gaussian equivalent score to evaluate
-            candidate network structures.
-            - ``"edge-exclusion"``: learns the network through conditional independence
-            tests that determine which edges should be excluded.
+              candidate network structures.
+            - ``"edge-exclusion"``: learns the network through conditional
+              independence tests that determine which edges should be excluded.
+
+        variance_scaling : {"no-scaling", "sdr-avs", "ce-avs"}, default="ce-avs"
+            Defines how the variance of the learned Gaussian network is treated
+            before offspring sampling.
+
+            - ``"no-scaling"``: applies no variance-scaling mechanism and samples
+              directly from the Gaussian network estimated by EGNA.
+            - ``"sdr-avs"``: applies Standard-Deviation Ratio triggered Adaptive
+              Variance Scaling.
+            - ``"ce-avs"``: applies two-stage Cross-Entropy Adaptive Variance
+              Scaling and is the default.
 
         edge_exclusion_alpha : float, default=0.05
             Significance level used only when
@@ -102,6 +124,21 @@ class EGNA(AlgorithmBase[EGNAParticle]):
             weak proper BGe prior. An explicitly supplied value must be greater
             than ``d + 1`` because the associated isotropic prior scale must be
             strictly positive.
+
+        sdr_avs_eta_decay : float, default=0.9
+            Multiplicative decay factor used only when
+            ``variance_scaling="sdr-avs"``. When no improving offspring is found,
+            the variance multiplier is multiplied by this value. When the SDR
+            trigger requests additional exploration, the multiplier is increased
+            by the reciprocal factor. The default follows Bosman, Grahl, and
+            Rothlauf.
+
+        sdr_avs_threshold : float, default=1.0
+            Standard-Deviation Ratio threshold used only when
+            ``variance_scaling="sdr-avs"``. Additional variance enlargement is
+            triggered when the largest conditional SDR of the centroid of
+            improving offspring exceeds this value. The default follows Bosman,
+            Grahl, and Rothlauf.
 
         Notes
         -----
@@ -156,6 +193,46 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         encoded-variable order, producing an acyclic network suitable for Gaussian
         ancestral sampling.
 
+        With ``variance_scaling="no-scaling"``, the learned conditional standard
+        deviations are sampled without adaptive scaling and the complete offspring
+        population replaces the previous generation, preserving the original EGNA
+        behavior.
+
+        With ``variance_scaling="sdr-avs"``, Tyrannis follows the SDR-AVS
+        generational loop for a Bayesian-factorized normal EDA. The variance
+        multiplier ``c_AVS`` starts at 1 and the sampling covariance is
+        ``c_AVS * Sigma``. Improving offspring are those whose fitness is better
+        than the worst member of the selected set used to estimate the model. The
+        centroid of those improvements is evaluated in each conditional Gaussian;
+        the largest conditional standard-deviation ratio is compared with
+        ``sdr_avs_threshold``. If it exceeds the threshold, ``c_AVS`` is multiplied
+        by ``1 / sdr_avs_eta_decay``. If no improvement is found, it is multiplied
+        by ``sdr_avs_eta_decay``. The multiplier is never allowed below 1. The
+        selected set is retained and offspring replace the unselected population.
+
+        With ``variance_scaling="ce-avs"``, Tyrannis uses the two-stage compositive
+        CE-AVS factor. If the previous model is ``N(mu_M, Gamma_M)``, the survivor
+        population after truncate replacement is modeled as
+        ``N(mu_P, Gamma_P)``, and the newly learned model mean is ``mu_M_new``,
+        then
+
+        ``a1 = sqrt(trace(Gamma_M^-1 * (Gamma_P + d_P d_P^T)) / d)``,
+
+        ``a2 = sqrt(trace(Gamma_M^-1 * (d_M d_M^T)) / d)``,
+
+        where ``d_P = mu_M - mu_P`` and ``d_M = mu_M - mu_M_new``. Sampling uses
+        ``N(mu_M_new, a^2 * Gamma_M_new)`` with ``a = a1 + a2``. The CE-AVS branch
+        performs truncate replacement over the union of parents and offspring, as
+        required for the survivor-distribution comparison used by CE-AVS.
+
+        Global variance scaling leaves the learned regression coefficients
+        unchanged and scales every conditional residual standard deviation by the
+        same standard-deviation factor. This is equivalent to multiplying the full
+        Gaussian-network covariance by the corresponding scalar. For adaptive
+        scaling branches, residual variances are kept strictly positive at machine
+        precision so that variance enlargement remains mathematically possible and
+        the CE-AVS linear systems remain nonsingular.
+
         EGNA is defined for continuous Gaussian models with unrestricted
         dependencies. This implementation therefore requires the selected sample
         count to exceed the number of encoded variables. Exact numerical
@@ -191,6 +268,16 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         Models, 555-574. Springer.
         https://doi.org/10.1007/978-94-011-5014-9_21
 
+        Bosman, P. A. N., Grahl, J., & Rothlauf, F. (2007). SDR: A Better
+        Trigger for Adaptive Variance Scaling in Normal EDAs. Proceedings of the
+        Genetic and Evolutionary Computation Conference, 492-499.
+        https://doi.org/10.1145/1276958.1277066
+
+        Cai, Y., Sun, X., Xu, H., & Jia, P. (2007). Cross Entropy and Adaptive
+        Variance Scaling in Continuous EDA. Proceedings of the Genetic and
+        Evolutionary Computation Conference, 609-616.
+        https://doi.org/10.1145/1276958.1277081
+
         Soloviev, V. P., Bielza, C., & Larrañaga, P. (2024).
         Semiparametric Estimation of Distribution Algorithms for Continuous
         Optimization. IEEE Transactions on Evolutionary Computation, 28(4),
@@ -216,6 +303,16 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         if structure_learning not in allowed_structure_learning:
             raise ValueError(
                 "structure_learning must be 'bic', 'bge', or 'edge-exclusion'."
+            )
+
+        if not isinstance(variance_scaling, str):
+            raise TypeError("variance_scaling must be a string.")
+
+        allowed_variance_scaling = ("no-scaling", "sdr-avs", "ce-avs")
+
+        if variance_scaling not in allowed_variance_scaling:
+            raise ValueError(
+                "variance_scaling must be 'no-scaling', 'sdr-avs', or 'ce-avs'."
             )
 
         if not isinstance(edge_exclusion_alpha, (int, float, np.number)) or isinstance(
@@ -245,11 +342,39 @@ class EGNA(AlgorithmBase[EGNAParticle]):
             if not np.isfinite(bge_alpha_w):
                 raise ValueError("bge_alpha_w must be finite when provided.")
 
+        if not isinstance(sdr_avs_eta_decay, (int, float, np.number)) or isinstance(
+            sdr_avs_eta_decay, (bool, np.bool_)
+        ):
+            raise TypeError("sdr_avs_eta_decay must be a number.")
+
+        if (
+            not np.isfinite(sdr_avs_eta_decay)
+            or sdr_avs_eta_decay <= 0
+            or sdr_avs_eta_decay > 1
+        ):
+            raise ValueError(
+                "sdr_avs_eta_decay must be finite and greater than 0 and less "
+                "than or equal to 1."
+            )
+
+        if not isinstance(sdr_avs_threshold, (int, float, np.number)) or isinstance(
+            sdr_avs_threshold, (bool, np.bool_)
+        ):
+            raise TypeError("sdr_avs_threshold must be a number.")
+
+        if not np.isfinite(sdr_avs_threshold) or sdr_avs_threshold < 0:
+            raise ValueError(
+                "sdr_avs_threshold must be finite and greater than or equal to 0."
+            )
+
         self._selection_fraction = float(selection_fraction)
         self._structure_learning = structure_learning
+        self._variance_scaling = variance_scaling
         self._edge_exclusion_alpha = float(edge_exclusion_alpha)
         self._bge_alpha_mu = float(bge_alpha_mu)
         self._bge_alpha_w = None if bge_alpha_w is None else float(bge_alpha_w)
+        self._sdr_avs_eta_decay = float(sdr_avs_eta_decay)
+        self._sdr_avs_threshold = float(sdr_avs_threshold)
 
         self._variable_names: tuple[str, ...] = ()
         self._lower_bounds: np.ndarray | None = None
@@ -258,7 +383,13 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         self._topological_order: tuple[int, ...] = ()
         self._conditionals: tuple[_ConditionalNormal, ...] = ()
         self._active_particle_ids: set[str] = set()
+        self._selected_particle_ids: tuple[str, ...] = ()
+        self._selected_fitness_threshold: float | None = None
         self._variance_floor = np.finfo(float).eps
+        self._sampling_standard_deviation_scale = 1.0
+        self._sdr_variance_multiplier = 1.0
+        self._ce_previous_model_mean: np.ndarray | None = None
+        self._ce_previous_model_covariance: np.ndarray | None = None
 
     @property
     def selection_fraction(self) -> float:
@@ -267,6 +398,10 @@ class EGNA(AlgorithmBase[EGNAParticle]):
     @property
     def structure_learning(self) -> str:
         return self._structure_learning
+
+    @property
+    def variance_scaling(self) -> str:
+        return self._variance_scaling
 
     @property
     def edge_exclusion_alpha(self) -> float:
@@ -279,6 +414,14 @@ class EGNA(AlgorithmBase[EGNAParticle]):
     @property
     def bge_alpha_w(self) -> float | None:
         return self._bge_alpha_w
+
+    @property
+    def sdr_avs_eta_decay(self) -> float:
+        return self._sdr_avs_eta_decay
+
+    @property
+    def sdr_avs_threshold(self) -> float:
+        return self._sdr_avs_threshold
 
     def create_particle(
         self,
@@ -343,6 +486,13 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         self._parents = ()
         self._topological_order = ()
         self._conditionals = ()
+        self._active_particle_ids = set()
+        self._selected_particle_ids = ()
+        self._selected_fitness_threshold = None
+        self._sampling_standard_deviation_scale = 1.0
+        self._sdr_variance_multiplier = 1.0
+        self._ce_previous_model_mean = None
+        self._ce_previous_model_covariance = None
 
     @staticmethod
     def _fitness_sort_key(fitness: np.float64) -> tuple[bool, float]:
@@ -405,6 +555,10 @@ class EGNA(AlgorithmBase[EGNAParticle]):
             )
 
         selected_ids = self._rank_particles(population_ids)[:selected_count]
+        self._selected_particle_ids = tuple(selected_ids)
+        self._selected_fitness_threshold = float(
+            self._population[selected_ids[-1]].fitness
+        )
 
         return np.asarray(
             [
@@ -736,14 +890,12 @@ class EGNA(AlgorithmBase[EGNAParticle]):
                     -(partial_correlation * partial_correlation)
                 )
                 cdf = float(chi2.cdf(statistic, df=1))
-
                 statistic_density_product = np.sqrt(statistic / (2.0 * np.pi)) * np.exp(
                     -0.5 * statistic
                 )
                 correction = (
                     0.5 * (2 * n_variables + 1) * statistic_density_product / n_samples
                 )
-
                 corrected_cdf = float(np.clip(cdf - correction, 0.0, 1.0))
                 p_value = 1.0 - corrected_cdf
 
@@ -783,10 +935,15 @@ class EGNA(AlgorithmBase[EGNAParticle]):
                 residuals = y - mean
 
             variance = max(float(np.mean(np.square(residuals))), 0.0)
-            standard_deviation = float(np.sqrt(variance))
 
-            if standard_deviation <= np.sqrt(self._variance_floor):
-                standard_deviation = 0.0
+            if self._variance_scaling == "no-scaling":
+                standard_deviation = float(np.sqrt(variance))
+
+                if standard_deviation <= np.sqrt(self._variance_floor):
+                    standard_deviation = 0.0
+            else:
+                variance = max(variance, self._variance_floor)
+                standard_deviation = float(np.sqrt(variance))
 
             conditionals.append(
                 _ConditionalNormal(
@@ -810,6 +967,155 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         self._topological_order = topological_order
         self._conditionals = conditionals
 
+    def _regularize_covariance_matrix(self, covariance: np.ndarray) -> np.ndarray:
+        covariance = np.asarray(covariance, dtype=float)
+        covariance = 0.5 * (covariance + covariance.T)
+        eigenvalues = np.linalg.eigvalsh(covariance)
+        scale = max(1.0, float(np.max(np.abs(np.diag(covariance)))))
+        minimum_eigenvalue = np.finfo(float).eps * len(self._variable_names) * scale
+        smallest = float(np.min(eigenvalues))
+
+        if smallest < minimum_eigenvalue:
+            covariance = covariance + np.eye(covariance.shape[0]) * (
+                minimum_eigenvalue - smallest
+            )
+
+        return covariance
+
+    def _model_joint_moments(self) -> tuple[np.ndarray, np.ndarray]:
+        n_variables = len(self._variable_names)
+
+        if len(self._conditionals) != n_variables:
+            raise RuntimeError("EGNA probability model has not been initialized.")
+
+        means = np.empty(n_variables, dtype=float)
+        regression = np.zeros((n_variables, n_variables), dtype=float)
+        residual_variances = np.empty(n_variables, dtype=float)
+
+        for conditional in self._conditionals:
+            variable = conditional.variable_index
+            means[variable] = conditional.mean
+            residual_variances[variable] = max(
+                conditional.standard_deviation**2, self._variance_floor
+            )
+
+            for parent, coefficient in zip(
+                conditional.parent_indices, conditional.coefficients, strict=True
+            ):
+                regression[variable, parent] = float(coefficient)
+
+        system = np.eye(n_variables, dtype=float) - regression
+
+        try:
+            transition = np.linalg.solve(system, np.eye(n_variables, dtype=float))
+        except np.linalg.LinAlgError as error:
+            raise RuntimeError(
+                "Unable to reconstruct the EGNA joint Gaussian covariance."
+            ) from error
+
+        covariance = transition @ np.diag(residual_variances) @ transition.T
+        covariance = self._regularize_covariance_matrix(covariance)
+        return means, covariance
+
+    def _population_moments(self) -> tuple[np.ndarray, np.ndarray]:
+        if not self._population:
+            raise ValueError("EGNA requires at least one particle.")
+
+        data = np.asarray(
+            [
+                self._variables_to_normalized_array(particle.variables)
+                for particle in self._population.values()
+            ],
+            dtype=float,
+        )
+        mean = np.mean(data, axis=0)
+        centered = data - mean
+        covariance = centered.T @ centered / len(data)
+        covariance = self._regularize_covariance_matrix(covariance)
+        return np.asarray(mean, dtype=float), covariance
+
+    @staticmethod
+    def _solve_positive_definite(
+        covariance: np.ndarray, value: np.ndarray
+    ) -> np.ndarray:
+        try:
+            return np.linalg.solve(covariance, value)
+        except np.linalg.LinAlgError as error:
+            raise RuntimeError(
+                "Unable to solve an EGNA variance-scaling covariance system."
+            ) from error
+
+    def _ce_avs_scale(
+        self,
+        previous_model_mean: np.ndarray,
+        previous_model_covariance: np.ndarray,
+        population_mean: np.ndarray,
+        population_covariance: np.ndarray,
+        current_model_mean: np.ndarray,
+    ) -> float:
+        dimension = len(previous_model_mean)
+        population_shift = previous_model_mean - population_mean
+        model_shift = previous_model_mean - current_model_mean
+
+        covariance_term = float(
+            np.trace(
+                self._solve_positive_definite(
+                    previous_model_covariance, population_covariance
+                )
+            )
+        )
+        population_shift_term = float(
+            population_shift
+            @ self._solve_positive_definite(previous_model_covariance, population_shift)
+        )
+        model_shift_term = float(
+            model_shift
+            @ self._solve_positive_definite(previous_model_covariance, model_shift)
+        )
+
+        a1_squared = max((covariance_term + population_shift_term) / dimension, 0.0)
+        a2_squared = max(model_shift_term / dimension, 0.0)
+        scale = float(np.sqrt(a1_squared) + np.sqrt(a2_squared))
+
+        if not np.isfinite(scale) or scale <= 0:
+            raise RuntimeError(
+                "CE-AVS produced an invalid EGNA standard-deviation scale."
+            )
+
+        return scale
+
+    def _prepare_variance_scaling(self) -> None:
+        if self._variance_scaling == "no-scaling":
+            self._sampling_standard_deviation_scale = 1.0
+            return
+
+        if self._variance_scaling == "sdr-avs":
+            self._sampling_standard_deviation_scale = float(
+                np.sqrt(self._sdr_variance_multiplier)
+            )
+            return
+
+        current_model_mean, current_model_covariance = self._model_joint_moments()
+
+        if (
+            self._ce_previous_model_mean is None
+            or self._ce_previous_model_covariance is None
+        ):
+            scale = 1.0
+        else:
+            population_mean, population_covariance = self._population_moments()
+            scale = self._ce_avs_scale(
+                previous_model_mean=self._ce_previous_model_mean,
+                previous_model_covariance=self._ce_previous_model_covariance,
+                population_mean=population_mean,
+                population_covariance=population_covariance,
+                current_model_mean=current_model_mean,
+            )
+
+        self._sampling_standard_deviation_scale = scale
+        self._ce_previous_model_mean = current_model_mean.copy()
+        self._ce_previous_model_covariance = current_model_covariance.copy()
+
     def pre_iteration(self, actual_iter: int) -> None:
         if actual_iter == 0:
             self._initialize_model_context()
@@ -824,8 +1130,21 @@ class EGNA(AlgorithmBase[EGNAParticle]):
 
         selected_data = self._selected_matrix()
         self._learn_probability_model(selected_data)
+        self._prepare_variance_scaling()
 
-        self._active_particle_ids = set(self._population)
+        if self._variance_scaling == "sdr-avs":
+            selected = set(self._selected_particle_ids)
+            active = set(self._population) - selected
+
+            if not active:
+                raise ValueError(
+                    "SDR-AVS requires at least one offspring per generation. "
+                    "Use selection_fraction less than 1."
+                )
+
+            self._active_particle_ids = active
+        else:
+            self._active_particle_ids = set(self._population)
 
     def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
         for identifier in particle_ids:
@@ -917,7 +1236,10 @@ class EGNA(AlgorithmBase[EGNAParticle]):
 
             candidate[variable] = self._sample_truncated_normal(
                 mean=conditional_mean,
-                standard_deviation=conditional.standard_deviation,
+                standard_deviation=(
+                    conditional.standard_deviation
+                    * self._sampling_standard_deviation_scale
+                ),
                 random_value=float(random_values[variable]),
             )
 
@@ -943,10 +1265,94 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         )
         return particle
 
-    def post_iteration(self, actual_iter: int) -> None:
-        if actual_iter == 0:
-            self.update_solution_state()
-            return
+    def _validate_evaluated_candidates(self) -> None:
+        for identifier in self._active_particle_ids:
+            particle = self._population[identifier]
+
+            if (
+                particle.candidate_variables is None
+                or particle.candidate_fitness is None
+            ):
+                raise RuntimeError(
+                    f"EGNA particle '{identifier}' has no evaluated candidate."
+                )
+
+    def _sdr_conditional_ratio(self, centroid: np.ndarray) -> float:
+        ratios: list[float] = []
+        standard_deviation_scale = float(np.sqrt(self._sdr_variance_multiplier))
+
+        for variable in self._topological_order:
+            conditional = self._conditionals[variable]
+
+            if conditional.parent_indices:
+                parent_values = centroid[
+                    np.asarray(conditional.parent_indices, dtype=int)
+                ]
+                conditional_mean = float(
+                    conditional.mean
+                    + conditional.coefficients
+                    @ (parent_values - conditional.parent_means)
+                )
+            else:
+                conditional_mean = conditional.mean
+
+            standard_deviation = (
+                conditional.standard_deviation * standard_deviation_scale
+            )
+
+            if standard_deviation <= 0 or not np.isfinite(standard_deviation):
+                raise RuntimeError(
+                    "SDR-AVS requires positive finite conditional standard deviations."
+                )
+
+            ratios.append(
+                abs(float(centroid[variable]) - conditional_mean) / standard_deviation
+            )
+
+        return max(ratios)
+
+    def _update_sdr_variance_multiplier(self) -> None:
+        threshold = self._selected_fitness_threshold
+
+        if threshold is None:
+            raise RuntimeError("SDR-AVS selected-fitness threshold is unavailable.")
+
+        improvements: list[np.ndarray] = []
+
+        for identifier in self._active_particle_ids:
+            particle = self._population[identifier]
+            candidate_fitness = particle.candidate_fitness
+            candidate_variables = particle.candidate_variables
+
+            if candidate_fitness is None or candidate_variables is None:
+                raise RuntimeError(
+                    f"EGNA particle '{identifier}' has no evaluated candidate."
+                )
+
+            if float(candidate_fitness) < threshold:
+                improvements.append(
+                    self._variables_to_normalized_array(candidate_variables)
+                )
+
+        if not improvements:
+            self._sdr_variance_multiplier *= self._sdr_avs_eta_decay
+        else:
+            centroid = np.mean(np.asarray(improvements, dtype=float), axis=0)
+            sdr = self._sdr_conditional_ratio(centroid)
+
+            if sdr > self._sdr_avs_threshold:
+                self._sdr_variance_multiplier /= self._sdr_avs_eta_decay
+
+        self._sdr_variance_multiplier = max(1.0, self._sdr_variance_multiplier)
+
+    def _parent_solutions(self) -> list[tuple[dict[str, float], np.float64]]:
+        return [
+            (deepcopy(particle.variables), np.float64(particle.fitness))
+            for particle in self._population.values()
+        ]
+
+    def _offspring_solutions(self) -> list[tuple[dict[str, float], np.float64]]:
+        offspring: list[tuple[dict[str, float], np.float64]] = []
 
         for identifier in self._active_particle_ids:
             particle = self._population[identifier]
@@ -959,7 +1365,75 @@ class EGNA(AlgorithmBase[EGNAParticle]):
                     f"EGNA particle '{identifier}' has no evaluated candidate."
                 )
 
+            offspring.append(
+                (
+                    deepcopy(particle.candidate_variables),
+                    np.float64(particle.candidate_fitness),
+                )
+            )
+
+        return offspring
+
+    def _rank_solutions(
+        self, solutions: Collection[tuple[dict[str, float], np.float64]]
+    ) -> list[tuple[dict[str, float], np.float64]]:
+        candidates = list(solutions)
+
+        if not candidates:
+            return []
+
+        permutation = self._rng.permutation(len(candidates))
+        randomized = [candidates[int(index)] for index in permutation]
+        randomized.sort(key=lambda solution: self._fitness_sort_key(solution[1]))
+        return randomized
+
+    def _apply_survivors(
+        self, survivors: Collection[tuple[dict[str, float], np.float64]]
+    ) -> None:
+        survivor_list = list(survivors)
+        identifiers = list(self._population)
+
+        if len(survivor_list) != len(identifiers):
+            raise RuntimeError(
+                "EGNA survivor count must equal the persistent population size."
+            )
+
+        for identifier, (variables, fitness) in zip(
+            identifiers, survivor_list, strict=True
+        ):
+            particle = self._population[identifier]
+            particle.candidate_variables = deepcopy(variables)
+            particle.candidate_fitness = np.float64(fitness)
             particle.consolidate(consolidate_new=True)
+
+    def _ce_avs_replacement(self) -> None:
+        parents = self._parent_solutions()
+        offspring = self._offspring_solutions()
+        population_size = len(parents)
+
+        if len(offspring) != population_size:
+            raise RuntimeError(
+                "CE-AVS requires one evaluated offspring per persistent particle."
+            )
+
+        survivors = self._rank_solutions([*parents, *offspring])[:population_size]
+        self._apply_survivors(survivors)
+
+    def post_iteration(self, actual_iter: int) -> None:
+        if actual_iter == 0:
+            self.update_solution_state()
+            return
+
+        self._validate_evaluated_candidates()
+
+        if self._variance_scaling == "ce-avs":
+            self._ce_avs_replacement()
+        else:
+            if self._variance_scaling == "sdr-avs":
+                self._update_sdr_variance_multiplier()
+
+            for identifier in self._active_particle_ids:
+                self._population[identifier].consolidate(consolidate_new=True)
 
         self._active_particle_ids = set()
         self.update_solution_state()
