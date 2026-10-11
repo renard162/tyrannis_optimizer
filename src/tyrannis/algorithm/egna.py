@@ -103,7 +103,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
             - ``"sdr-avs"``: applies Standard-Deviation Ratio triggered Adaptive
               Variance Scaling.
             - ``"ce-avs"``: applies two-stage Cross-Entropy Adaptive Variance
-              Scaling and is the default.
+              Scaling.
 
         edge_exclusion_alpha : float, default=0.05
             Significance level used only when

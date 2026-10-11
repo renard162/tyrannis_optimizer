@@ -12,15 +12,38 @@ Tyrannis contract, without claiming independent bibliographic verification.
 Linear Gaussian conditionals model selected P_(t-1). Tyrannis specifies affine
 [0,1] coordinates, truncated-normal ancestral sampling, prior settings,
 structure reuse/addition/deletion tolerance, precision stabilization and
-random caches. Its full generational replacement gives sampled P_t; t=0 is
-setup. Numerical degeneracies are unit-test territory unless naturally reached.
+random caches. At t=0 EGNA initializes. Thereafter no-scaling replaces every
+parent with its offspring; SDR-AVS retains the selected set and samples only
+its complement; CE-AVS keeps the best n from the parent/offspring union.
+
+Bosman, Grahl & Rothlauf (2007), GECCO, 492-499,
+doi:10.1145/1276958.1277066, eqs. (3)-(4) and Figure 1, supplies the conditional
+centroid SDR trigger, covariance multiplier and selected-set retention:
+https://homepages.cwi.nl/~bosman/publications/2007_sdrabetter.pdf
+Cai, Sun, Xu & Jia (2007), GECCO, 609-616, doi:10.1145/1276958.1277081,
+sections 3.2-3.3, supplies CE-AVS's two-stage SD factor a=a1+a2:
+https://www.researchgate.net/publication/220740836_Cross_entropy_and_adaptive_variance_scaling_in_continuous_EDA
+The author-uploaded full text was consulted. Soloviev, Bielza & Larranaga
+(2024), doi:10.1109/TEVC.2023.3290670, is an additional production reference,
+not the source of these AVS oracles.
+
+The global factor multiplies conditional residual SDs, leaving means and
+regressions unchanged: sqrt(c_AVS) for SDR, a for CE. Joint GBN covariance
+is (I-B)^-1 D (I-B)^-T. Tyrannis specifies worst-selected strict improvement,
+c_AVS>=1 (also in Bosman's Figure 1), normalized truncated sampling, positive
+adaptive residual floors, spectral covariance regularization, and survivor
+redistribution over persistent identifiers. These are tested as its contract;
+Cai's experiments also use Boltzmann selection and other replacement policies,
+so the present EGNA integration is not a reproduction of every paper setting.
+Numerical degeneracies are covered only through legitimate selected data.
 """
 
+from collections import Counter
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import partial
-from math import exp, floor, lgamma, log, pi, sqrt
+from math import exp, floor, lgamma, log, nextafter, pi, sqrt
 from statistics import NormalDist
 from typing import cast, override
 
@@ -93,6 +116,20 @@ class Generation:
     )
     before_post: Population = field(default_factory=dict)
     after: Population = field(default_factory=dict)
+    scaling: str = "no-scaling"
+    selected_ids: tuple[str, ...] = ()
+    selected_threshold: float | None = None
+    sampling_scale: float = 1.0
+    sdr_before: float = 1.0
+    sdr_after: float = 1.0
+    sdr_centroid: Array | None = None
+    sdr_ratio: float | None = None
+    ce_mean_before: Array | None = None
+    ce_covariance_before: Array | None = None
+    ce_mean_after: Array | None = None
+    ce_covariance_after: Array | None = None
+    population_moments: tuple[Array, Array] | None = None
+    fitted_conditionals: tuple[ConditionalNormal, ...] = ()
 
 
 class ObservedEGNA(EGNA):
@@ -101,6 +138,8 @@ class ObservedEGNA(EGNA):
     # Production uses bare ndarray annotations; specialize observation boundaries.
     _lower_bounds: Array | None
     _spans: Array | None
+    _ce_previous_model_mean: Array | None
+    _ce_previous_model_covariance: Array | None
 
     @override
     def pre_iteration(self, actual_iter: int) -> None:
@@ -110,8 +149,17 @@ class ObservedEGNA(EGNA):
         self.generations[actual_iter] = Generation(
             deepcopy(self.population), self._parents
         )
-        super().pre_iteration(actual_iter)
         g = self.generations[actual_iter]
+        g.scaling = self.variance_scaling
+        g.sdr_before = self._sdr_variance_multiplier
+        g.ce_mean_before = deepcopy(self._ce_previous_model_mean)
+        g.ce_covariance_before = deepcopy(self._ce_previous_model_covariance)
+        super().pre_iteration(actual_iter)
+        g.selected_ids = self._selected_particle_ids
+        g.selected_threshold = self._selected_fitness_threshold
+        g.sampling_scale = self._sampling_standard_deviation_scale
+        g.ce_mean_after = deepcopy(self._ce_previous_model_mean)
+        g.ce_covariance_after = deepcopy(self._ce_previous_model_covariance)
         g.parents, g.order = self._parents, self._topological_order
         g.conditionals = deepcopy(self._conditionals)
         g.active = self._active_particle_ids.copy()
@@ -130,6 +178,24 @@ class ObservedEGNA(EGNA):
     def _learn_probability_model(self, selected_data: Array) -> None:
         cast(Callable[[Array], None], super()._learn_probability_model)(selected_data)
         self.generations[self.iteration].fits += 1
+        self.generations[self.iteration].fitted_conditionals = deepcopy(
+            self._conditionals
+        )
+
+    @override
+    def _population_moments(self) -> tuple[Array, Array]:
+        result = cast(Callable[[], tuple[Array, Array]], super()._population_moments)()
+        self.generations[self.iteration].population_moments = deepcopy(result)
+        return result
+
+    @override
+    def _sdr_conditional_ratio(self, centroid: Array) -> float:
+        result = cast(Callable[[Array], float], super()._sdr_conditional_ratio)(
+            centroid
+        )
+        g = self.generations[self.iteration]
+        g.sdr_centroid, g.sdr_ratio = centroid.copy(), result
+        return result
 
     @override
     def _local_bic_score(
@@ -218,6 +284,7 @@ class ObservedEGNA(EGNA):
         g.before_post = deepcopy(self.population)
         super().post_iteration(actual_iter)
         g.after = deepcopy(self.population)
+        g.sdr_after = self._sdr_variance_multiplier
 
 
 def run_egna(
@@ -261,8 +328,10 @@ def bounds() -> dict[str, tuple[float, float]]:
 
 
 @pytest.fixture
-def trajectory(bounds: dict[str, tuple[float, float]]) -> ObservedEGNA:
-    return run_egna(ObservedEGNA(selection_fraction=0.6), bounds)
+def no_scaling_trajectory(bounds: dict[str, tuple[float, float]]) -> ObservedEGNA:
+    return run_egna(
+        ObservedEGNA(selection_fraction=0.6, variance_scaling="no-scaling"), bounds
+    )
 
 
 def assert_selection(a: ObservedEGNA, bounds: dict[str, tuple[float, float]]) -> None:
@@ -298,14 +367,23 @@ def assert_selection(a: ObservedEGNA, bounds: dict[str, tuple[float, float]]) ->
             remaining.remove(p)
             fitness.append(float(p.fitness))
         assert fitness == sorted(float(p.fitness) for p in previous.values())[:count]
+        assert [float(previous[key].fitness) for key in g.selected_ids] == fitness
+        assert g.selected_threshold == fitness[-1]
+        for index, key in enumerate(g.selected_ids):
+            np.testing.assert_allclose(
+                cast(Array, g.selected[index]),
+                (np.array(list(previous[key].variables.values())) - lower) / spans,
+                rtol=STRICT_RTOL,
+                atol=STRICT_ATOL,
+            )
         assert np.all(np.isfinite(g.selected))
 
 
 def test_setup_affine_normalization_and_truncation_selection(
-    trajectory: ObservedEGNA,
+    no_scaling_trajectory: ObservedEGNA,
     bounds: dict[str, tuple[float, float]],
 ) -> None:
-    a = trajectory
+    a = no_scaling_trajectory
     g = a.generations[0]
     assert a.names == tuple(bounds)
     assert a.lower is not None and a.spans is not None
@@ -442,7 +520,7 @@ def test_bic_local_scores_and_first_forward_search(
     # Case 4 has an improving dependency; case 0 rejects both initial additions.
     for case in (4, 0):
         a = run_egna(
-            ObservedEGNA(selection_fraction=0.6),
+            ObservedEGNA(selection_fraction=0.6, variance_scaling="no-scaling"),
             bounds,
             iterations=1,
             seed=seed_for(case),
@@ -459,7 +537,10 @@ def test_bic_reuses_previous_structure_and_accepts_improving_deletion(
     bounds: dict[str, tuple[float, float]],
 ) -> None:
     a = run_egna(
-        ObservedEGNA(selection_fraction=0.6), bounds, iterations=3, seed=seed_for(11)
+        ObservedEGNA(selection_fraction=0.6, variance_scaling="no-scaling"),
+        bounds,
+        iterations=3,
+        seed=seed_for(11),
     )
     additions = deletions = 0
     for t in range(1, 4):
@@ -483,6 +564,7 @@ def test_bge_default_and_explicit_priors_local_evidence_and_search(
             ObservedEGNA(
                 selection_fraction=0.75,
                 structure_learning="bge",
+                variance_scaling="no-scaling",
                 bge_alpha_mu=alpha_mu,
                 bge_alpha_w=configured_w,
             ),
@@ -528,6 +610,7 @@ def test_edge_exclusion_partial_correlations_and_finite_sample_correction(
         ObservedEGNA(
             selection_fraction=0.75,
             structure_learning="edge-exclusion",
+            variance_scaling="no-scaling",
             edge_exclusion_alpha=0.2,
         ),
         bounds,
@@ -623,7 +706,10 @@ def assert_conditionals(g: Generation) -> None:
         np.testing.assert_allclose(
             cast(Array, observed.coefficients), beta, rtol=LINALG_RTOL, atol=LINALG_ATOL
         )
-        expected_sd = 0.0 if sd <= sqrt(np.finfo(float).eps) else sd
+        if g.scaling == "no-scaling":
+            expected_sd = 0.0 if sd <= sqrt(np.finfo(float).eps) else sd
+        else:
+            expected_sd = max(sd, sqrt(np.finfo(float).eps))
         assert observed.standard_deviation == pytest.approx(
             expected_sd, rel=LINALG_RTOL, abs=LINALG_ATOL
         )
@@ -633,10 +719,10 @@ def assert_conditionals(g: Generation) -> None:
 
 
 def test_gaussian_roots_children_and_topological_order(
-    trajectory: ObservedEGNA,
+    no_scaling_trajectory: ObservedEGNA,
 ) -> None:
     roots = children = 0
-    for t, g in trajectory.generations.items():
+    for t, g in no_scaling_trajectory.generations.items():
         if t:
             assert_conditionals(g)
             roots += sum(not parents for parents in g.parents)
@@ -645,7 +731,7 @@ def test_gaussian_roots_children_and_topological_order(
 
 
 def truncated_quantile(mean: float, sd: float, u: float) -> float:
-    if sd <= sqrt(np.finfo(float).eps):
+    if sd == 0.0:
         return min(1.0, max(0.0, mean))
     normal = NormalDist(mean, sd)
     lower, upper = normal.cdf(0.0), normal.cdf(1.0)
@@ -657,7 +743,9 @@ def test_cached_uniforms_exact_ancestral_sampling_and_truncation(
 ) -> None:
     # This small real trajectory includes substantial mass outside the box.
     trajectory = run_egna(
-        ObservedEGNA(selection_fraction=0.6), bounds, seed=seed_for(3)
+        ObservedEGNA(selection_fraction=0.6, variance_scaling="no-scaling"),
+        bounds,
+        seed=seed_for(3),
     )
     lower = np.array([b[0] for b in bounds.values()])
     spans = np.array([b[1] - b[0] for b in bounds.values()])
@@ -668,6 +756,7 @@ def test_cached_uniforms_exact_ancestral_sampling_and_truncation(
         if not t:
             continue
         assert_conditionals(g)
+        assert g.sampling_scale == 1.0
         assert len(g.caches) == 1
         initialize, caches = g.caches[0]
         assert not initialize and set(caches) == set(g.before)
@@ -689,6 +778,7 @@ def test_cached_uniforms_exact_ancestral_sampling_and_truncation(
             for child in g.order:
                 parents = g.parents[child]
                 mean, parent_means, beta, sd = conditional(g.selected, child, parents)
+                sd = (0.0 if sd <= sqrt(np.finfo(float).eps) else sd) * g.sampling_scale
                 mu = mean + float(beta @ (expected[list(parents)] - parent_means))
                 u = float(cast(np.float64, uniforms[child]))
                 value = truncated_quantile(mu, sd, u)
@@ -743,7 +833,11 @@ def test_affine_model_invariance(bounds: dict[str, tuple[float, float]]) -> None
     unit_bounds = {name: (0.0, 1.0) for name in bounds}
     runs = [
         run_egna(
-            ObservedEGNA(selection_fraction=0.75, structure_learning="bge"),
+            ObservedEGNA(
+                selection_fraction=0.75,
+                structure_learning="bge",
+                variance_scaling="no-scaling",
+            ),
             box,
             objective=constant_objective,
             iterations=1,
@@ -774,9 +868,9 @@ def test_affine_model_invariance(bounds: dict[str, tuple[float, float]]) -> None
 
 
 def test_one_synchronous_model_precedes_the_entire_sampling_sweep(
-    trajectory: ObservedEGNA,
+    no_scaling_trajectory: ObservedEGNA,
 ) -> None:
-    for t, g in trajectory.generations.items():
+    for t, g in no_scaling_trajectory.generations.items():
         if not t:
             continue
         assert g.fits == 1
@@ -807,10 +901,10 @@ def test_one_synchronous_model_precedes_the_entire_sampling_sweep(
 
 
 def test_full_generational_replacement_including_worse_candidates(
-    trajectory: ObservedEGNA,
+    no_scaling_trajectory: ObservedEGNA,
 ) -> None:
     worse = 0
-    for t, g in trajectory.generations.items():
+    for t, g in no_scaling_trajectory.generations.items():
         if not t:
             continue
         assert set(g.before) == set(g.before_post) == set(g.after) == g.active
@@ -862,8 +956,480 @@ def test_infinite_fitness_ordering_and_ties_keep_finite_models() -> None:
         for t, g in run.generations.items():
             if t:
                 assert_conditionals(g)
+                _ = assert_sdr_transition(run, t, bounds)
                 assert np.all(np.isfinite(g.selected))
                 assert all(np.isfinite(score) for score in g.scores.values())
                 assert all(
                     np.all(np.isfinite(list(s.values.values()))) for s in g.samples
                 )
+
+
+def normalized(
+    variables: dict[str, float], bounds: dict[str, tuple[float, float]]
+) -> Array:
+    return np.array(
+        [(variables[name] - low) / (high - low) for name, (low, high) in bounds.items()]
+    )
+
+
+def assert_scaled_sampling(
+    g: Generation, bounds: dict[str, tuple[float, float]]
+) -> None:
+    """Independent inverse-CDF sampling, with the base fit checked against data."""
+    assert_conditionals(g)
+    for records in (g.fitted_conditionals, *(s.conditionals for s in g.samples)):
+        for actual, base in zip(records, g.conditionals, strict=True):
+            assert actual.mean == base.mean
+            assert actual.standard_deviation == base.standard_deviation
+            assert actual.parent_indices == base.parent_indices
+            np.testing.assert_array_equal(
+                cast(Array, actual.coefficients), cast(Array, base.coefficients)
+            )
+            np.testing.assert_array_equal(
+                cast(Array, actual.parent_means), cast(Array, base.parent_means)
+            )
+    initialize, caches = g.caches[0]
+    assert not initialize and len(g.caches) == 1
+    assert set(caches) == set(g.before)
+    assert_valid_permutation([s.identifier for s in g.samples], list(g.active))
+    for identifier, cache, particle in g.processed:
+        if identifier not in g.active:
+            assert cache == caches[identifier] == particle.random_cache == {}
+            assert particle.candidate_variables is None
+            assert particle.candidate_fitness is None
+        else:
+            assert set(cache) == set(caches[identifier]) == {"variable-uniforms"}
+            np.testing.assert_array_equal(
+                np.asarray(cache["variable-uniforms"], dtype=float),
+                np.asarray(particle.random_cache["variable-uniforms"], dtype=float),
+            )
+    for sample in g.samples:
+        uniforms = cast(
+            Array, np.asarray(sample.cache["variable-uniforms"], dtype=float)
+        )
+        np.testing.assert_array_equal(
+            uniforms,
+            np.asarray(caches[sample.identifier]["variable-uniforms"], dtype=float),
+        )
+        assert uniforms.shape == (len(bounds),)
+        assert np.all((0 <= uniforms) & (uniforms < 1))
+        expected: Array = np.full(len(bounds), np.nan)
+        for child in g.order:
+            parents = g.parents[child]
+            mean, parent_means, beta, sd = conditional(g.selected, child, parents)
+            if g.scaling == "no-scaling":
+                sd = 0.0 if sd <= sqrt(np.finfo(float).eps) else sd
+            else:
+                sd = max(sd, sqrt(np.finfo(float).eps))
+            mu = mean + float(beta @ (expected[list(parents)] - parent_means))
+            expected[child] = truncated_quantile(
+                mu, sd * g.sampling_scale, float(cast(np.float64, uniforms[child]))
+            )
+        np.testing.assert_allclose(
+            normalized(sample.values, bounds),
+            expected,
+            rtol=LINALG_RTOL,
+            atol=LINALG_ATOL,
+        )
+
+
+def assert_sdr_transition(
+    a: ObservedEGNA, t: int, bounds: dict[str, tuple[float, float]]
+) -> str:
+    """Bosman et al. eqs. (3)-(4); strict worst-selected improvement in Tyrannis."""
+    g = a.generations[t]
+    assert g.selected_threshold is not None
+    assert g.sdr_before == a.generations[t - 1].sdr_after
+    assert g.sampling_scale == pytest.approx(sqrt(g.sdr_before), rel=STRICT_RTOL)
+    improvements: list[Array] = []
+    for key in g.active:
+        p = g.before_post[key]
+        assert p.candidate_fitness is not None and p.candidate_variables is not None
+        if p.candidate_fitness < g.selected_threshold:
+            improvements.append(normalized(p.candidate_variables, bounds))
+    if not improvements:
+        assert g.sdr_centroid is None and g.sdr_ratio is None
+        expected = max(1.0, g.sdr_before * a.sdr_avs_eta_decay)
+        outcome = "decay" if g.sdr_before > 1 else "floor"
+    else:
+        centroid = cast(Array, np.mean(np.array(improvements), axis=0))
+        assert g.sdr_centroid is not None
+        np.testing.assert_allclose(
+            g.sdr_centroid, centroid, rtol=LINALG_RTOL, atol=LINALG_ATOL
+        )
+        ratios: list[float] = []
+        for child, parents in enumerate(g.parents):
+            mean, parent_means, beta, sd = conditional(g.selected, child, parents)
+            mu = mean + float(beta @ (centroid[list(parents)] - parent_means))
+            ratios.append(
+                abs(float(cast(np.float64, centroid[child])) - mu)
+                / (max(sd, sqrt(np.finfo(float).eps)) * sqrt(g.sdr_before))
+            )
+        ratio = max(ratios)
+        assert g.sdr_ratio == pytest.approx(ratio, rel=LINALG_RTOL, abs=LINALG_ATOL)
+        triggered = ratio > a.sdr_avs_threshold
+        expected = g.sdr_before / a.sdr_avs_eta_decay if triggered else g.sdr_before
+        outcome = "increase" if triggered else "unchanged"
+    assert g.sdr_after == pytest.approx(expected, rel=STRICT_RTOL, abs=STRICT_ATOL)
+    assert g.sdr_after >= 1
+    return outcome
+
+
+def test_conditional_variance_floor_differs_from_no_scaling() -> None:
+    # The public Continuous domain has two representable floats. Truncation on
+    # sphere selects four identical minima: legitimate data, no injected state.
+    bounds = {"x": (1.0, nextafter(1.0, 2.0))}
+    for branch in ("no-scaling", "sdr-avs", "ce-avs"):
+        a = run_egna(ObservedEGNA(variance_scaling=branch), bounds, iterations=2)
+        for t in (1, 2):
+            g = a.generations[t]
+            np.testing.assert_array_equal(g.selected, np.zeros((4, 1)))
+            assert_conditionals(g)
+            (model,) = g.conditionals
+            expected = 0.0 if branch == "no-scaling" else sqrt(np.finfo(float).eps)
+            assert model.standard_deviation == expected
+            if branch == "no-scaling":
+                assert g.sampling_scale == 1
+                assert g.active == set(g.before)
+                assert_scaled_sampling(g, bounds)
+                assert all(s.values == {"x": 1.0} for s in g.samples)
+            if branch == "ce-avs":
+                assert g.ce_covariance_after is not None
+                # Relative-only tolerance distinguishes epsilon from zero.
+                np.testing.assert_allclose(
+                    g.ce_covariance_after,
+                    [[np.finfo(float).eps]],
+                    rtol=LINALG_RTOL,
+                    atol=0,
+                )
+                if t == 2:
+                    assert g.population_moments is not None
+                    mean, covariance = g.population_moments
+                    np.testing.assert_array_equal(mean, [0.0])
+                    # Population is a point mass; the spectral floor is eps*d.
+                    np.testing.assert_allclose(
+                        covariance, [[np.finfo(float).eps]], rtol=LINALG_RTOL, atol=0
+                    )
+
+
+def test_sdr_default_selected_retention_active_cache_and_replacement(
+    bounds: dict[str, tuple[float, float]],
+) -> None:
+    configured = ObservedEGNA(selection_fraction=0.6)
+    assert configured.variance_scaling == "sdr-avs"
+    a = run_egna(configured, bounds, iterations=3, seed=seed_for(2))
+    assert a.generations[0].sdr_after == a.generations[1].sdr_before == 1
+    assert a.generations[1].sampling_scale == 1
+    assert_selection(a, bounds)
+    worse = 0
+    for t in (1, 2, 3):
+        g = a.generations[t]
+        ranked = sorted(g.before, key=lambda key: g.before[key].fitness)
+        assert list(g.selected_ids) == ranked[: floor(0.6 * len(ranked))]
+        selected = set(g.selected_ids)
+        assert g.active == set(g.before) - selected
+        assert not selected & g.active and selected | g.active == set(g.before)
+        assert len(g.active) == len(g.before) - len(selected)
+        assert_scaled_sampling(g, bounds)
+        _ = assert_sdr_transition(a, t, bounds)
+        for key, after in g.after.items():
+            before, pending = g.before[key], g.before_post[key]
+            if key in selected:
+                assert (
+                    after.variables == before.variables
+                    and after.fitness == before.fitness
+                )
+                assert (
+                    pending.candidate_variables is None
+                    and pending.candidate_fitness is None
+                )
+            else:
+                assert after.variables == pending.candidate_variables
+                assert after.fitness == pending.candidate_fitness
+                worse += after.fitness > before.fitness
+    assert worse > 0
+
+
+def test_sdr_conditional_centroid_trigger_increases_variance_and_scales_sd(
+    bounds: dict[str, tuple[float, float]],
+) -> None:
+    # Case 4 supplies a detectable dependency; its score is checked from data.
+    a = run_egna(
+        ObservedEGNA(
+            selection_fraction=0.6, variance_scaling="sdr-avs", sdr_avs_threshold=0
+        ),
+        bounds,
+        seed=seed_for(4),
+    )
+    assert a.sdr_avs_eta_decay == 0.9
+    assert_selection(a, bounds)
+    for t in (1, 2):
+        g = a.generations[t]
+        assert any(g.parents)
+        assert_two_node_search(g, partial(bic, g.selected))
+        assert assert_sdr_transition(a, t, bounds) == "increase"
+        assert_scaled_sampling(g, bounds)
+    g = a.generations[2]
+    assert g.sdr_before == pytest.approx(1 / 0.9, rel=STRICT_RTOL)
+    assert g.sampling_scale != pytest.approx(g.sdr_before, rel=STRICT_RTOL)
+
+
+def test_sdr_no_improvement_decay_floor_and_below_trigger_unchanged(
+    bounds: dict[str, tuple[float, float]],
+) -> None:
+    plateau_bounds = {"x": (-1.0, 1.0), "y": (-2.0, 2.0)}
+    a = run_egna(
+        ObservedEGNA(
+            selection_fraction=0.6, variance_scaling="sdr-avs", sdr_avs_threshold=0
+        ),
+        plateau_bounds,
+        objective=signed_plateaus,
+        iterations=3,
+        seed=seed_for(0),
+    )
+    assert_selection(a, plateau_bounds)
+    assert [assert_sdr_transition(a, t, plateau_bounds) for t in (1, 2, 3)] == [
+        "increase",
+        "decay",
+        "floor",
+    ]
+    assert a.generations[2].selected_threshold == -np.inf
+    # Case 3 first grows twice, then decays without hitting the floor. This
+    # distinguishes multiplicative decay from an unconditional reset to one.
+    decaying = run_egna(
+        ObservedEGNA(
+            selection_fraction=0.6, variance_scaling="sdr-avs", sdr_avs_threshold=0
+        ),
+        plateau_bounds,
+        objective=signed_plateaus,
+        iterations=3,
+        seed=seed_for(3),
+    )
+    assert_selection(decaying, plateau_bounds)
+    assert [assert_sdr_transition(decaying, t, plateau_bounds) for t in (1, 2, 3)] == [
+        "increase",
+        "increase",
+        "decay",
+    ]
+    assert decaying.generations[1].selected_threshold == np.inf
+    last = decaying.generations[3]
+    assert 1 < last.sdr_after < last.sdr_before
+    tied = run_egna(
+        ObservedEGNA(
+            selection_fraction=0.6, variance_scaling="sdr-avs", sdr_avs_threshold=0
+        ),
+        bounds,
+        objective=constant_objective,
+        iterations=1,
+    )
+    # Equal fitness must not enter the centroid, even when the SDR threshold is 0.
+    assert assert_sdr_transition(tied, 1, bounds) == "floor"
+    held = run_egna(
+        ObservedEGNA(
+            selection_fraction=0.6, variance_scaling="sdr-avs", sdr_avs_threshold=100
+        ),
+        bounds,
+        iterations=2,
+        seed=seed_for(4),
+    )
+    for t in (1, 2):
+        assert assert_sdr_transition(held, t, bounds) == "unchanged"
+        assert_scaled_sampling(held.generations[t], bounds)
+
+
+def spectral_floor(covariance: Array) -> Array:
+    """Smallest isotropic shift making lambda_min >= eps*d*max(1, |diag|)."""
+    symmetric = (covariance + covariance.T) / 2
+    d = len(covariance)
+    # NumPy's reduction stubs erase the known float64 scalar dtype.
+    diagonal_max = float(cast(np.float64, np.max(np.abs(np.diag(symmetric)))))
+    smallest = float(cast(np.float64, np.linalg.eigvalsh(symmetric).min()))
+    target = np.finfo(float).eps * d * max(1.0, diagonal_max)
+    shift = max(0.0, target - smallest)
+    return symmetric + shift * np.eye(d)
+
+
+def joint_moments(g: Generation) -> tuple[Array, Array]:
+    """Solve the linear structural equations, using independent fits from S."""
+    d = len(g.parents)
+    regression: Array = np.zeros((d, d))
+    variances: Array = np.empty(d)
+    for child, parents in enumerate(g.parents):
+        _, _, beta, sd = conditional(g.selected, child, parents)
+        regression[child, list(parents)] = beta
+        variances[child] = max(sd**2, np.finfo(float).eps)
+    transition = np.linalg.inv(np.eye(d) - regression)
+    covariance = transition @ np.diag(variances) @ transition.T
+    return cast(Array, g.selected.mean(axis=0)), spectral_floor(covariance)
+
+
+@pytest.fixture
+def ce_avs_trajectory(bounds: dict[str, tuple[float, float]]) -> ObservedEGNA:
+    # A dependency and non-unit subsequent scales make covariance/SD confusion visible.
+    return run_egna(
+        ObservedEGNA(selection_fraction=0.6, variance_scaling="ce-avs"),
+        bounds,
+        iterations=3,
+        seed=seed_for(4),
+    )
+
+
+def test_ce_first_scale_and_joint_gaussian_moments(
+    ce_avs_trajectory: ObservedEGNA,
+) -> None:
+    a = ce_avs_trajectory
+    setup, first = a.generations[0], a.generations[1]
+    assert setup.ce_mean_after is setup.ce_covariance_after is None
+    assert first.ce_mean_before is first.ce_covariance_before is None
+    assert first.population_moments is None and first.sampling_scale == 1
+    for t in (1, 2, 3):
+        g = a.generations[t]
+        assert any(g.parents)
+        assert_conditionals(g)
+        mean, covariance = joint_moments(g)
+        assert g.ce_mean_after is not None and g.ce_covariance_after is not None
+        np.testing.assert_allclose(
+            g.ce_mean_after, mean, rtol=LINALG_RTOL, atol=LINALG_ATOL
+        )
+        np.testing.assert_allclose(
+            g.ce_covariance_after, covariance, rtol=LINALG_RTOL, atol=LINALG_ATOL
+        )
+        assert abs(float(cast(np.float64, covariance[0, 1]))) > LINALG_ATOL
+        assert np.all(np.linalg.eigvalsh(covariance) > 0)
+        if t > 1:
+            previous_mean, previous_covariance = joint_moments(a.generations[t - 1])
+            assert g.ce_mean_before is not None and g.ce_covariance_before is not None
+            np.testing.assert_allclose(
+                g.ce_mean_before, previous_mean, rtol=LINALG_RTOL, atol=LINALG_ATOL
+            )
+            np.testing.assert_allclose(
+                g.ce_covariance_before,
+                previous_covariance,
+                rtol=LINALG_RTOL,
+                atol=LINALG_ATOL,
+            )
+
+
+def test_ce_two_stage_scale_uses_previous_survivors_and_scaled_sampling(
+    ce_avs_trajectory: ObservedEGNA,
+    bounds: dict[str, tuple[float, float]],
+) -> None:
+    a = ce_avs_trajectory
+    assert_selection(a, bounds)
+    for t in (1, 2, 3):
+        g = a.generations[t]
+        assert g.active == set(g.before)
+        assert_scaled_sampling(g, bounds)
+        if t == 1:
+            continue
+        # Sufficient statistics are taken from the preceding survivors, before
+        # this sweep's offspring exist; the previous model is stored unscaled.
+        previous = a.generations[t - 1]
+        data = np.array(
+            [normalized(p.variables, bounds) for p in previous.after.values()]
+        )
+        mean = cast(Array, np.mean(data, axis=0))
+        covariance = spectral_floor(cast(Array, np.cov(data, rowvar=False, bias=True)))
+        assert g.population_moments is not None
+        observed_mean, observed_covariance = g.population_moments
+        np.testing.assert_allclose(
+            observed_mean, mean, rtol=LINALG_RTOL, atol=LINALG_ATOL
+        )
+        np.testing.assert_allclose(
+            observed_covariance, covariance, rtol=LINALG_RTOL, atol=LINALG_ATOL
+        )
+        assert not np.allclose(covariance, np.cov(data, rowvar=False, bias=False))
+        old_mean, old_covariance = joint_moments(previous)
+        new_mean, _ = joint_moments(g)
+        # Whiten with Cholesky instead of reproducing production's three solves.
+        whitening = np.linalg.inv(np.linalg.cholesky(old_covariance))
+        covariance_term = float(
+            cast(np.float64, np.trace(whitening @ covariance @ whitening.T))
+        )
+        population_shift = whitening @ (old_mean - mean)
+        model_shift = whitening @ (old_mean - new_mean)
+        population_term = float(population_shift @ population_shift)
+        model_term = float(model_shift @ model_shift)
+        d = len(bounds)
+        a1 = sqrt((covariance_term + population_term) / d)
+        a2 = sqrt(model_term / d)
+        assert covariance_term > 0 and population_term > 0 and model_term > 0
+        expected = a1 + a2
+        assert g.sampling_scale == pytest.approx(
+            expected, rel=LINALG_RTOL, abs=LINALG_ATOL
+        )
+        # Each term matters, including the compositive (not quadratic) sum.
+        for wrong in (
+            a1,
+            a2,
+            sqrt(covariance_term / d) + a2,
+            sqrt(a1 * a1 + a2 * a2),
+            sqrt(expected),
+            expected**2,
+        ):
+            assert g.sampling_scale != pytest.approx(
+                wrong, rel=LINALG_RTOL, abs=LINALG_ATOL
+            )
+        # The raw previous offspring distribution is not the survivor population.
+        raw_offspring = np.array(
+            [normalized(s.values, bounds) for s in previous.samples]
+        )
+        assert not np.allclose(
+            cast(Array, raw_offspring.mean(axis=0)),
+            mean,
+            rtol=LINALG_RTOL,
+            atol=LINALG_ATOL,
+        )
+
+
+def test_ce_truncate_replacement_parent_offspring_union_and_ties(
+    ce_avs_trajectory: ObservedEGNA,
+    bounds: dict[str, tuple[float, float]],
+) -> None:
+    tied = run_egna(
+        ObservedEGNA(selection_fraction=0.6, variance_scaling="ce-avs"),
+        bounds,
+        objective=constant_objective,
+        iterations=1,
+    )
+    for a in (ce_avs_trajectory, tied):
+        for t, g in a.generations.items():
+            if t == 0:
+                continue
+            assert g.active == set(g.before) and len(g.samples) == len(g.before)
+            parents = [
+                (tuple(p.variables.values()), float(p.fitness))
+                for p in g.before.values()
+            ]
+            offspring: list[tuple[tuple[float, ...], float]] = []
+            for key in g.active:
+                p = g.before_post[key]
+                assert (
+                    p.candidate_variables is not None
+                    and p.candidate_fitness is not None
+                )
+                offspring.append(
+                    (tuple(p.candidate_variables.values()), float(p.candidate_fitness))
+                )
+            survivors = Counter(
+                (tuple(p.variables.values()), float(p.fitness))
+                for p in g.after.values()
+            )
+            union = parents + offspring
+            assert len(union) == 2 * len(g.before)
+            # Multisets preserve duplicate solutions and allow arbitrary tie order.
+            assert survivors <= Counter(union)
+            ranked = sorted(union, key=lambda solution: solution[1])
+            expected = ranked[: len(g.before)]
+            assert sorted(fitness for _, fitness in survivors.elements()) == [
+                f for _, f in expected
+            ]
+            cutoff = expected[-1][1]
+            assert Counter(s for s in union if s[1] < cutoff) <= survivors
+            if a is ce_avs_trajectory:
+                assert len({f for _, f in union}) == len(union)
+                assert survivors == Counter(expected)
+                assert survivors & Counter(parents)
+                assert survivors & Counter(offspring)
+            else:
+                assert {f for _, f in union} == {1.0}
