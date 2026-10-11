@@ -41,7 +41,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         self,
         selection_fraction: float = 0.5,
         structure_learning: str = "bic",
-        variance_scaling: str = "ce-avs",
+        variance_scaling: str = "sdr-avs",
         edge_exclusion_alpha: float = 0.05,
         bge_alpha_mu: float = 1.0,
         bge_alpha_w: float | None = None,
@@ -94,7 +94,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
             - ``"edge-exclusion"``: learns the network through conditional
               independence tests that determine which edges should be excluded.
 
-        variance_scaling : {"no-scaling", "sdr-avs", "ce-avs"}, default="ce-avs"
+        variance_scaling : {"no-scaling", "sdr-avs", "ce-avs"}, default="sdr-avs"
             Defines how the variance of the learned Gaussian network is treated
             before offspring sampling.
 
