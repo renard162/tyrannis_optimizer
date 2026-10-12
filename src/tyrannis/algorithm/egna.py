@@ -1,13 +1,17 @@
 from collections.abc import Collection
 from copy import deepcopy
 from dataclasses import dataclass
+from math import sqrt
+from typing import cast
 
 import numpy as np
 from scipy.sparse.csgraph import shortest_path
 from scipy.special import gammaln
-from scipy.stats import chi2, truncnorm
+from scipy.stats import chi2
 
 from ..core.algorithm import FITNESS_UNDEFINED, AlgorithmBase, ParticleBase
+
+_FloatArray = np.ndarray[tuple[int, ...], np.dtype[np.float64]]
 
 
 @dataclass(frozen=True)
@@ -15,8 +19,8 @@ class _ConditionalNormal:
     variable_index: int
     parent_indices: tuple[int, ...]
     mean: float
-    parent_means: np.ndarray
-    coefficients: np.ndarray
+    parent_means: _FloatArray
+    coefficients: _FloatArray
     standard_deviation: float
 
 
@@ -26,8 +30,8 @@ class _BGeContext:
     dimension: int
     alpha_mu: float
     alpha_w: float
-    prior_scale: np.ndarray
-    posterior_scale: np.ndarray
+    prior_scale: _FloatArray
+    posterior_scale: _FloatArray
 
 
 class EGNAParticle(ParticleBase):
@@ -46,7 +50,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         bge_alpha_mu: float = 1.0,
         bge_alpha_w: float | None = None,
         sdr_avs_eta_decay: float = 0.9,
-        sdr_avs_threshold: float = 1.0,
+        sdr_avs_threshold: float = 1.0
     ) -> None:
         """
         Estimation of Gaussian Networks Algorithm (EGNA).
@@ -64,7 +68,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         likelihood with the Bayesian Information Criterion, ``"bge"`` uses the
         score-equivalent Bayesian Gaussian equivalent metric, and
         ``"edge-exclusion"`` tests edges in the saturated Gaussian graphical model
-        and converts the retained dependencies to an ordered Gaussian network.
+        and fits a Gaussian concentration model to the retained dependencies.
 
         The ``variance_scaling`` argument controls whether the learned Gaussian
         network is sampled without variance scaling or with one of two published
@@ -115,13 +119,13 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         bge_alpha_mu : float, default=1.0
             Positive equivalent sample size for the mean component of the
             normal-Wishart prior used only when ``structure_learning="bge"``.
-            The default follows a standard weak BGe prior specification.
+            The default follows a conventional normal-Wishart BGe prior specification.
 
         bge_alpha_w : float or None, default=None
             Wishart equivalent sample size used only when
             ``structure_learning="bge"``. ``None`` resolves to ``d + 2``, where
             ``d`` is the number of encoded variables, following the conventional
-            weak proper BGe prior. An explicitly supplied value must be greater
+            proper BGe prior. An explicitly supplied value must be greater
             than ``d + 1`` because the associated isotropic prior scale must be
             strictly positive.
 
@@ -165,7 +169,11 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         from the empty graph. Later generations use the previously learned structure
         as the starting point of a local search that considers one-edge additions
         and deletions and accepts the modification giving the largest strict BIC
-        improvement.
+        improvement. If an inherited family becomes rank deficient, redundant
+        parent columns are removed while preserving its fitted projection before
+        resuming score comparisons. A machine-precision variance floor makes the
+        likelihood finite for exactly fitted data; there is no finite unrestricted
+        Gaussian maximum likelihood estimate in that case.
 
         With ``structure_learning="bge"``, the same search policy is used but the
         local score is the Bayesian Gaussian equivalent marginal likelihood. A
@@ -179,6 +187,9 @@ class EGNA(AlgorithmBase[EGNAParticle]):
 
         ``t = alpha_mu * (alpha_w - d - 1) / (alpha_mu + 1)``.
 
+        The fixed box-centered mean and unit prior-predictive marginal variance
+        are prior choices in normalized coordinates, not universal EGNA defaults.
+
         With ``structure_learning="edge-exclusion"``, edge-exclusion tests are
         applied to the saturated Gaussian graphical model. For variables ``X_i``
         and ``X_j``, the sample partial correlation conditioned on all remaining
@@ -189,9 +200,13 @@ class EGNA(AlgorithmBase[EGNAParticle]):
 
         Edges whose conditional-independence null hypothesis is not rejected at
         ``edge_exclusion_alpha`` are removed. Retained undirected dependencies are
-        represented as directed edges from earlier to later variables in the stable
-        encoded-variable order, producing an acyclic network suitable for Gaussian
-        ancestral sampling.
+        constraints on the precision matrix, not as directed edges. The covariance
+        is fitted by constrained Gaussian maximum likelihood, then factored using
+        all predecessors in encoded-variable order. This chain-rule factorization
+        preserves the fitted joint distribution, including for nonchordal graphs.
+        The p-value uses the first-order finite-sample CDF correction; on singular
+        data, machine-precision covariance stabilization is a numerical extension,
+        not an exact significance test for the original degenerate sample.
 
         With ``variance_scaling="no-scaling"``, the learned conditional standard
         deviations are sampled without adaptive scaling and the complete offspring
@@ -241,9 +256,14 @@ class EGNA(AlgorithmBase[EGNAParticle]):
 
         Tyrannis optimizes over finite encoded boundaries. Model fitting is carried
         out after an affine normalization of every encoded variable to ``[0, 1]``.
-        Sampling uses the corresponding conditional Gaussian truncated to that
-        interval, which preserves valid encoded candidates without placing clipped
-        probability mass directly on the boundaries.
+        Sampling generates the complete unbounded Gaussian network and rejects
+        the whole vector if any coordinate is outside that interval. Accepted
+        vectors therefore follow the joint Gaussian conditioned on the box.
+        Variance scaling applies to the Gaussian proposal; the covariance after
+        conditioning generally differs from that proposal covariance. CE-AVS keeps
+        its published unbounded-Gaussian adaptation rule, not a new truncated-KL
+        minimizer. After 100,000 unsuccessful proposals an explicit sampling error
+        is raised rather than substituting another distribution.
 
         References
         ----------
@@ -262,6 +282,14 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         Geiger, D., & Heckerman, D. (1994). Learning Gaussian Networks.
         Uncertainty Proceedings 1994, 235-243.
         https://doi.org/10.1016/B978-1-55860-332-5.50035-3
+
+        Kuipers, J., Moffa, G., & Heckerman, D. (2014). Addendum on the
+        Scoring of Gaussian Directed Acyclic Graphical Models.
+        Annals of Statistics, 42(4), 1689-1691.
+        https://doi.org/10.1214/14-AOS1217
+
+        Dempster, A. P. (1972). Covariance Selection. Biometrics, 28(1), 157-175.
+        https://doi.org/10.2307/2528966
 
         Smith, P. W. F., & Whittaker, J. (1998). Edge Exclusion Tests for
         Graphical Gaussian Models. In M. I. Jordan (Ed.), Learning in Graphical
@@ -377,8 +405,8 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         self._sdr_avs_threshold = float(sdr_avs_threshold)
 
         self._variable_names: tuple[str, ...] = ()
-        self._lower_bounds: np.ndarray | None = None
-        self._spans: np.ndarray | None = None
+        self._lower_bounds: _FloatArray | None = None
+        self._spans: _FloatArray | None = None
         self._parents: tuple[tuple[int, ...], ...] = ()
         self._topological_order: tuple[int, ...] = ()
         self._conditionals: tuple[_ConditionalNormal, ...] = ()
@@ -388,8 +416,8 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         self._variance_floor = np.finfo(float).eps
         self._sampling_standard_deviation_scale = 1.0
         self._sdr_variance_multiplier = 1.0
-        self._ce_previous_model_mean: np.ndarray | None = None
-        self._ce_previous_model_covariance: np.ndarray | None = None
+        self._ce_previous_model_mean: _FloatArray | None = None
+        self._ce_previous_model_covariance: _FloatArray | None = None
 
     @property
     def selection_fraction(self) -> float:
@@ -515,7 +543,9 @@ class EGNA(AlgorithmBase[EGNAParticle]):
             ),
         )
 
-    def _variables_to_normalized_array(self, variables: dict[str, float]) -> np.ndarray:
+    def _variables_to_normalized_array(
+        self, variables: dict[str, float]
+    ) -> _FloatArray:
         if self._lower_bounds is None or self._spans is None:
             raise RuntimeError("EGNA model context has not been initialized.")
 
@@ -525,7 +555,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         normalized = (values - self._lower_bounds) / self._spans
         return np.clip(normalized, 0.0, 1.0)
 
-    def _normalized_array_to_variables(self, values: np.ndarray) -> dict[str, float]:
+    def _normalized_array_to_variables(self, values: _FloatArray) -> dict[str, float]:
         if self._lower_bounds is None or self._spans is None:
             raise RuntimeError("EGNA model context has not been initialized.")
 
@@ -533,11 +563,13 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         encoded = self._lower_bounds + bounded * self._spans
 
         return {
-            name: float(value)
+            # Only floating-point affine roundoff is clamped: the proposal was
+            # already accepted inside the normalized box before this conversion.
+            name: float(np.clip(value, *self._boundaries[name]))
             for name, value in zip(self._variable_names, encoded, strict=True)
         }
 
-    def _selected_matrix(self) -> np.ndarray:
+    def _selected_matrix(self) -> _FloatArray:
         population_ids = list(self._population)
         population_size = len(population_ids)
 
@@ -572,8 +604,8 @@ class EGNA(AlgorithmBase[EGNAParticle]):
 
     @staticmethod
     def _adjacency_from_parents(
-        parents: list[set[int]] | tuple[tuple[int, ...], ...],
-    ) -> np.ndarray:
+        parents: list[set[int]] | tuple[tuple[int, ...], ...]
+    ) -> np.ndarray[tuple[int, ...], np.dtype[np.uint8]]:
         n_variables = len(parents)
         adjacency = np.zeros((n_variables, n_variables), dtype=np.uint8)
 
@@ -613,7 +645,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         return tuple(order)
 
     def _local_bic_score(
-        self, data: np.ndarray, child: int, parents: tuple[int, ...]
+        self, data: _FloatArray, child: int, parents: tuple[int, ...]
     ) -> float:
         y = data[:, child]
         n_samples = len(y)
@@ -630,8 +662,13 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         else:
             residuals = y - float(np.mean(y))
 
-        variance = max(float(np.mean(np.square(residuals))), self._variance_floor)
-        log_likelihood = -0.5 * n_samples * (np.log(2.0 * np.pi * variance) + 1.0)
+        residual_variance = float(np.mean(np.square(residuals)))
+        variance = max(residual_variance, self._variance_floor)
+        log_likelihood = (
+            -0.5
+            * n_samples
+            * (np.log(2.0 * np.pi * variance) + residual_variance / variance)
+        )
         n_parameters = len(parents) + 2
         penalty = 0.5 * n_parameters * np.log(n_samples)
         return float(log_likelihood - penalty)
@@ -644,7 +681,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
 
         return self._bge_alpha_w
 
-    def _prepare_bge_context(self, data: np.ndarray) -> _BGeContext:
+    def _prepare_bge_context(self, data: _FloatArray) -> _BGeContext:
         n_samples, dimension = data.shape
         alpha_mu = self._bge_alpha_mu
         alpha_w = self._resolve_bge_alpha_w()
@@ -679,7 +716,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         )
 
     @staticmethod
-    def _submatrix_logdet(matrix: np.ndarray, indices: tuple[int, ...]) -> float:
+    def _submatrix_logdet(matrix: _FloatArray, indices: tuple[int, ...]) -> float:
         if not indices:
             return 0.0
 
@@ -723,7 +760,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         return float(score)
 
     def _score_search_structure(
-        self, data: np.ndarray, metric: str
+        self, data: _FloatArray, metric: str
     ) -> tuple[tuple[int, ...], ...]:
         n_variables = data.shape[1]
         use_previous_structure = len(self._parents) == n_variables
@@ -757,6 +794,22 @@ class EGNA(AlgorithmBase[EGNAParticle]):
 
             score_cache[key] = value
             return value
+
+        if metric == "bic" and use_previous_structure:
+            for child in range(n_variables):
+                if np.isfinite(score(child, parents[child])):
+                    continue
+
+                # A basis of the inherited design preserves its projection and RSS.
+                # Removing dependent columns also reduces the parameter penalty.
+                design = np.ones((len(data), 1))
+                independent: set[int] = set()
+                for parent in sorted(parents[child]):
+                    candidate_design = np.column_stack((design, data[:, parent]))
+                    if np.linalg.matrix_rank(candidate_design) == design.shape[1] + 1:
+                        independent.add(parent)
+                        design = candidate_design
+                parents[child] = independent
 
         current_scores = [score(child, parents[child]) for child in range(n_variables)]
         allow_deletions = use_previous_structure
@@ -837,7 +890,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
 
         return tuple(tuple(sorted(parent_set)) for parent_set in parents)
 
-    def _regularized_precision(self, data: np.ndarray) -> np.ndarray:
+    def _regularized_precision(self, data: _FloatArray) -> _FloatArray:
         centered = data - np.mean(data, axis=0)
         covariance = centered.T @ centered / len(data)
         covariance = 0.5 * (covariance + covariance.T)
@@ -860,7 +913,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
             ) from error
 
     def _edge_exclusion_structure(
-        self, data: np.ndarray
+        self, data: _FloatArray
     ) -> tuple[tuple[int, ...], ...]:
         n_samples, n_variables = data.shape
         precision = self._regularized_precision(data)
@@ -889,31 +942,32 @@ class EGNA(AlgorithmBase[EGNAParticle]):
                 statistic = -n_samples * np.log1p(
                     -(partial_correlation * partial_correlation)
                 )
-                cdf = float(chi2.cdf(statistic, df=1))
                 statistic_density_product = np.sqrt(statistic / (2.0 * np.pi)) * np.exp(
                     -0.5 * statistic
                 )
                 correction = (
                     0.5 * (2 * n_variables + 1) * statistic_density_product / n_samples
                 )
-                corrected_cdf = float(np.clip(cdf - correction, 0.0, 1.0))
-                p_value = 1.0 - corrected_cdf
+                p_value = float(
+                    np.clip(chi2.sf(statistic, df=1) + correction, 0.0, 1.0)
+                )
 
                 if p_value < self._edge_exclusion_alpha:
                     parents[child].add(parent)
+                    parents[parent].add(child)
 
         return tuple(tuple(sorted(parent_set)) for parent_set in parents)
 
-    def _learn_structure(self, data: np.ndarray) -> tuple[tuple[int, ...], ...]:
+    def _learn_structure(self, data: _FloatArray) -> tuple[tuple[int, ...], ...]:
         if self._structure_learning == "edge-exclusion":
             return self._edge_exclusion_structure(data)
 
         return self._score_search_structure(data=data, metric=self._structure_learning)
 
     def _fit_conditionals(
-        self, data: np.ndarray, parents: tuple[tuple[int, ...], ...]
+        self, data: _FloatArray, parents: tuple[tuple[int, ...], ...]
     ) -> tuple[_ConditionalNormal, ...]:
-        means = np.mean(data, axis=0)
+        means = np.asarray(np.mean(data, axis=0), dtype=np.float64)
         conditionals: list[_ConditionalNormal] = []
 
         for variable, parent_indices in enumerate(parents):
@@ -938,9 +992,6 @@ class EGNA(AlgorithmBase[EGNAParticle]):
 
             if self._variance_scaling == "no-scaling":
                 standard_deviation = float(np.sqrt(variance))
-
-                if standard_deviation <= np.sqrt(self._variance_floor):
-                    standard_deviation = 0.0
             else:
                 variance = max(variance, self._variance_floor)
                 standard_deviation = float(np.sqrt(variance))
@@ -958,16 +1009,97 @@ class EGNA(AlgorithmBase[EGNAParticle]):
 
         return tuple(conditionals)
 
-    def _learn_probability_model(self, selected_data: np.ndarray) -> None:
+    def _fit_concentration_covariance(
+        self, data: _FloatArray, neighbors: tuple[tuple[int, ...], ...]
+    ) -> _FloatArray:
+        """Maximize logdet(Sigma) with empirical diagonal/edge entries fixed."""
+        centered = data - np.asarray(np.mean(data, axis=0), dtype=np.float64)
+        empirical = self._regularize_covariance_matrix(
+            centered.T @ centered / len(data)
+        )
+        deviations = np.sqrt(np.diag(empirical))
+        empirical = empirical / np.outer(deviations, deviations)
+        covariance = empirical.copy()
+        dimension = len(neighbors)
+        missing = np.ones((dimension, dimension), dtype=bool)
+        np.fill_diagonal(missing, False)
+        for node, adjacent in enumerate(neighbors):
+            missing[node, list(adjacent)] = False
+
+        if not np.any(missing):
+            return covariance * np.outer(deviations, deviations)
+
+        for _ in range(10_000):
+            for node, adjacent in enumerate(neighbors):
+                other = [index for index in range(dimension) if index != node]
+                if adjacent:
+                    coefficients = np.linalg.solve(
+                        covariance[np.ix_(adjacent, adjacent)],
+                        empirical[list(adjacent), node]
+                    )
+                    column = covariance[np.ix_(other, adjacent)] @ coefficients
+                else:
+                    column = np.zeros(dimension - 1)
+                covariance[other, node] = column
+                covariance[node, other] = column
+
+            precision = np.linalg.inv(covariance)
+            partial = precision / np.sqrt(
+                np.outer(np.diag(precision), np.diag(precision))
+            )
+            if np.max(np.abs(partial[missing])) <= 1e-10:
+                return covariance * np.outer(deviations, deviations)
+
+        raise RuntimeError("EGNA concentration-model likelihood fit did not converge.")
+
+    def _concentration_conditionals(
+        self, data: _FloatArray, neighbors: tuple[tuple[int, ...], ...]
+    ) -> tuple[_ConditionalNormal, ...]:
+        covariance = self._fit_concentration_covariance(data, neighbors)
+        means = np.asarray(np.mean(data, axis=0), dtype=np.float64)
+        conditionals: list[_ConditionalNormal] = []
+        for variable in range(data.shape[1]):
+            coefficients = np.linalg.solve(
+                covariance[:variable, :variable], covariance[:variable, variable]
+            )
+            # NumPy scalar indexing/matmul erases the known float64 scalar dtype.
+            variance = float(
+                cast(
+                    np.float64,
+                    covariance[variable, variable]
+                    - covariance[variable, :variable] @ coefficients
+                )
+            )
+            if variance <= 0 or not np.isfinite(variance):
+                raise RuntimeError(
+                    "EGNA concentration covariance is not positive definite."
+                )
+            conditionals.append(
+                _ConditionalNormal(
+                    variable_index=variable,
+                    parent_indices=tuple(range(variable)),
+                    mean=means.item(variable),
+                    parent_means=means[:variable].copy(),
+                    coefficients=coefficients,
+                    standard_deviation=sqrt(variance)
+                )
+            )
+        return tuple(conditionals)
+
+    def _learn_probability_model(self, selected_data: _FloatArray) -> None:
         parents = self._learn_structure(selected_data)
+        if self._structure_learning == "edge-exclusion":
+            conditionals = self._concentration_conditionals(selected_data, parents)
+            parents = tuple(conditional.parent_indices for conditional in conditionals)
+        else:
+            conditionals = self._fit_conditionals(data=selected_data, parents=parents)
         topological_order = self._topological_sort(parents)
-        conditionals = self._fit_conditionals(data=selected_data, parents=parents)
 
         self._parents = parents
         self._topological_order = topological_order
         self._conditionals = conditionals
 
-    def _regularize_covariance_matrix(self, covariance: np.ndarray) -> np.ndarray:
+    def _regularize_covariance_matrix(self, covariance: _FloatArray) -> _FloatArray:
         covariance = np.asarray(covariance, dtype=float)
         covariance = 0.5 * (covariance + covariance.T)
         eigenvalues = np.linalg.eigvalsh(covariance)
@@ -982,7 +1114,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
 
         return covariance
 
-    def _model_joint_moments(self) -> tuple[np.ndarray, np.ndarray]:
+    def _model_joint_moments(self) -> tuple[_FloatArray, _FloatArray]:
         n_variables = len(self._variable_names)
 
         if len(self._conditionals) != n_variables:
@@ -1017,7 +1149,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         covariance = self._regularize_covariance_matrix(covariance)
         return means, covariance
 
-    def _population_moments(self) -> tuple[np.ndarray, np.ndarray]:
+    def _population_moments(self) -> tuple[_FloatArray, _FloatArray]:
         if not self._population:
             raise ValueError("EGNA requires at least one particle.")
 
@@ -1036,8 +1168,8 @@ class EGNA(AlgorithmBase[EGNAParticle]):
 
     @staticmethod
     def _solve_positive_definite(
-        covariance: np.ndarray, value: np.ndarray
-    ) -> np.ndarray:
+        covariance: _FloatArray, value: _FloatArray
+    ) -> _FloatArray:
         try:
             return np.linalg.solve(covariance, value)
         except np.linalg.LinAlgError as error:
@@ -1047,11 +1179,11 @@ class EGNA(AlgorithmBase[EGNAParticle]):
 
     def _ce_avs_scale(
         self,
-        previous_model_mean: np.ndarray,
-        previous_model_covariance: np.ndarray,
-        population_mean: np.ndarray,
-        population_covariance: np.ndarray,
-        current_model_mean: np.ndarray,
+        previous_model_mean: _FloatArray,
+        previous_model_covariance: _FloatArray,
+        population_mean: _FloatArray,
+        population_covariance: _FloatArray,
+        current_model_mean: _FloatArray
     ) -> float:
         dimension = len(previous_model_mean)
         population_shift = previous_model_mean - population_mean
@@ -1155,7 +1287,9 @@ class EGNA(AlgorithmBase[EGNAParticle]):
                 continue
 
             particle.random_cache = {
-                "variable-uniforms": self._rng.random(len(self._variable_names))
+                "random_generator": np.random.default_rng(
+                    self._rng.integers(0, 2**32, size=4, dtype=np.uint32)
+                )
             }
 
     def initialize_particle(self, identifier: str) -> EGNAParticle:
@@ -1178,75 +1312,39 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         particle.consolidate(consolidate_new=True)
         return particle
 
-    @staticmethod
-    def _sample_truncated_normal(
-        mean: float, standard_deviation: float, random_value: float
-    ) -> float:
-        if standard_deviation == 0.0:
-            return float(np.clip(mean, 0.0, 1.0))
-
-        epsilon = np.finfo(float).eps
-        probability = float(np.clip(random_value, epsilon, 1.0 - epsilon))
-        lower = (0.0 - mean) / standard_deviation
-        upper = (1.0 - mean) / standard_deviation
-        value = float(
-            truncnorm.ppf(probability, lower, upper, loc=mean, scale=standard_deviation)
-        )
-
-        if not np.isfinite(value):
-            raise RuntimeError(
-                "EGNA truncated Gaussian sampling produced a non-finite value."
-            )
-
-        return float(np.clip(value, 0.0, 1.0))
-
     def _sample_candidate(self, particle: EGNAParticle) -> dict[str, float]:
         if not self._conditionals or not self._topological_order:
             raise RuntimeError("EGNA probability model has not been initialized.")
 
-        random_values = np.asarray(
-            particle.random_cache["variable-uniforms"], dtype=float
-        )
-
-        if random_values.shape != (len(self._variable_names),):
-            raise RuntimeError("EGNA random cache has an invalid sampling shape.")
-
-        candidate = np.full(len(self._variable_names), np.nan, dtype=float)
-
-        for variable in self._topological_order:
-            conditional = self._conditionals[variable]
-
-            if conditional.parent_indices:
-                parent_values = candidate[
-                    np.asarray(conditional.parent_indices, dtype=int)
-                ]
-
-                if np.any(np.isnan(parent_values)):
-                    raise RuntimeError(
-                        "EGNA attempted to sample a variable before one of its parents."
-                    )
-
+        local_rng: object = particle.random_cache["random_generator"]
+        if not isinstance(local_rng, np.random.Generator):
+            raise TypeError("EGNA sampling cache must contain a local Generator.")
+        for _ in range(100_000):
+            residuals = local_rng.standard_normal(len(self._variable_names))
+            candidate = np.full(len(self._variable_names), np.nan, dtype=float)
+            for variable in self._topological_order:
+                conditional = self._conditionals[variable]
+                parent_values = candidate[list(conditional.parent_indices)]
                 conditional_mean = float(
                     conditional.mean
                     + conditional.coefficients
                     @ (parent_values - conditional.parent_means)
                 )
-            else:
-                conditional_mean = conditional.mean
-
-            candidate[variable] = self._sample_truncated_normal(
-                mean=conditional_mean,
-                standard_deviation=(
-                    conditional.standard_deviation
+                candidate[variable] = (
+                    conditional_mean
+                    + conditional.standard_deviation
                     * self._sampling_standard_deviation_scale
-                ),
-                random_value=float(random_values[variable]),
-            )
+                    * residuals[variable]
+                )
 
-        if np.any(np.isnan(candidate)):
-            raise RuntimeError("EGNA produced an incomplete sampled candidate.")
+            if not np.all(np.isfinite(candidate)):
+                raise RuntimeError("EGNA produced a non-finite Gaussian candidate.")
+            if np.all((candidate >= 0.0) & (candidate <= 1.0)):
+                return self._normalized_array_to_variables(candidate)
 
-        return self._normalized_array_to_variables(candidate)
+        raise RuntimeError(
+            "EGNA joint Gaussian rejection sampling exhausted 100,000 attempts."
+        )
 
     def update_particle(self, identifier: str) -> EGNAParticle:
         particle = self._population[identifier]
@@ -1277,7 +1375,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
                     f"EGNA particle '{identifier}' has no evaluated candidate."
                 )
 
-    def _sdr_conditional_ratio(self, centroid: np.ndarray) -> float:
+    def _sdr_conditional_ratio(self, centroid: _FloatArray) -> float:
         ratios: list[float] = []
         standard_deviation_scale = float(np.sqrt(self._sdr_variance_multiplier))
 
@@ -1317,9 +1415,11 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         if threshold is None:
             raise RuntimeError("SDR-AVS selected-fitness threshold is unavailable.")
 
-        improvements: list[np.ndarray] = []
+        improvements: list[_FloatArray] = []
 
-        for identifier in self._active_particle_ids:
+        for identifier in self._population:
+            if identifier not in self._active_particle_ids:
+                continue
             particle = self._population[identifier]
             candidate_fitness = particle.candidate_fitness
             candidate_variables = particle.candidate_variables
@@ -1354,7 +1454,9 @@ class EGNA(AlgorithmBase[EGNAParticle]):
     def _offspring_solutions(self) -> list[tuple[dict[str, float], np.float64]]:
         offspring: list[tuple[dict[str, float], np.float64]] = []
 
-        for identifier in self._active_particle_ids:
+        for identifier in self._population:
+            if identifier not in self._active_particle_ids:
+                continue
             particle = self._population[identifier]
 
             if (
