@@ -1,4 +1,7 @@
+from math import sqrt
+
 import numpy as np
+from numpy.typing import NDArray
 
 from ..core.algorithm import FITNESS_UNDEFINED, AlgorithmBase, ParticleBase
 
@@ -27,12 +30,11 @@ class CMAESCandidateSolution(ParticleBase):
 class CMAES(AlgorithmBase[CMAESCandidateSolution]):
     """Covariance Matrix Adaptation Evolution Strategy algorithm."""
 
-    _MAX_RESAMPLING_ATTEMPTS = 100_000
-
     def __init__(
         self,
         sigma: float = 0.3,
         boundary_handling: str = "adaptive-penalty",
+        resampling_max_attempts: int = 100_000,
     ) -> None:
         """
         Covariance Matrix Adaptation Evolution Strategy (CMA-ES).
@@ -61,9 +63,14 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
             - ``"reflection"``: reflects the sample into the feasible domain while
               preserving the original Gaussian sample for CMA-ES adaptation.
             - ``"resampling"``: rejects infeasible samples and draws again until
-              a feasible sample is obtained.
+              a feasible sample is obtained or the attempt limit is reached.
             - ``"clip"``: clips the sample to the nearest feasible point and uses
               the clipped point both for evaluation and CMA-ES adaptation.
+
+        resampling_max_attempts : int, default=100_000
+            Maximum number of sampling attempts per candidate for
+            ``boundary_handling="resampling"``. Must be a positive integer.
+            Exhausting the limit raises ``RuntimeError`` without fallback.
 
         Notes
         -----
@@ -125,7 +132,9 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         evaluation while their original Gaussian coordinates are retained for
         distribution adaptation. With ``"resampling"``, infeasible samples are
         rejected before evaluation, so the evaluated point and the point used by
-        CMA-ES adaptation are identical.
+        CMA-ES adaptation are identical. Sampling is limited to
+        ``resampling_max_attempts`` attempts per candidate; exhausting the limit
+        raises an error without switching boundary handling strategies.
 
         ``"clip"`` preserves the legacy CMA-ES boundary behavior for compatibility.
         Samples outside the boundaries are clipped to the nearest feasible point,
@@ -165,6 +174,8 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         Application to Feedback Control of Combustion. IEEE Transactions on
         Evolutionary Computation, 13(1), 180-197.
         https://doi.org/10.1109/TEVC.2008.924423
+        Box-constraint handling follows the November 2011 errata/addenda:
+        https://www.cmap.polytechnique.fr/~nikolaus.hansen/TEC2009online.pdf
 
         Biedrzycki, R. (2020). Handling bound constraints in CMA-ES: An experimental
         study. Swarm and Evolutionary Computation, 52, 100627.
@@ -205,15 +216,18 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
 
         self._initial_sigma = float(sigma)
         self._boundary_handling = boundary_handling
+        self._resampling_max_attempts: int = self._validate_resampling_max_attempts(
+            resampling_max_attempts
+        )
 
-        self._mean: np.ndarray | None = None
-        self._covariance: np.ndarray | None = None
+        self._mean: NDArray[np.float64] | None = None
+        self._covariance: NDArray[np.float64] | None = None
         self._step_size: float | None = None
-        self._p_sigma: np.ndarray | None = None
-        self._p_c: np.ndarray | None = None
+        self._p_sigma: NDArray[np.float64] | None = None
+        self._p_c: NDArray[np.float64] | None = None
         self._gamma_sigma: float = 0.0
         self._gamma_c: float = 0.0
-        self._weights: np.ndarray | None = None
+        self._weights: NDArray[np.float64] | None = None
         self._mu: int | None = None
         self._mu_eff: float | None = None
         self._cc: float | None = None
@@ -224,12 +238,22 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         self._chi_n: float | None = None
         self._dimension: int | None = None
         self._variable_names: tuple[str, ...] = ()
-        self._lower_bounds: np.ndarray | None = None
-        self._upper_bounds: np.ndarray | None = None
+        self._lower_bounds: NDArray[np.float64] | None = None
+        self._upper_bounds: NDArray[np.float64] | None = None
         self._injected_particle_ids: set[str] = set()
-        self._penalty_gamma: np.ndarray | None = None
+        self._penalty_gamma: NDArray[np.float64] | None = None
         self._penalty_history: list[float] = []
         self._penalty_weights_initialized = False
+
+    @staticmethod
+    def _validate_resampling_max_attempts(value: object) -> int:
+        if not isinstance(value, (int, np.integer)):
+            raise TypeError("resampling_max_attempts must be an integer.")
+
+        if value < 1:
+            raise ValueError("resampling_max_attempts must be greater than 0.")
+
+        return value.__index__()
 
     @property
     def sigma(self) -> float:
@@ -240,6 +264,10 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
     @property
     def boundary_handling(self) -> str:
         return self._boundary_handling
+
+    @property
+    def resampling_max_attempts(self) -> int:
+        return self._resampling_max_attempts
 
     def create_particle(
         self,
@@ -336,21 +364,23 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         self._cmu = float(cmu)
         self._damps = float(damps)
 
-    def _variables_to_array(self, variables: dict[str, float]) -> np.ndarray:
+    def _variables_to_array(self, variables: dict[str, float]) -> NDArray[np.float64]:
         return np.asarray(
             [variables[name] for name in self._variable_names], dtype=float
         )
 
-    def _array_to_variables(self, values: np.ndarray) -> dict[str, float]:
+    def _array_to_variables(self, values: NDArray[np.float64]) -> dict[str, float]:
         return {name: float(value) for name, value in zip(self._variable_names, values)}
 
-    def _project_to_boundaries(self, values: np.ndarray) -> np.ndarray:
+    def _project_to_boundaries(
+        self, values: NDArray[np.float64]
+    ) -> NDArray[np.float64]:
         if self._lower_bounds is None or self._upper_bounds is None:
             raise RuntimeError("CMA-ES boundaries have not been initialized.")
 
         return np.clip(values, self._lower_bounds, self._upper_bounds)
 
-    def _is_within_boundaries(self, values: np.ndarray) -> bool:
+    def _is_within_boundaries(self, values: NDArray[np.float64]) -> bool:
         if self._lower_bounds is None or self._upper_bounds is None:
             raise RuntimeError("CMA-ES boundaries have not been initialized.")
 
@@ -360,7 +390,9 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
             and np.all(values <= self._upper_bounds)
         )
 
-    def _reflect_to_boundaries(self, values: np.ndarray) -> np.ndarray:
+    def _reflect_to_boundaries(
+        self, values: NDArray[np.float64]
+    ) -> NDArray[np.float64]:
         if self._lower_bounds is None or self._upper_bounds is None:
             raise RuntimeError("CMA-ES boundaries have not been initialized.")
 
@@ -374,21 +406,23 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         return np.clip(reflected, self._lower_bounds, self._upper_bounds)
 
     @staticmethod
-    def _sampling_transform(covariance: np.ndarray) -> np.ndarray:
+    def _sampling_transform(covariance: NDArray[np.float64]) -> NDArray[np.float64]:
         eigenvalues, eigenvectors = np.linalg.eigh(covariance)
         eigenvalues = np.maximum(eigenvalues, np.finfo(float).eps)
 
         return eigenvectors @ np.diag(np.sqrt(eigenvalues))
 
-    def _raw_candidate_from_z(self, z: np.ndarray, transform: np.ndarray) -> np.ndarray:
+    def _raw_candidate_from_z(
+        self, z: NDArray[np.float64], transform: NDArray[np.float64]
+    ) -> NDArray[np.float64]:
         if self._mean is None or self._step_size is None:
             raise RuntimeError("CMA-ES state has not been initialized.")
 
         return self._mean + self._step_size * (transform @ z)
 
     def _resample_candidate(
-        self, particle: CMAESCandidateSolution, transform: np.ndarray
-    ) -> np.ndarray:
+        self, particle: CMAESCandidateSolution, transform: NDArray[np.float64]
+    ) -> NDArray[np.float64]:
         local_rng: object = particle.random_cache["cmaes-rng"]
 
         if not isinstance(local_rng, np.random.Generator):
@@ -399,7 +433,7 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         if dimension is None:
             raise RuntimeError("CMA-ES dimension has not been initialized.")
 
-        for _ in range(self._MAX_RESAMPLING_ATTEMPTS):
+        for _ in range(self._resampling_max_attempts):
             z = local_rng.standard_normal(dimension)
             candidate = self._raw_candidate_from_z(z=z, transform=transform)
 
@@ -408,15 +442,14 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
 
         raise RuntimeError(
             "CMA-ES resampling could not generate a feasible candidate after "
-            f"{self._MAX_RESAMPLING_ATTEMPTS} attempts."
+            f"{self._resampling_max_attempts} attempts."
         )
 
     def _update_boundary_penalty(
         self,
-        actual_iter: int,
         particles: list[CMAESCandidateSolution],
-        mean: np.ndarray,
-        covariance: np.ndarray,
+        mean: NDArray[np.float64],
+        covariance: NDArray[np.float64],
         step_size: float,
         mu_eff: float,
         dimension: int,
@@ -435,21 +468,20 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         )
 
         with np.errstate(over="ignore", invalid="ignore"):
-            variance_scale = float(
-                np.float64(step_size)
-                * np.float64(step_size)
-                * np.trace(covariance)
-                / dimension
-            )
+            # Keep the standard deviation unsquared: sigma**2 may overflow
+            # even when the normalized fitness spread is representable.
+            coordinate_scale = step_size * sqrt(float(np.mean(np.diag(covariance))))
 
         if (
             len(finite_fitness) >= 2
-            and np.isfinite(variance_scale)
-            and variance_scale > 0
+            and np.isfinite(coordinate_scale)
+            and coordinate_scale > 0
         ):
             lower_quartile = float(np.quantile(finite_fitness, 0.25))
             upper_quartile = float(np.quantile(finite_fitness, 0.75))
-            delta_f = (upper_quartile - lower_quartile) / variance_scale
+            delta_f = (
+                (upper_quartile - lower_quartile) / coordinate_scale / coordinate_scale
+            )
 
             if np.isfinite(delta_f) and delta_f > 0:
                 self._penalty_history.insert(0, delta_f)
@@ -472,9 +504,7 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         mean_violation = mean - projected_mean
         mean_is_infeasible = bool(np.any(mean_violation != 0.0))
 
-        if mean_is_infeasible and (
-            not self._penalty_weights_initialized or actual_iter == 2
-        ):
+        if mean_is_infeasible and not self._penalty_weights_initialized:
             self._penalty_gamma.fill(2.0 * delta_fit)
             self._penalty_weights_initialized = True
 
@@ -527,9 +557,12 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         violation = raw_candidate - feasible_candidate
 
         with np.errstate(over="ignore", invalid="ignore"):
-            penalty = float(
-                np.sum(self._penalty_gamma * violation**2) / self._dimension
+            # Scale before squaring: zero weights must give zero even when the
+            # unweighted squared distance would overflow (Hansen 2009, eq. 12).
+            weighted_violation = (
+                np.sqrt(self._penalty_gamma) * violation / sqrt(self._dimension)
             )
+            penalty = float(np.sum(weighted_violation**2))
 
         if np.isnan(penalty):
             raise RuntimeError("CMA-ES boundary penalty produced NaN.")
@@ -538,8 +571,8 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
 
     @staticmethod
     def _average_tied_weights(
-        ranking_values: np.ndarray, weights: np.ndarray
-    ) -> np.ndarray:
+        ranking_values: NDArray[np.float64], weights: NDArray[np.float64]
+    ) -> NDArray[np.float64]:
         rank_weights = np.zeros(len(ranking_values), dtype=float)
         rank_weights[: len(weights)] = weights
 
@@ -742,7 +775,6 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
 
         if self._boundary_handling == "adaptive-penalty":
             self._update_boundary_penalty(
-                actual_iter=actual_iter,
                 particles=particles,
                 mean=mean,
                 covariance=covariance,
