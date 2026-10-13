@@ -161,6 +161,7 @@ class MPIParallel(ParallelBackendBase):
         self._cost_function_wrapper = MPIParallelCostFunctionWrapper
 
     def execute(self) -> None:
+        """Execute iterations, checking local force stop before each iteration starts."""
         self.init_particles()
 
         with self._executor_class() as executor:
@@ -179,6 +180,9 @@ class MPIParallel(ParallelBackendBase):
                 return_as="list",
             ) as parallel:
                 for actual_iter in range(self._n_iter + 1):
+                    if self._algorithm.force_stop:
+                        break
+
                     self._algorithm.pre_iteration(actual_iter)
                     self.pre_iteration_log(actual_iter)
 

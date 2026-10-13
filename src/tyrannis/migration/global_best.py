@@ -15,7 +15,11 @@ from ..core.backend_communication import (
     CommunicationDriverBase,
     CommunicationProcessorBase,
 )
-from ..core.backend_migration import MigrationDriverBase, MigrationProcessorBase
+from ..core.backend_migration import (
+    MigrationDriverBase,
+    MigrationProcessorBase,
+    MigrationState,
+)
 from ..core.results import HistoryConfig
 from ..core.signals import EventProtocol
 
@@ -57,6 +61,7 @@ class GlobalBestProcessor(MigrationProcessorBase):
         """Initialize resources required by the processor iteration loop."""
 
         self._migration_signal = migration_signal
+        self._retirement_state: MigrationState = "ACTIVE"
         self._synchronization_iter = self._initial_iter
         self._last_published_fitness = None
         self._population = None
@@ -79,6 +84,14 @@ class GlobalBestProcessor(MigrationProcessorBase):
 
         self._communication_processor.stop()
 
+    def retire(
+        self,
+        *,
+        insert_arrival_particle: Callable[[dict[str, Any]], None],
+    ) -> None:
+        """Discard queued broadcasts and releases until the local retirement ACK."""
+        self._retire(consume_message=lambda message: None)
+
     def migration_control(
         self,
         actual_iter: int,
@@ -92,14 +105,17 @@ class GlobalBestProcessor(MigrationProcessorBase):
         if self._migration_signal is None:
             raise RuntimeError("Migration loop context has not been initialized.")
 
+        if self._retirement_state != "ACTIVE":
+            return
+
         self._population = population
 
+        self._migration_signal.clear()
         self._consume_messages(
             population=population,
             insert_arrival_particle=insert_arrival_particle,
             departure_particle=departure_particle,
         )
-        self._migration_signal.clear()
 
         if iter_best is None:
             return
@@ -127,7 +143,7 @@ class GlobalBestProcessor(MigrationProcessorBase):
     ) -> None:
         """Block at synchronous checkpoints until the driver releases them."""
 
-        if not self._synchronous:
+        if not self._synchronous or self._retirement_state != "ACTIVE":
             return
 
         if actual_iter < self._synchronization_iter:
@@ -352,7 +368,7 @@ class GlobalBest(MigrationDriverBase):
             Islands therefore do not wait for one another before continuing their
             optimization.
 
-            When `True`, all islands must reach the same checkpoint before the driver
+            When `True`, all active islands must reach the same checkpoint before the driver
             evaluates the candidates from that checkpoint. Each island pauses at the
             checkpoint after notifying the driver, and the driver waits until all
             islands have reached it. The candidates received from the participating
@@ -374,6 +390,13 @@ class GlobalBest(MigrationDriverBase):
         Invalid migration messages or particles with invalid fitness are ignored.
         If an island has no particle with a valid fitness, an incoming global-best
         particle is not inserted.
+
+        Islands retire locally after iteration processing ends. Retirement removes
+        them from broadcasts and checkpoint participants immediately and
+        reevaluates any waiting barrier. Their final results and the global best
+        already incorporated by the driver remain valid. A retiring processor
+        discards queued broadcasts until its FIFO retirement acknowledgement.
+        With one active island, checkpoints release without inter-island exchange.
         """
         if initial_iter < 1:
             raise ValueError("initial_iter must be greater than or equal to 1.")
@@ -421,6 +444,7 @@ class GlobalBest(MigrationDriverBase):
         if self._thread is not None and self._thread.is_alive():
             raise RuntimeError("Migration is already running.")
 
+        self._initialize_retirement_context()
         self._global_best_fitness = None
         self._global_best_particle = None
         self._synchronization_paused.clear()
@@ -451,6 +475,29 @@ class GlobalBest(MigrationDriverBase):
 
         self._communication_driver.stop()
         self._running = None
+        self._finalize_retirement_context()
+        self._global_best_fitness = None
+        self._global_best_particle = None
+        self._synchronization_paused.clear()
+        self._synchronization_particles.clear()
+        self._synchronization_pending.clear()
+
+    def _on_retirement_requested(self, island_id: str) -> None:
+        """Remove the island's unfinished checkpoint contributions and reevaluate."""
+        for paused in self._synchronization_paused.values():
+            paused.discard(island_id)
+
+        for particles in self._synchronization_particles.values():
+            _ = particles.pop(island_id, None)
+
+        if not self._active_island_ids:
+            self._synchronization_paused.clear()
+            self._synchronization_particles.clear()
+            self._synchronization_pending.clear()
+            return
+
+        if self._synchronous:
+            self._maybe_complete_synchronization(self._next_synchronization_iter)
 
     def _routing_loop(self) -> None:
         running = self._running
@@ -488,6 +535,12 @@ class GlobalBest(MigrationDriverBase):
             return
 
         if not isinstance(payload, dict):
+            return
+
+        if self._route_retirement(island_id=source_id, payload=payload):
+            return
+
+        if self._island_lifecycle.get(source_id) != "ACTIVE":
             return
 
         message_type = payload.get("type")
@@ -542,12 +595,13 @@ class GlobalBest(MigrationDriverBase):
         self._global_best_fitness = fitness
         self._global_best_particle = particle_data.copy()
 
-        self.migration_log(
-            particle=particle_data,
-            origin=source_id,
-            destination="all",
-            iteration=actual_iter,
-        )
+        if len(self._active_island_ids) > 1:
+            self.migration_log(
+                particle=particle_data,
+                origin=source_id,
+                destination="all",
+                iteration=actual_iter,
+            )
 
         self._broadcast_global_best(particle_data=particle_data, source_id=source_id)
 
@@ -578,9 +632,9 @@ class GlobalBest(MigrationDriverBase):
         if paused is None:
             return
 
-        island_ids = set(self._communication_driver.outgoing_queues)
+        island_ids = set(self._active_island_ids)
 
-        if paused != island_ids:
+        if not island_ids or not island_ids.issubset(paused):
             return
 
         if actual_iter in self._synchronization_pending:
@@ -627,7 +681,11 @@ class GlobalBest(MigrationDriverBase):
                 particle_data=self._global_best_particle, source_id=best_source
             )
 
-            if new_global_best and best_source is not None:
+            if (
+                new_global_best
+                and best_source is not None
+                and len(self._active_island_ids) > 1
+            ):
                 self.migration_log(
                     particle=self._global_best_particle,
                     origin=best_source,
@@ -642,8 +700,8 @@ class GlobalBest(MigrationDriverBase):
             }
         )
 
-        for outgoing_queue in self._communication_driver.outgoing_queues.values():
-            outgoing_queue.put(release_message)
+        for island_id in self._active_island_ids:
+            self._communication_driver.outgoing_queues[island_id].put(release_message)
 
         self._synchronization_paused.pop(actual_iter, None)
         self._synchronization_pending.discard(actual_iter)
@@ -652,20 +710,22 @@ class GlobalBest(MigrationDriverBase):
     def _broadcast_global_best(
         self, particle_data: dict[str, Any], source_id: str | None
     ) -> None:
-        """Broadcast a global-best particle to all other islands."""
+        """Broadcast only among active islands; a singleton performs no exchange."""
+
+        island_ids = self._active_island_ids
+
+        if len(island_ids) < 2:
+            return
 
         message = json.dumps(
             {"type": GlobalBestProcessor.MESSAGE_TYPE, "particle": particle_data}
         )
 
-        for (
-            island_id,
-            outgoing_queue,
-        ) in self._communication_driver.outgoing_queues.items():
+        for island_id in island_ids:
             if source_id is not None and island_id == source_id:
                 continue
 
-            outgoing_queue.put(message)
+            self._communication_driver.outgoing_queues[island_id].put(message)
 
     def _get_check_interval(self) -> int:
         """Return the configured migration interval."""

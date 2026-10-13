@@ -198,6 +198,14 @@ class ProcessorMigrationDouble(MigrationProcessorBase):
         self.loop_finalized = True
 
     @override
+    def retire(
+        self,
+        *,
+        insert_arrival_particle: Callable[[dict[str, object]], None],
+    ) -> None:
+        del insert_arrival_particle
+
+    @override
     def migration_control(
         self,
         actual_iter: int,

@@ -315,6 +315,14 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         n_iter: int,
         n_particles: int,
     ) -> None:
+        """Reset common execution state, including the local force-stop request.
+
+        A new execution context always starts with ``force_stop`` false. The
+        processor or parallel backend owns iteration scheduling and checks this
+        request before starting each iteration. A request raised during an
+        iteration therefore takes effect only after that iteration has completed
+        normally.
+        """
         self._fitness_function = fitness_function
         self._boundaries = boundaries
         self._population: dict[str, ParticleType] = {}
@@ -323,6 +331,7 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         self._iter_worst: str | None = None
         self._double_particle_check: bool = False
         self._double_check_ids: list[str] = []
+        self._force_iteration_stop: bool = False
         self._max_iterations: int = n_iter
         # Start value of n_particles to initialize algorithm.
         # Thre real value is dinamically set after migration step
@@ -337,6 +346,20 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         self._identifier = identifier
         self._fitness_function = cost_function_wrapper(self._fitness_function)
         self._rng = np.random.default_rng(seed)
+
+    @property
+    def force_stop(self) -> bool:
+        """Request that no further iteration be started.
+
+        Concrete algorithms may set ``_force_iteration_stop`` internally. This
+        read-only property does not control the loop or interrupt particle work.
+        The lifecycle owner checks it before starting each iteration. A request
+        raised during an iteration therefore takes effect after that iteration has
+        completed normally, while a request already present prevents a new
+        iteration from starting. In distributed execution the request affects only
+        this algorithm's island.
+        """
+        return self._force_iteration_stop
 
     @property
     def identifier(self) -> str:

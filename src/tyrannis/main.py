@@ -100,6 +100,9 @@ class Optimizer:
             one another, without exchanging solutions, and the final result is the
             best solution found among all islands.
 
+            Local execution always uses isolated islands, including when an
+            explicit ``Local()`` backend is supplied.
+
         seed:
             Optional random seed used to make the optimization reproducible.
 
@@ -298,7 +301,7 @@ class Optimizer:
         self._n_particles = n_particles
         self._backend = backend if backend is not None else Local()
         self._processor = processor if processor is not None else Serial()
-        if backend is not None:
+        if not isinstance(self._backend, Local):
             self._migration = migration if migration is not None else IslandIsolation()
         else:
             self._migration = IslandIsolation()

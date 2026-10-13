@@ -105,7 +105,11 @@ class ThreadsPool(ProcessorBase[EventProtocol]):
 
         try:
             with ThreadPool(processes=self._n_process) as pool:
-                for actual_iter in range(self._n_iter + 1):
+                for actual_iter in range(self._n_iter + 2):
+                    if self._algorithm.force_stop or (actual_iter == self._n_iter + 1):
+                        self.retire_migration()
+                        break
+
                     self.migration_control(actual_iter)
 
                     self._algorithm.pre_iteration(actual_iter)
@@ -209,5 +213,6 @@ class ThreadsPool(ProcessorBase[EventProtocol]):
 
                     self.update_status()
                     self.best_log(actual_iter)
+
         finally:
             self.finalize_loop_context()

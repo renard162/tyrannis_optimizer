@@ -71,6 +71,13 @@ class IslandIsolationProcessor(MigrationProcessorBase):
     ) -> None:
         """Do nothing because isolated islands do not synchronize."""
 
+    def retire(
+        self,
+        *,
+        insert_arrival_particle: Callable[[dict[str, Any]], None],
+    ) -> None:
+        """Retire locally without messages, population changes, or an ACK wait."""
+
 
 class IslandIsolation(MigrationDriverBase):
     """Migration strategy that keeps all islands isolated."""
@@ -105,9 +112,11 @@ class IslandIsolation(MigrationDriverBase):
     def start(self) -> None:
         """Start the inactive migration strategy."""
 
+        self._initialize_retirement_context()
         self._communication_driver.start()
 
     def stop(self) -> None:
         """Stop the inactive migration strategy."""
 
         self._communication_driver.stop()
+        self._finalize_retirement_context()

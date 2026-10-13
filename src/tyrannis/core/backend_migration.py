@@ -1,7 +1,8 @@
 import json
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any
+from queue import Empty
+from typing import Any, Final, Literal
 
 import numpy as np
 from numpy.random import SeedSequence
@@ -12,6 +13,11 @@ from .backend_communication import (
     CommunicationProcessorBase,
 )
 from .signals import EventProtocol
+
+RETIRE: Final[str] = "retire"
+RETIRE_ACK: Final[str] = "retire_ack"
+
+MigrationState = Literal["ACTIVE", "RETIRING", "RETIRED"]
 
 
 class MigrationProcessorBase(ABC):
@@ -57,6 +63,7 @@ class MigrationProcessorBase(ABC):
         -> initialize_loop_context
         -> migration_control (repeated for each iteration)
         -> synchronization_control (repeated for each iteration)
+        -> retire (after iteration processing ends)
         -> finalize_loop_context
         -> stop
 
@@ -95,6 +102,7 @@ class MigrationProcessorBase(ABC):
 
     _migration_signal: EventProtocol | None
     _communication_processor: CommunicationProcessorBase
+    _retirement_state: MigrationState = "ACTIVE"
 
     @abstractmethod
     def __init__(
@@ -382,6 +390,59 @@ class MigrationProcessorBase(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    def retire(
+        self, *, insert_arrival_particle: Callable[[dict[str, Any]], None]
+    ) -> None:
+        """Retire this island after iteration processing has ended.
+
+        The processor calls this for both force stop and normal exhaustion of its
+        iteration budget. For normal exhaustion, the final scheduled iteration has
+        already completed. For force stop, no additional iteration is started after
+        the request is observed. The loop context and communication remain available
+        until this method returns. Retirement is local and must not invalidate the
+        island's final result.
+
+        A retiring island publishes no new migration state and removes no more
+        particles. It drains already authorized arrivals through the callback on the
+        processor thread, then waits for the driver's retirement ACK. The ACK follows
+        all deliveries in the same FIFO. Repeated calls after successful retirement
+        are inert within the same loop context. Isolation implementations return
+        immediately without communication.
+        """
+        raise NotImplementedError
+
+    def _retire(self, *, consume_message: Callable[[str], None]) -> None:
+        """Drain the existing FIFO protocol without another synchronization event."""
+        signal = self._migration_signal
+
+        if signal is None:
+            raise RuntimeError("Migration loop context has not been initialized.")
+
+        if self._retirement_state == "RETIRED":
+            return
+
+        if self._retirement_state == "RETIRING":
+            raise RuntimeError("Retirement is already in progress.")
+
+        self._retirement_state = "RETIRING"
+        self._communication_processor.outgoing_queue.put(json.dumps({"type": RETIRE}))
+
+        while True:
+            signal.clear()
+            message = self._communication_processor.messages.get()
+
+            try:
+                payload: object = json.loads(message)
+            except (TypeError, json.JSONDecodeError):
+                continue
+
+            if payload == {"type": RETIRE_ACK}:
+                self._retirement_state = "RETIRED"
+                return
+
+            consume_message(message)
+
+    @abstractmethod
     def synchronization_control(
         self,
         actual_iter: int,
@@ -564,6 +625,7 @@ class MigrationDriverBase(ABC):
     _seed: int | None
     _seed_sequence: SeedSequence
     _rng: np.random.Generator
+    _island_lifecycle: dict[str, MigrationState]
 
     @abstractmethod
     def __init__(self, initial_iter: int = 1, *args: Any, **kargs: Any) -> None:
@@ -681,6 +743,80 @@ class MigrationDriverBase(ABC):
         self._seed = seed
         self._seed_sequence = np.random.SeedSequence(seed)
         self._rng = np.random.default_rng(seed)
+        self._initialize_retirement_context()
+
+    @property
+    def _active_island_ids(self) -> list[str]:
+        """Derive the ordered migration participants from the sole lifecycle registry."""
+        return sorted(
+            island_id
+            for island_id, state in self._island_lifecycle.items()
+            if state == "ACTIVE"
+        )
+
+    def _initialize_retirement_context(self) -> None:
+        """Prepare a fresh run before starting communication or the routing thread."""
+        self._finalize_retirement_context()
+        self._island_lifecycle = dict.fromkeys(
+            self._communication_driver.incoming_queues, "ACTIVE"
+        )
+
+    def _finalize_retirement_context(self) -> None:
+        """Clear transient state and residual messages while transport is stopped."""
+        self._island_lifecycle = {}
+
+        for queues in (
+            self._communication_driver.incoming_queues,
+            self._communication_driver.outgoing_queues,
+        ):
+            for queue in queues.values():
+                while True:
+                    try:
+                        _ = queue.get_nowait()
+                    except Empty:
+                        break
+
+    def _route_retirement(self, *, island_id: str, payload: dict[str, Any]) -> bool:
+        """Exclude an island immediately, retaining its existing transfer obligations.
+
+        Only the migration routing thread changes runtime membership. Transport
+        endpoints remain registered until their processors close them after ACK.
+        Duplicate requests never reactivate an island or create another delivery.
+        """
+        if payload.get("type") != RETIRE:
+            return False
+
+        if self._island_lifecycle.get(island_id) == "ACTIVE":
+            self._island_lifecycle[island_id] = "RETIRING"
+            self._on_retirement_requested(island_id)
+            self._acknowledge_ready_retirements()
+
+        return True
+
+    def _acknowledge_ready_retirements(self) -> None:
+        """Queue a final ACK after every authorized delivery to each ready island."""
+        for island_id, state in tuple(self._island_lifecycle.items()):
+            if state != "RETIRING" or self._has_retirement_dependencies(island_id):
+                continue
+
+            self._on_retirement_completed(island_id)
+            self._island_lifecycle[island_id] = "RETIRED"
+            self._communication_driver.outgoing_queues[island_id].put(
+                json.dumps({"type": RETIRE_ACK})
+            )
+
+    def _on_retirement_requested(self, island_id: str) -> None:
+        """Remove policy participation and immediately reevaluate active barriers."""
+        del island_id
+
+    def _has_retirement_dependencies(self, island_id: str) -> bool:
+        """Return whether existing requests still involve this island."""
+        del island_id
+        return False
+
+    def _on_retirement_completed(self, island_id: str) -> None:
+        """Release policy state after all requests involving the island are resolved."""
+        del island_id
 
     def create_processor_module(self, identifier: str) -> MigrationProcessorBase:
         """

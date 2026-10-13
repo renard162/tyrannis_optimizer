@@ -327,6 +327,23 @@ class ProcessorBase(ABC, Generic[SignalType]):
 
         self._migration_processor.stop()
 
+    def retire_migration(self) -> None:
+        """Drain this island's migration after iteration processing has ended.
+
+        This runs before loop-context finalization for force stop and ordinary
+        iteration exhaustion alike. Only previously authorized arrivals may
+        change population membership; the recorded result and best remain the
+        last completed iteration's values. Retirement never stops another island.
+        """
+        if self._migration_processor is None:
+            raise RuntimeError("Migration processor has not been initialized.")
+
+        self._migration_processor.retire(
+            insert_arrival_particle=self._insert_arrival_particle
+        )
+        self._update_population()
+        self._algorithm.update_n_particles()
+
     def migration_control(self, actual_iter: int) -> None:
         if self._migration_processor is None:
             raise RuntimeError("Migration processor has not been initialized.")
@@ -512,10 +529,25 @@ class ProcessorBase(ABC, Generic[SignalType]):
         """
         Execute the algorithm iterations.
 
-        The iteration loop must run `actual_iter` from 0 through `self._n_iter`,
-        inclusive. Iteration 0 represents the initial execution required to
-        establish the initial states of the algorithm and its particles and
-        does not represent an actual optimization iteration.
+        Valid algorithm iterations run with ``actual_iter`` from 0 through
+        ``self._n_iter``, inclusive. Iteration 0 represents the initial execution
+        required to establish the initial states of the algorithm and its particles
+        and does not represent an actual optimization iteration.
+
+        The processor owns the loop. Its concrete implementations include one
+        additional terminal pass at ``actual_iter == self._n_iter + 1``. This pass
+        is not an algorithm iteration and exists only to retire migration after the
+        ordinary iteration budget has been exhausted.
+
+        At the beginning of each loop pass, before ``migration_control`` or any
+        algorithm iteration operation, the processor checks ``algorithm.force_stop``
+        and whether the terminal pass has been reached. If either condition is true,
+        it retires the local migration module and exits the loop. This prevents a
+        force-stop request from starting an additional iteration while still allowing
+        the final scheduled iteration, ``actual_iter == self._n_iter``, to complete
+        fully. Retirement must finish before ``finalize_loop_context`` releases the
+        shared signal. Exceptional exits still finalize resources but do not claim
+        successful retirement.
 
         Before processing each iteration, the processor must call
         `migration_control` to allow the migration processor to enforce its

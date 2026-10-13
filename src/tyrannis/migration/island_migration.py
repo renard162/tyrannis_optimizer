@@ -16,7 +16,11 @@ from ..core.backend_communication import (
     CommunicationDriverBase,
     CommunicationProcessorBase,
 )
-from ..core.backend_migration import MigrationDriverBase, MigrationProcessorBase
+from ..core.backend_migration import (
+    MigrationDriverBase,
+    MigrationProcessorBase,
+    MigrationState,
+)
 from ..core.results import HistoryConfig
 from ..core.signals import EventProtocol
 
@@ -67,6 +71,7 @@ class IslandMigrationProcessor(MigrationProcessorBase):
 
     def initialize_loop_context(self, migration_signal: EventProtocol) -> None:
         self._migration_signal = migration_signal
+        self._retirement_state: MigrationState = "ACTIVE"
         self._population = None
         self._next_synchronization_iter = self._initial_iter
         self._synchronization_paused_iter = None
@@ -77,6 +82,47 @@ class IslandMigrationProcessor(MigrationProcessorBase):
         self._migration_signal = None
         self._population = None
         self._synchronization_paused_iter = None
+
+    def retire(
+        self,
+        *,
+        insert_arrival_particle: Callable[[dict[str, Any]], None],
+    ) -> None:
+        """Drain authorized arrivals and refuse unfulfilled departures before ACK.
+
+        All callbacks run on the processor thread while its loop context is
+        alive. A request that has not removed a particle receives the existing
+        null-particle response, so retirement never creates another departure.
+        """
+
+        def consume_message(message: str) -> None:
+            payload = json.loads(message)
+
+            if not isinstance(payload, dict):
+                return
+
+            if payload.get("type") == self.MIGRATION_REQUEST:
+                request_id = payload.get("request_id")
+                actual_iter = payload.get("actual_iter")
+
+                if isinstance(request_id, str) and isinstance(actual_iter, int):
+                    self._communication_processor.outgoing_queue.put(
+                        json.dumps(
+                            {
+                                "type": self.PARTICLE,
+                                "request_id": request_id,
+                                "actual_iter": actual_iter,
+                                "particle": None,
+                            }
+                        )
+                    )
+            elif payload.get("type") == self.PARTICLE:
+                particle = payload.get("particle")
+
+                if isinstance(particle, dict):
+                    insert_arrival_particle(particle)
+
+        self._retire(consume_message=consume_message)
 
     def migration_control(
         self,
@@ -89,8 +135,12 @@ class IslandMigrationProcessor(MigrationProcessorBase):
         if self._migration_signal is None:
             raise RuntimeError("Migration loop context has not been initialized.")
 
+        if self._retirement_state != "ACTIVE":
+            return
+
         self._population = population
 
+        self._migration_signal.clear()
         self._consume_messages(
             population=population,
             insert_arrival_particle=insert_arrival_particle,
@@ -98,12 +148,9 @@ class IslandMigrationProcessor(MigrationProcessorBase):
         )
 
         if actual_iter < self._initial_iter:
-            self._migration_signal.clear()
             return
 
         self._send_state(actual_iter=actual_iter, population=population)
-
-        self._migration_signal.clear()
 
     def synchronization_control(
         self,
@@ -111,7 +158,7 @@ class IslandMigrationProcessor(MigrationProcessorBase):
         insert_arrival_particle: Callable[[dict[str, Any]], None],
         departure_particle: Callable[[str], dict[str, Any] | None],
     ) -> None:
-        if self._trigger != "synchronous":
+        if self._trigger != "synchronous" or self._retirement_state != "ACTIVE":
             return
 
         if actual_iter < self._next_synchronization_iter:
@@ -501,6 +548,18 @@ class IslandMigration(MigrationDriverBase):
         island identifiers to define their circular topology. The resulting
         topology is therefore deterministic for a fixed set of island
         identifiers.
+
+        Only active islands participate in new requests, topology, state
+        watermarks, and barriers. Retirement immediately removes an island from
+        that set and reevaluates paused checkpoints. A single active island
+        performs no particle exchange and need not wait for retired islands.
+
+        Existing requests retain their original donor and receiver. A retiring
+        donor refuses an unfulfilled request with a null-particle response;
+        particles already removed are delivered to the original receiver even
+        while it is retiring. Both endpoints remain available until their
+        requests resolve. The retirement ACK follows all authorized deliveries
+        in the receiver's FIFO, preserving particle ownership before shutdown.
         """
 
         movement_strategies = {
@@ -562,7 +621,6 @@ class IslandMigration(MigrationDriverBase):
             "trigger": trigger,
         }
 
-        self._island_ids: list[str] = []
         self._states: dict[str, dict[str, Any]] = {}
 
         # Confirmed departures that have not yet appeared in a processor
@@ -601,12 +659,11 @@ class IslandMigration(MigrationDriverBase):
             seed=seed,
         )
 
-        self._island_ids = sorted(communication_driver.incoming_queues)
-
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():
             raise RuntimeError("Migration is already running.")
 
+        self._initialize_retirement_context()
         self._states.clear()
         self._state_departures.clear()
         self._state_arrivals.clear()
@@ -637,6 +694,40 @@ class IslandMigration(MigrationDriverBase):
 
         self._communication_driver.stop()
         self._running = None
+        self._finalize_retirement_context()
+        self._states.clear()
+        self._state_departures.clear()
+        self._state_arrivals.clear()
+        self._pending_requests.clear()
+        self._reserved_departures.clear()
+        self._synchronization_paused.clear()
+        self._synchronization_pending.clear()
+
+    def _on_retirement_requested(self, island_id: str) -> None:
+        """Remove barrier participation without abandoning authorized requests."""
+        for paused in self._synchronization_paused.values():
+            paused.discard(island_id)
+
+        if not self._active_island_ids:
+            self._synchronization_paused.clear()
+
+        if self._trigger == "synchronous":
+            self._finish_synchronization(self._next_migration_iter)
+            self._maybe_activate_synchronization(self._next_migration_iter)
+
+    def _has_retirement_dependencies(self, island_id: str) -> bool:
+        """Wait for both donor and receiver obligations, including null responses."""
+        return any(
+            island_id in (donor, receiver)
+            for donor, receiver, _ in self._pending_requests.values()
+        )
+
+    def _on_retirement_completed(self, island_id: str) -> None:
+        """Release retained accounting without requiring another population snapshot."""
+        _ = self._states.pop(island_id, None)
+        _ = self._reserved_departures.pop(island_id, None)
+        _ = self._state_departures.pop(island_id, None)
+        _ = self._state_arrivals.pop(island_id, None)
 
     def _routing_loop(self) -> None:
         running = self._running
@@ -672,14 +763,20 @@ class IslandMigration(MigrationDriverBase):
         if not isinstance(payload, dict):
             return
 
+        if self._route_retirement(island_id=island_id, payload=payload):
+            return
+
         message_type = payload.get("type")
+
+        if message_type == IslandMigrationProcessor.PARTICLE:
+            self._receive_particle(island_id=island_id, payload=payload)
+            return
+
+        if self._island_lifecycle.get(island_id) != "ACTIVE":
+            return
 
         if message_type == IslandMigrationProcessor.STATE:
             self._receive_state(island_id=island_id, payload=payload)
-            return
-
-        if message_type == IslandMigrationProcessor.PARTICLE:
-            self._receive_particle(payload=payload)
             return
 
         if message_type == IslandMigrationProcessor.SYNCHRONIZATION_PAUSE:
@@ -711,7 +808,9 @@ class IslandMigration(MigrationDriverBase):
         if paused is None:
             return
 
-        if len(paused) != len(self._island_ids):
+        island_ids = set(self._active_island_ids)
+
+        if not island_ids or not island_ids.issubset(paused):
             return
 
         if not self._all_states_current(actual_iter):
@@ -745,8 +844,8 @@ class IslandMigration(MigrationDriverBase):
             }
         )
 
-        for queue in self._communication_driver.outgoing_queues.values():
-            queue.put(release)
+        for island_id in self._active_island_ids:
+            self._communication_driver.outgoing_queues[island_id].put(release)
 
         self._next_migration_iter = actual_iter + self._min_interval
 
@@ -809,16 +908,18 @@ class IslandMigration(MigrationDriverBase):
             self._maybe_activate(actual_iter=actual_iter)
 
     def _migration_watermark(self) -> int | None:
-        if not self._island_ids:
+        island_ids = self._active_island_ids
+
+        if not island_ids:
             return None
 
         iterations = [
             self._states[island_id]["actual_iter"]
-            for island_id in self._island_ids
+            for island_id in island_ids
             if island_id in self._states
         ]
 
-        if len(iterations) != len(self._island_ids):
+        if len(iterations) != len(island_ids):
             return None
 
         return min(iterations)
@@ -826,10 +927,15 @@ class IslandMigration(MigrationDriverBase):
     def _all_states_current(self, actual_iter: int) -> bool:
         return all(
             self._states.get(island_id, {}).get("actual_iter", -1) >= actual_iter
-            for island_id in self._island_ids
+            for island_id in self._active_island_ids
         )
 
     def _maybe_activate(self, actual_iter: int) -> None:
+        # Do not consume this iteration's random opportunity before a donor and
+        # a known receiver can exist. Later STATE messages may make it eligible.
+        if sum(island_id in self._states for island_id in self._active_island_ids) < 2:
+            return
+
         if actual_iter < self._next_migration_iter:
             return
 
@@ -911,6 +1017,11 @@ class IslandMigration(MigrationDriverBase):
         return population - reserved
 
     def _choose_migration_pair(self) -> tuple[str, str] | None:
+        island_ids = self._active_island_ids
+
+        if len(island_ids) < 2:
+            return None
+
         donors = self._donor_candidates()
 
         if not donors:
@@ -918,19 +1029,26 @@ class IslandMigration(MigrationDriverBase):
 
         donor = self._choose_donor(candidates=donors)
 
-        receivers = [island_id for island_id in self._island_ids if island_id != donor]
+        receivers = [
+            island_id
+            for island_id in island_ids
+            if island_id != donor and island_id in self._states
+        ]
 
         if not receivers:
             return None
 
         receiver = self._choose_receiver(donor=donor, candidates=receivers)
 
+        if receiver is None:
+            return None
+
         return donor, receiver
 
     def _donor_candidates(self) -> list[str]:
         return [
             island_id
-            for island_id in self._island_ids
+            for island_id in self._active_island_ids
             if self._available_population(island_id) > self._min_population
         ]
 
@@ -958,7 +1076,17 @@ class IslandMigration(MigrationDriverBase):
 
         return candidates[int(self._rng.choice(choices))]
 
-    def _choose_receiver(self, donor: str, candidates: list[str]) -> str:
+    def _choose_receiver(self, donor: str, candidates: list[str]) -> str | None:
+        island_ids = self._active_island_ids
+        candidates = [
+            island_id
+            for island_id in candidates
+            if island_id in island_ids and island_id != donor
+        ]
+
+        if donor not in island_ids or not candidates:
+            return None
+
         strategy = self._movement_strategy
 
         if strategy == "random":
@@ -971,13 +1099,13 @@ class IslandMigration(MigrationDriverBase):
                 if island_id in candidates
             ]
 
-            return self._random_island(neighbors)
+            return self._random_island(neighbors) if neighbors else None
 
         if strategy == "star":
-            hub = self._island_ids[0]
+            hub = island_ids[0]
 
             if donor != hub:
-                return hub
+                return hub if hub in candidates else None
 
             return self._random_island(candidates)
 
@@ -991,7 +1119,7 @@ class IslandMigration(MigrationDriverBase):
                 if island_id in candidates
             ]
 
-            return self._best_fitness_island(neighbors)
+            return self._best_fitness_island(neighbors) if neighbors else None
 
         if strategy == "greedy_random":
             fitness = np.asarray(
@@ -1013,7 +1141,8 @@ class IslandMigration(MigrationDriverBase):
             return candidates[int(self._rng.choice(choices))]
 
         if strategy in {"ring", "ring_sequential"}:
-            return self._next_ring_island(donor)
+            receiver = self._next_ring_island(donor)
+            return receiver if receiver in candidates else None
 
         raise RuntimeError(f"Unsupported movement strategy: {strategy!r}")
 
@@ -1055,76 +1184,101 @@ class IslandMigration(MigrationDriverBase):
         return float(np.min(fitness))
 
     def _neighbors(self, island_id: str) -> list[str]:
-        index = self._island_ids.index(island_id)
+        island_ids = self._active_island_ids
 
-        return [
-            self._island_ids[(index - 1) % len(self._island_ids)],
-            self._island_ids[(index + 1) % len(self._island_ids)],
-        ]
+        if island_id not in island_ids or len(island_ids) < 2:
+            return []
 
-    def _next_ring_island(self, donor: str) -> str:
-        return self._island_ids[
-            (self._island_ids.index(donor) + 1) % len(self._island_ids)
-        ]
+        index = island_ids.index(island_id)
+        return list(
+            dict.fromkeys(
+                (
+                    island_ids[(index - 1) % len(island_ids)],
+                    island_ids[(index + 1) % len(island_ids)],
+                )
+            )
+        )
 
-    def _receive_particle(self, payload: dict[str, Any]) -> None:
+    def _next_ring_island(self, donor: str) -> str | None:
+        island_ids = self._active_island_ids
+
+        if donor not in island_ids or len(island_ids) < 2:
+            return None
+
+        return island_ids[(island_ids.index(donor) + 1) % len(island_ids)]
+
+    def _receive_particle(self, island_id: str, payload: dict[str, Any]) -> None:
+        """Resolve one authorized transfer before releasing barriers or retirement.
+
+        Donor removal precedes this response. Keep both endpoint states and the
+        original route until a valid response has been handled; retirement must
+        never discard a particle already removed from its donor.
+        """
         request_id = payload.get("request_id")
         particle = payload.get("particle")
 
         if not isinstance(request_id, str):
             return
 
-        request = self._pending_requests.pop(request_id, None)
+        request = self._pending_requests.get(request_id)
 
         if request is None:
             return
 
+        donor, receiver, actual_iter = request
+
+        if island_id != donor:
+            return
+
+        if particle is not None:
+            if not isinstance(particle, dict):
+                return
+
+            identifier = particle.get("identifier")
+
+            if not isinstance(identifier, str):
+                return
+
+            # Existing requests pin these states, including RETIRING endpoints.
+            donor_state = self._states[donor]
+            receiver_state = self._states[receiver]
+
+            donor_state["population"].pop(identifier, None)
+
+            self._state_departures.setdefault(donor, set()).add(identifier)
+
+            receiver_fitness = particle.get("fitness")
+
+            receiver_state["population"][identifier] = receiver_fitness
+
+            self._state_arrivals.setdefault(receiver, {})[identifier] = receiver_fitness
+
+            self._communication_driver.outgoing_queues[receiver].put(
+                json.dumps(
+                    {
+                        "type": IslandMigrationProcessor.PARTICLE,
+                        "particle": particle,
+                        "actual_iter": actual_iter,
+                    }
+                )
+            )
+
+            self.migration_log(
+                particle=particle,
+                origin=donor,
+                destination=receiver,
+                iteration=actual_iter,
+            )
+
+        self._release_departure(donor=donor)
+        del self._pending_requests[request_id]
+
         for pending_requests in self._synchronization_pending.values():
             pending_requests.discard(request_id)
 
-        donor, receiver, actual_iter = request
-
-        self._release_departure(donor=donor)
-
-        if not isinstance(particle, dict):
-            self._finish_synchronization(actual_iter=actual_iter)
-            return
-
-        identifier = particle.get("identifier")
-
-        if not isinstance(identifier, str):
-            self._finish_synchronization(actual_iter=actual_iter)
-            return
-
-        donor_state = self._states.get(donor)
-        receiver_state = self._states.get(receiver)
-
-        if donor_state is None or receiver_state is None:
-            self._finish_synchronization(actual_iter=actual_iter)
-            return
-
-        donor_state["population"].pop(identifier, None)
-
-        self._state_departures.setdefault(donor, set()).add(identifier)
-
-        receiver_fitness = particle.get("fitness")
-
-        receiver_state["population"][identifier] = receiver_fitness
-
-        self._state_arrivals.setdefault(receiver, {})[identifier] = receiver_fitness
-
-        self._communication_driver.outgoing_queues[receiver].put(
-            json.dumps(
-                {
-                    "type": IslandMigrationProcessor.PARTICLE,
-                    "particle": particle,
-                    "actual_iter": actual_iter,
-                }
-            )
-        )
-
-        self.migration_log(
-            particle=particle, origin=donor, destination=receiver, iteration=actual_iter
-        )
-
         self._finish_synchronization(actual_iter=actual_iter)
+
+        if self._trigger == "synchronous":
+            self._maybe_activate_synchronization(self._next_migration_iter)
+
+        self._acknowledge_ready_retirements()
