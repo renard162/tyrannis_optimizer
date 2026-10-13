@@ -77,14 +77,19 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
 
         At each iteration, a population of candidate solutions is sampled from
         the current distribution. The candidates are evaluated and ranked
-        according to their objective values, and the best ``mu`` candidates are
-        selected to update the distribution. CMA-ES requires at least two
-        particles, including after population changes during optimization.
+        according to their objective values, and the best-ranked candidates
+        receive positive recombination weights to update the distribution.
+        CMA-ES requires at least two particles, including after population
+        changes during optimization.
 
         The new mean is calculated as a weighted combination of the selected
         candidates, with better-ranked candidates receiving greater weights.
-        This moves the search distribution toward regions associated with
-        better objective values.
+        Candidates tied in the ranking receive the average of the weights assigned
+        to the ranks occupied by the tied group. If a tie crosses the ``mu``
+        selection boundary, zero weights beyond ``mu`` are included in this
+        average, preserving the total recombination weight while treating all
+        tied candidates symmetrically. This moves the search distribution toward
+        regions associated with better objective values.
 
         The covariance matrix is adapted from the selected candidates and the
         accumulated search path. The rank-mu update captures the distribution
@@ -531,6 +536,31 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
 
         return fitness + penalty
 
+    @staticmethod
+    def _average_tied_weights(
+        ranking_values: np.ndarray, weights: np.ndarray
+    ) -> np.ndarray:
+        rank_weights = np.zeros(len(ranking_values), dtype=float)
+        rank_weights[: len(weights)] = weights
+
+        start = 0
+
+        while start < len(ranking_values):
+            end = start + 1
+
+            while (
+                end < len(ranking_values)
+                and ranking_values[end] == ranking_values[start]
+            ):
+                end += 1
+
+            if end - start > 1:
+                rank_weights[start:end] = float(np.mean(rank_weights[start:end]))
+
+            start = end
+
+        return rank_weights
+
     def pre_iteration(self, actual_iter: int) -> None:
         if len(self._population) < 2:
             raise ValueError("CMA-ES requires at least 2 particles.")
@@ -693,7 +723,6 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         gamma_sigma = self._gamma_sigma
         gamma_c = self._gamma_c
         weights = self._weights
-        mu = self._mu
         mu_eff = self._mu_eff
         cc = self._cc
         cs = self._cs
@@ -722,6 +751,10 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
                 dimension=dimension,
             )
             particles.sort(key=self._boundary_penalty_score)
+            ranking_values = np.asarray(
+                [self._boundary_penalty_score(particle) for particle in particles],
+                dtype=float,
+            )
         else:
 
             def fitness_key(particle: CMAESCandidateSolution) -> float:
@@ -733,8 +766,22 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
                 return float(particle.candidate_fitness)
 
             particles.sort(key=fitness_key)
+            ranking_values = np.asarray(
+                [fitness_key(particle) for particle in particles], dtype=float
+            )
 
-        selected = particles[:mu]
+        weights = self._average_tied_weights(
+            ranking_values=ranking_values, weights=weights
+        )
+        selected_mask = weights > 0.0
+        selected = [
+            particle
+            for particle, is_selected in zip(particles, selected_mask)
+            if is_selected
+        ]
+        weights = weights[selected_mask]
+        mu_eff = float(1.0 / np.sum(weights**2))
+
         old_mean = mean.copy()
         selected_variables = []
 
