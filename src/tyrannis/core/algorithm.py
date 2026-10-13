@@ -317,11 +317,20 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
     ) -> None:
         """Reset common execution state, including the local force-stop request.
 
-        A new execution context always starts with ``force_stop`` false. The
-        processor or parallel backend owns iteration scheduling and checks this
-        request before starting each iteration. A request raised during an
-        iteration therefore takes effect only after that iteration has completed
-        normally.
+        Initializing a new execution context resets ``force_stop`` to false. Once a
+        concrete algorithm requests force stop, that request remains latched for the
+        lifetime of the current execution context. Calling ``fit``, ``run``, or
+        ``execute`` again does not clear it and therefore cannot resume algorithm
+        iterations. Iteration execution can resume only after the algorithm context
+        is initialized again.
+
+        Concrete algorithms that request force stop must warn the user that
+        execution was terminated prematurely and should include the reason whenever
+        that information is available.
+
+        The processor or parallel backend owns iteration scheduling and checks the
+        request before starting each iteration. A request raised during an iteration
+        therefore takes effect only after that iteration has completed normally.
         """
         self._fitness_function = fitness_function
         self._boundaries = boundaries
@@ -351,13 +360,23 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
     def force_stop(self) -> bool:
         """Request that no further iteration be started.
 
-        Concrete algorithms may set ``_force_iteration_stop`` internally. This
-        read-only property does not control the loop or interrupt particle work.
-        The lifecycle owner checks it before starting each iteration. A request
-        raised during an iteration therefore takes effect after that iteration has
-        completed normally, while a request already present prevents a new
-        iteration from starting. In distributed execution the request affects only
-        this algorithm's island.
+        Concrete algorithms may set ``_force_iteration_stop`` internally. Whenever
+        an algorithm requests force stop, it must emit a warning informing the user
+        that execution was terminated prematurely. The warning should also state
+        the reason for the termination whenever that information is available.
+
+        Once set, the request is latched for the lifetime of the current execution
+        context and cannot be cleared by calling ``fit``, ``run``, or ``execute``
+        again. Those calls therefore cannot resume algorithm iterations after a
+        force stop. Iteration execution can resume only when the algorithm context
+        is initialized again, which resets the force-stop state.
+
+        This read-only property does not control the loop or interrupt particle
+        work. The lifecycle owner checks it before starting each iteration. A
+        request raised during an iteration therefore takes effect after that
+        iteration has completed normally, while a request already present prevents
+        a new iteration from starting. In distributed execution the request affects
+        only this algorithm's island.
         """
         return self._force_iteration_stop
 
