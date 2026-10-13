@@ -1,7 +1,8 @@
-from math import sqrt
+import warnings
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy.linalg import norm
 
 from ..core.algorithm import FITNESS_UNDEFINED, AlgorithmBase, ParticleBase
 
@@ -128,13 +129,22 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         the feasible evaluated point, rather than the infeasible Gaussian sample,
         is used in the CMA-ES distribution update.
 
+        Penalty coefficients are initialized once, when the mean is infeasible
+        and a positive dispersion estimate is available. Their scale uses the
+        median of valid historical estimates. Invalid or zero observations do
+        not erase that history; an infinite dispersion uses its maximum when
+        at least two valid historical observations exist.
+
         With ``"reflection"``, samples are reflected into the feasible domain for
         evaluation while their original Gaussian coordinates are retained for
-        distribution adaptation. With ``"resampling"``, infeasible samples are
-        rejected before evaluation, so the evaluated point and the point used by
+        distribution adaptation, except for the ``-np.inf`` case described above.
+        With ``"resampling"``, infeasible samples are rejected before evaluation,
+        so the evaluated point and the point used by
         CMA-ES adaptation are identical. Sampling is limited to
         ``resampling_max_attempts`` attempts per candidate; exhausting the limit
         raises an error without switching boundary handling strategies.
+        Reflection requires finite positive widths and representable periods;
+        invalid geometry raises an error before optimization iterations begin.
 
         ``"clip"`` preserves the legacy CMA-ES boundary behavior for compatibility.
         Samples outside the boundaries are clipped to the nearest feasible point,
@@ -154,6 +164,17 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         The initial value of ``sigma`` controls the scale of the initial
         search. Larger values favor broader exploration, while smaller values
         produce a more concentrated initial search.
+        The mean boundary width and resulting initial step size must be finite
+        and positive; invalid initial scales raise an error.
+
+        Numerical degeneration during adaptation terminates optimization early
+        with a warning identifying the cause. This includes invalid covariance
+        spectra, numerical singularity, a covariance condition number above
+        ``1e14``, non-positive or non-finite step sizes, and non-representable
+        sampling or whitening scales. Covariance eigenvalues are not floored
+        or silently regularized. A finite positive operational step size is
+        not rejected merely for its magnitude. After force stop, running again
+        requires reinitializing the algorithm execution context.
 
         References
         ----------
@@ -222,6 +243,8 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
 
         self._mean: NDArray[np.float64] | None = None
         self._covariance: NDArray[np.float64] | None = None
+        self._sampling_matrix: NDArray[np.float64] | None = None
+        self._inverse_sqrt_covariance: NDArray[np.float64] | None = None
         self._step_size: float | None = None
         self._p_sigma: NDArray[np.float64] | None = None
         self._p_c: NDArray[np.float64] | None = None
@@ -278,6 +301,9 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         if identifier is None:
             raise ValueError("Particle identifier cannot be None.")
 
+        if not self._population:
+            _ = self._validate_initial_geometry()
+
         if variables is None:
             variables = {
                 name: self._rng.uniform(lower, upper)
@@ -293,6 +319,40 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
             raise ValueError("Particle identifier cannot be None.")
 
         del self._population[identifier]
+
+    def _validate_initial_geometry(self) -> float:
+        if not self._boundaries:
+            raise ValueError("CMA-ES requires at least one optimization variable.")
+
+        lower: NDArray[np.float64] = np.asarray(
+            [lo for lo, _ in self._boundaries.values()], dtype=float
+        )
+        upper: NDArray[np.float64] = np.asarray(
+            [hi for _, hi in self._boundaries.values()], dtype=float
+        )
+        with np.errstate(over="ignore", invalid="ignore"):
+            widths = upper - lower
+
+        if not np.all(np.isfinite(widths)) or np.any(widths <= 0.0):
+            raise ValueError("CMA-ES boundary widths must be finite and positive.")
+
+        if self._boundary_handling == "reflection" and np.any(
+            widths > np.finfo(float).max / 2.0
+        ):
+            raise ValueError("CMA-ES reflection periods must be finite and positive.")
+
+        # Normalize before reduction to avoid overflow in the sum of widths.
+        largest_width = float(np.max(widths))
+        average_width = largest_width * float(np.mean(widths / largest_width))
+        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+            step_size = float(np.float64(self._initial_sigma) * average_width)
+
+        if not np.isfinite(average_width) or average_width <= 0.0:
+            raise ValueError("CMA-ES mean boundary width must be finite and positive.")
+        if not np.isfinite(step_size) or step_size <= 0.0:
+            raise ValueError("CMA-ES initial sigma must be finite and positive.")
+
+        return step_size
 
     def _initialize_parameters(self) -> None:
         self._variable_names = tuple(self._boundaries)
@@ -319,8 +379,7 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         self._penalty_history = []
         self._penalty_weights_initialized = False
 
-        ranges = self._upper_bounds - self._lower_bounds
-        self._step_size = self._initial_sigma * float(np.mean(ranges))
+        self._step_size = self._validate_initial_geometry()
 
     def _update_strategy_parameters(self) -> None:
         if self._dimension is None:
@@ -405,12 +464,84 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
 
         return np.clip(reflected, self._lower_bounds, self._upper_bounds)
 
-    @staticmethod
-    def _sampling_transform(covariance: NDArray[np.float64]) -> NDArray[np.float64]:
-        eigenvalues, eigenvectors = np.linalg.eigh(covariance)
-        eigenvalues = np.maximum(eigenvalues, np.finfo(float).eps)
+    def _stop_numerical_evolution(self, reason: str) -> None:
+        self._force_iteration_stop: bool = True
+        warnings.warn(
+            f"CMA-ES optimization stopped prematurely: {reason}. "
+            + "Reinitialize the algorithm context before running it again.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
-        return eigenvectors @ np.diag(np.sqrt(eigenvalues))
+    def _prepare_distribution_transforms(self) -> None:
+        covariance = self._covariance
+        step_size = self._step_size
+        if covariance is None or step_size is None:
+            raise RuntimeError("CMA-ES state has not been initialized.")
+
+        self._sampling_matrix = None
+        self._inverse_sqrt_covariance = None
+        if not np.isfinite(step_size):
+            self._stop_numerical_evolution("sigma became non-finite")
+            return
+        if step_size <= 0.0:
+            self._stop_numerical_evolution("sigma became non-positive")
+            return
+        if not np.all(np.isfinite(covariance)):
+            self._stop_numerical_evolution("covariance contains non-finite values")
+            return
+
+        try:
+            eigensystem = np.linalg.eigh(covariance)
+        except np.linalg.LinAlgError:
+            self._stop_numerical_evolution("covariance eigendecomposition failed")
+            return
+
+        eigenvalues: NDArray[np.float64] = eigensystem.eigenvalues
+        eigenvectors: NDArray[np.float64] = eigensystem.eigenvectors
+        if not np.all(np.isfinite(eigenvalues)):
+            self._stop_numerical_evolution("covariance eigenvalues are non-finite")
+            return
+        if np.any(eigenvalues <= 0.0):
+            self._stop_numerical_evolution("covariance has a non-positive eigenvalue")
+            return
+
+        relative_eigenvalue = float(np.min(eigenvalues) / np.max(eigenvalues))
+        # Relative rank tolerance used for float64 matrices, without an absolute floor.
+        if relative_eigenvalue <= len(eigenvalues) * np.finfo(float).eps:
+            self._stop_numerical_evolution("covariance became numerically singular")
+            return
+        if relative_eigenvalue < 1e-14:
+            self._stop_numerical_evolution(
+                "covariance exceeded the condition limit 1e14"
+            )
+            return
+
+        principal_std = np.sqrt(eigenvalues)
+        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+            effective_scale = step_size * principal_std
+        if not np.all(np.isfinite(effective_scale)) or np.any(effective_scale <= 0.0):
+            self._stop_numerical_evolution(
+                "effective sampling scale became non-representable"
+            )
+            return
+
+        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+            transform = eigenvectors @ np.diag(principal_std)
+            inverse = eigenvectors @ np.diag(1.0 / principal_std) @ eigenvectors.T
+        if not np.all(np.isfinite(transform)):
+            self._stop_numerical_evolution(
+                "covariance sampling transform is non-finite"
+            )
+            return
+        if not np.all(np.isfinite(inverse)):
+            self._stop_numerical_evolution(
+                "covariance whitening transform is non-finite"
+            )
+            return
+
+        self._sampling_matrix = transform
+        self._inverse_sqrt_covariance = inverse
 
     def _raw_candidate_from_z(
         self, z: NDArray[np.float64], transform: NDArray[np.float64]
@@ -418,7 +549,13 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         if self._mean is None or self._step_size is None:
             raise RuntimeError("CMA-ES state has not been initialized.")
 
-        return self._mean + self._step_size * (transform @ z)
+        with np.errstate(over="ignore", invalid="ignore"):
+            candidate = self._mean + self._step_size * (transform @ z)
+        if not np.all(np.isfinite(candidate)):
+            raise RuntimeError(
+                "CMA-ES sampling violated the finite distribution invariants."
+            )
+        return candidate
 
     def _resample_candidate(
         self, particle: CMAESCandidateSolution, transform: NDArray[np.float64]
@@ -470,21 +607,28 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         with np.errstate(over="ignore", invalid="ignore"):
             # Keep the standard deviation unsquared: sigma**2 may overflow
             # even when the normalized fitness spread is representable.
-            coordinate_scale = step_size * sqrt(float(np.mean(np.diag(covariance))))
+            coordinate_scale = step_size * float(
+                np.sqrt(np.float64(np.mean(np.diag(covariance))))
+            )
 
         if (
             len(finite_fitness) >= 2
             and np.isfinite(coordinate_scale)
             and coordinate_scale > 0
         ):
-            lower_quartile = float(np.quantile(finite_fitness, 0.25))
-            upper_quartile = float(np.quantile(finite_fitness, 0.75))
-            delta_f = (
-                (upper_quartile - lower_quartile) / coordinate_scale / coordinate_scale
-            )
+            with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+                lower_quartile = float(np.quantile(finite_fitness, 0.25))
+                upper_quartile = float(np.quantile(finite_fitness, 0.75))
+                delta_f = float(
+                    (np.float64(upper_quartile) - lower_quartile)
+                    / coordinate_scale
+                    / coordinate_scale
+                )
 
             if np.isfinite(delta_f) and delta_f > 0:
                 self._penalty_history.insert(0, delta_f)
+            elif delta_f == np.inf and len(self._penalty_history) > 1:
+                self._penalty_history.insert(0, max(self._penalty_history))
 
         history_limit = 20 + int(np.floor(3.0 * dimension / len(particles)))
 
@@ -511,7 +655,7 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         if not self._penalty_weights_initialized:
             return
 
-        diagonal = np.maximum(np.diag(covariance), np.finfo(float).eps)
+        diagonal = np.diag(covariance)
         coordinate_std = step_size * np.sqrt(diagonal)
         normalized_distance = np.abs(mean_violation) / coordinate_std
         threshold = 3.0 * max(1.0, np.sqrt(dimension) / mu_eff)
@@ -560,7 +704,9 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
             # Scale before squaring: zero weights must give zero even when the
             # unweighted squared distance would overflow (Hansen 2009, eq. 12).
             weighted_violation = (
-                np.sqrt(self._penalty_gamma) * violation / sqrt(self._dimension)
+                np.sqrt(self._penalty_gamma)
+                * violation
+                / float(np.sqrt(np.float64(self._dimension)))
             )
             penalty = float(np.sum(weighted_violation**2))
 
@@ -618,13 +764,19 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         if self._mean is None:
             raise RuntimeError("CMA-ES mean has not been initialized.")
 
+        self._prepare_distribution_transforms()
+
     def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
         dimension = self._dimension
 
         for particle_id in particle_ids:
             cache = {}
 
-            if not initialize and particle_id not in self._injected_particle_ids:
+            if (
+                not initialize
+                and self._sampling_matrix is not None
+                and particle_id not in self._injected_particle_ids
+            ):
                 if dimension is None:
                     raise RuntimeError("CMA-ES dimension has not been initialized.")
 
@@ -679,7 +831,7 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
 
         particle.raw_candidate_variables = None
 
-        if identifier in self._injected_particle_ids:
+        if self._force_iteration_stop or identifier in self._injected_particle_ids:
             if particle.candidate_variables is None:
                 particle.candidate_variables = dict(particle.variables)
 
@@ -691,7 +843,9 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         if self._mean is None or self._covariance is None or self._step_size is None:
             raise RuntimeError("CMA-ES state has not been initialized.")
 
-        transform = self._sampling_transform(self._covariance)
+        transform = self._sampling_matrix
+        if transform is None:
+            raise RuntimeError("CMA-ES sampling transform has not been initialized.")
 
         if self._boundary_handling == "resampling":
             raw_candidate = self._resample_candidate(
@@ -701,9 +855,6 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         else:
             z = particle.random_cache["cmaes-z"]
             raw_candidate = self._raw_candidate_from_z(z=z, transform=transform)
-
-            if not np.all(np.isfinite(raw_candidate)):
-                raise RuntimeError("CMA-ES generated a non-finite candidate solution.")
 
             if self._boundary_handling in ("adaptive-penalty", "clip"):
                 evaluated_candidate = self._project_to_boundaries(raw_candidate)
@@ -727,6 +878,10 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         if actual_iter == 0:
             self._injected_particle_ids = set()
             self.update_solution_state()
+            return
+
+        if self._force_iteration_stop:
+            self._consolidate_population()
             return
 
         if (
@@ -815,7 +970,7 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         mu_eff = float(1.0 / np.sum(weights**2))
 
         old_mean = mean.copy()
-        selected_variables = []
+        selected_variables: list[NDArray[np.float64]] = []
 
         for particle in selected:
             if particle.candidate_variables is None:
@@ -826,10 +981,7 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
             if (
                 particle.identifier in self._injected_particle_ids
                 or self._boundary_handling == "clip"
-                or (
-                    self._boundary_handling == "adaptive-penalty"
-                    and particle.candidate_fitness == -np.inf
-                )
+                or particle.candidate_fitness == -np.inf
             ):
                 adaptation_variables = particle.candidate_variables
             else:
@@ -843,15 +995,28 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
 
             selected_variables.append(self._variables_to_array(adaptation_variables))
 
-        selected_candidates = np.asarray(selected_variables)
-        y_selected = (selected_candidates - old_mean) / step_size
+        selected_candidates: NDArray[np.float64] = np.asarray(selected_variables)
+        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+            displacement = selected_candidates - old_mean
+            y_selected: NDArray[np.float64] = displacement / step_size
+            overflowed_difference = ~np.isfinite(displacement)
+            if np.any(overflowed_difference):
+                scaled_difference = (
+                    selected_candidates / step_size - old_mean / step_size
+                )
+                y_selected[overflowed_difference] = scaled_difference[
+                    overflowed_difference
+                ]
+        if not np.all(np.isfinite(y_selected)):
+            self._stop_numerical_evolution(
+                "distribution normalization produced non-finite adaptation steps"
+            )
+            self._consolidate_population()
+            return
 
-        eigenvalues, eigenvectors = np.linalg.eigh(covariance)
-        eigenvalues = np.maximum(eigenvalues, np.finfo(float).eps)
-
-        inv_sqrt_covariance = (
-            eigenvectors @ np.diag(1.0 / np.sqrt(eigenvalues)) @ eigenvectors.T
-        )
+        inv_sqrt_covariance = self._inverse_sqrt_covariance
+        if inv_sqrt_covariance is None:
+            raise RuntimeError("CMA-ES whitening transform has not been initialized.")
 
         injection_limit = np.sqrt(dimension) + 2.0 * dimension / (dimension + 2.0)
 
@@ -859,7 +1024,17 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
             if particle.identifier not in self._injected_particle_ids:
                 continue
 
-            mahalanobis_norm = np.linalg.norm(inv_sqrt_covariance @ y_selected[index])
+            with np.errstate(over="ignore", invalid="ignore"):
+                whitened_step: NDArray[np.float64] = (
+                    inv_sqrt_covariance @ y_selected[index, :]
+                )
+            if not np.all(np.isfinite(whitened_step)):
+                self._stop_numerical_evolution(
+                    "covariance whitening produced non-finite adaptation steps"
+                )
+                self._consolidate_population()
+                return
+            mahalanobis_norm = float(norm(whitened_step))
 
             if mahalanobis_norm > injection_limit:
                 y_selected[index] *= injection_limit / mahalanobis_norm
@@ -888,17 +1063,26 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         for weight, y in zip(weights, y_selected):
             rank_mu += weight * np.outer(y, y)
 
-        covariance = (
-            (1.0 - c1 * gamma_c - cmu) * covariance
-            + c1 * np.outer(p_c, p_c)
-            + cmu * rank_mu
-        )
+        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+            covariance = (
+                (1.0 - c1 * gamma_c - cmu) * covariance
+                + c1 * np.outer(p_c, p_c)
+                + cmu * rank_mu
+            )
 
-        covariance = (covariance + covariance.T) / 2.0
+            if np.any(np.abs(covariance) > np.finfo(float).max / 2.0):
+                covariance = covariance / 2.0 + covariance.T / 2.0
+            else:
+                covariance = (covariance + covariance.T) / 2.0
 
-        step_size *= np.exp(
-            (cs / damps) * (p_sigma_norm / chi_n - np.sqrt(gamma_sigma))
-        )
+            sigma_exponent = (cs / damps) * (
+                p_sigma_norm / chi_n - np.sqrt(gamma_sigma)
+            )
+            sigma_factor = np.exp(sigma_exponent)
+            if not np.isfinite(sigma_factor) or sigma_factor == 0.0:
+                step_size = np.exp(np.log(step_size) + sigma_exponent)
+            else:
+                step_size *= sigma_factor
 
         self._mean = new_mean
         self._covariance = covariance
@@ -908,6 +1092,10 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
         self._gamma_sigma = gamma_sigma
         self._gamma_c = gamma_c
 
+        self._prepare_distribution_transforms()
+        self._consolidate_population()
+
+    def _consolidate_population(self) -> None:
         for particle in self._population.values():
             if particle.candidate_fitness is None:
                 raise RuntimeError(
