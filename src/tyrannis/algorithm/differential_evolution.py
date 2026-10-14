@@ -67,8 +67,11 @@ class DifferentialEvolution(AlgorithmBase[DEParticle]):
         crossover. For each variable, the mutant value is selected with probability
         ``crossover_rate``; otherwise, the value from the target individual is
         retained. At least one variable is always selected from the mutant vector,
-        ensuring that the resulting trial solution differs from the target through
-        the differential mutation.
+        ensuring that the trial solution inherits at least one coordinate from the
+        mutant vector even if its numerical value equals the target coordinate.
+
+        Mutant coordinates outside the configured search boundaries are projected
+        onto the nearest boundary before being included in the trial solution.
 
         After evaluation, the trial solution competes directly with its corresponding
         target individual. The trial solution replaces the target only when it
