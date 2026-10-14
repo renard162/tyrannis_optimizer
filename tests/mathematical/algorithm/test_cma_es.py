@@ -8,8 +8,9 @@ Tyrannis: initial centroid, range-scaled sigma, four boundary policies,
 average tied weights including zero ranks, and feasible geometry for -inf.
 Iteration zero is setup; iteration k>0 executes mathematical t=k-1.
 
-Tie-dependent path normalization is a pending design decision. Tests of ties
-protect recombination and rank-mu, without freezing that normalization choice.
+Tyrannis uses the effective mass of averaged tied weights in both evolution
+paths, while learning rates retain the nominal strategy mass. Penalty weights
+initialize once, at the first infeasible mean with a valid historical scale.
 """
 
 from collections.abc import Callable
@@ -253,8 +254,7 @@ def geometry(generation: Generation, policy: str) -> tuple[Array, Array]:
         [
             point(
                 p,
-                raw=policy != "clip"
-                and not (policy == "adaptive-penalty" and fitness(p) == -np.inf),
+                raw=policy != "clip" and fitness(p) != -np.inf,
             )
             for p in generation.candidates
         ]
@@ -268,12 +268,37 @@ def assert_recombination(generation: Generation, policy: str) -> None:
     old, new = generation.before, generation.after
     steps, weights = geometry(generation, policy)
     close(new.mean, old.mean + old.sigma * (weights @ steps))
-    # Isolate rank-mu using the observed path, so this does not decide how
-    # tied weights should normalize the paths (an explicitly pending decision).
+    # Isolate rank-mu; the path equations are checked independently below.
     expected = (1 - old.c1 * new.gamma_c - old.cmu) * old.covariance
     expected += old.c1 * np.outer(new.p_c, new.p_c)
     expected += old.cmu * ((steps.T * weights) @ steps)
     close(new.covariance, expected)
+
+
+def assert_paths(generation: Generation, policy: str) -> int:
+    """AH (3)-(11), with Tyrannis' effective mass after averaging tied ranks."""
+    old, new = generation.before, generation.after
+    steps, weights = geometry(generation, policy)
+    mass = 1 / float(weights @ weights)
+    weighted = weights @ steps
+    eigenvalues, basis = np.linalg.eigh(old.covariance)
+    inverse = (basis * eigenvalues**-0.5) @ basis.T
+    ps = (1 - old.cs) * old.p_sigma + sqrt(old.cs * (2 - old.cs) * mass) * (
+        inverse @ weighted
+    )
+    gs = (1 - old.cs) ** 2 * old.gamma_sigma + old.cs * (2 - old.cs)
+    gate = int(float(ps @ ps) < gs * 2 * (2 + 4 / 3))
+    pc = (1 - old.cc) * old.p_c + gate * sqrt(old.cc * (2 - old.cc) * mass) * weighted
+    gc = (1 - old.cc) ** 2 * old.gamma_c + gate * (1 - (1 - old.cc) ** 2)
+    close(new.p_sigma, ps)
+    close(new.gamma_sigma, gs)
+    close(new.p_c, pc)
+    close(new.gamma_c, gc)
+    close(
+        log(new.sigma / old.sigma),
+        old.cs / old.damps * (float(np.linalg.norm(ps)) / old.chi_n - sqrt(gs)),
+    )
+    return gate
 
 
 def test_setup_parameters_and_sampling(
@@ -286,6 +311,8 @@ def test_setup_parameters_and_sampling(
     close(initial.covariance, np.eye(2))
     close(initial.p_sigma, np.zeros(2))
     close(initial.p_c, np.zeros(2))
+    close(initial.penalty, np.zeros(2))
+    assert initial.history == []
     close(initial.sigma, 0.3 * (10 + 6) / 2)
     nominal = weights_for(5)[:2]
     mass = 1 / float(nominal @ nominal)
@@ -344,28 +371,8 @@ def test_mean_csa_and_covariance_transitions(
     for k, generation in enumerate(run.generations, 1):
         old, new = generation.before, generation.after
         assert len(set(generation.scores)) == 5
-        steps, weights = geometry(generation, "reflection")
-        weighted = weights @ steps
-        eigenvalues, basis = np.linalg.eigh(old.covariance)
-        inverse = (basis * eigenvalues**-0.5) @ basis.T
-        ps = (1 - old.cs) * old.p_sigma + sqrt(old.cs * (2 - old.cs) * old.mu_eff) * (
-            inverse @ weighted
-        )
-        gs = 1 - (1 - old.cs) ** (2 * k)
-        gate = int(float(ps @ ps) < gs * 2 * (2 + 4 / 3))
-        gates.add(gate)
-        pc = (1 - old.cc) * old.p_c + gate * sqrt(
-            old.cc * (2 - old.cc) * old.mu_eff
-        ) * weighted
-        gc = (1 - old.cc) ** 2 * old.gamma_c + gate * (1 - (1 - old.cc) ** 2)
-        close(new.p_sigma, ps)
-        close(new.gamma_sigma, gs)
-        close(new.p_c, pc)
-        close(new.gamma_c, gc)
-        close(
-            log(new.sigma / old.sigma),
-            old.cs / old.damps * (float(np.linalg.norm(ps)) / old.chi_n - sqrt(gs)),
-        )
+        gates.add(assert_paths(generation, "reflection"))
+        close(new.gamma_sigma, 1 - (1 - old.cs) ** (2 * k))
         assert_recombination(generation, "reflection")
         close(new.covariance, new.covariance.T)
         assert np.all(np.linalg.eigvalsh(new.covariance) > 0)
@@ -441,6 +448,7 @@ def test_ties_preserve_all_rank_mass_and_ignore_candidate_order(
         monkeypatch, small_bounds, objective=staircase, policy="clip", population=8
     )
     blocks: set[str] = set()
+    changed_mass = active_covariance_path = False
     for generation in run.generations:
         scores = generation.scores
         for value in set(map(float, scores)):
@@ -454,36 +462,98 @@ def test_ties_preserve_all_rank_mass_and_ignore_candidate_order(
                 )
         weights = tied_weights(scores)
         close(float(np.sum(weights)), 1.0)
+        effective_mass = 1 / float(weights @ weights)
+        different_mass = not np.isclose(
+            effective_mass, run.setup.mu_eff, rtol=LINALG_RTOL, atol=LINALG_ATOL
+        )
+        changed_mass |= different_mass
+        gate = assert_paths(generation, "clip")
+        active_covariance_path |= gate == 1 and different_mass
+        nominal = run.setup
+        for state in (generation.before, generation.after):
+            close(state.weights, nominal.weights)
+            close(
+                np.array(
+                    [state.mu_eff, state.cc, state.cs, state.c1, state.cmu, state.damps]
+                ),
+                np.array(
+                    [
+                        nominal.mu_eff,
+                        nominal.cc,
+                        nominal.cs,
+                        nominal.c1,
+                        nominal.cmu,
+                        nominal.damps,
+                    ]
+                ),
+            )
         positions = np.stack([point(p) for p in generation.candidates])
         # Both permutations must describe the same production mean.
         close(generation.after.mean, tied_weights(scores[::-1]) @ positions[::-1])
         assert_recombination(generation, "clip")
     assert blocks == {"above", "inside", "crossing"}
+    assert changed_mass and active_covariance_path
 
 
+@pytest.mark.parametrize("history_stress", [False, True], ids=["sphere", "history"])
 def test_adaptive_penalty_matches_published_scale_and_coefficients(
     monkeypatch: pytest.MonkeyPatch,
+    history_stress: bool,
 ) -> None:
     bounds = {"x": (0.1, 2.0), "y": (-2.0, 2.0)}
-    run = run_cma(monkeypatch, bounds, sigma=1.0, iterations=8)
+
+    def plateau_with_cliff(**variables: float) -> float:
+        # A fixed landscape: finite extreme cliff, then a flat quartic basin.
+        # It yields an overflowing normalized spread and later a zero IQR,
+        # without scheduling fitness values or manipulating the CMA state.
+        if variables["x"] > 1.2:
+            return 1.6e308
+        return max(0.0, sphere(**variables) - 0.1) ** 2
+
+    run = run_cma(
+        monkeypatch,
+        bounds,
+        objective=plateau_with_cliff if history_stress else sphere,
+        sigma=0.3 if history_stress else 1.0,
+        iterations=10 if history_stress else 8,
+    )
     lower = np.array([limits[0] for limits in bounds.values()])
     upper = np.array([limits[1] for limits in bounds.values()])
     activated = penalized = False
+    first_activation: int | None = None
+    distinguished_reinitialization = False
+    infinite_spread = zero_spread = adapted_without_observation = False
     history: list[float] = []
     for k, generation in enumerate(run.generations, 1):
         old, new = generation.before, generation.after
         values = np.array([fitness(p) for p in generation.candidates])
+        assert np.all(np.isfinite(values))
         iqr = float(np.quantile(values, 0.75) - np.quantile(values, 0.25))
-        scale = iqr / (old.sigma**2 * sum(map(float, np.diag(old.covariance))) / 2)
-        if scale > 0:
+        scale = iqr / float(old.sigma**2 * sum(map(float, np.diag(old.covariance))) / 2)
+        if np.isfinite(scale) and scale > 0:
             history.insert(0, scale)
+        elif scale == np.inf:
+            # Tyrannis' historical fallback uses the maximum when at least
+            # two estimates exist; unequal entries distinguish it from median.
+            assert len(history) > 1 and max(history) != min(history)
+            history.insert(0, max(history))
+            infinite_spread = True
+        else:
+            assert scale == 0 and history
+            zero_spread = True
         close(np.array(new.history), np.array(history))
         typical = float(np.median(history))
         violation = np.abs(old.mean - np.clip(old.mean, lower, upper))
         gamma = old.penalty.copy()
-        if np.any(violation) and (not activated or k == 2):
-            gamma = np.full(2, 2 * typical)
-            activated = True
+        if np.any(violation):
+            if not activated:
+                gamma = np.full(2, 2 * typical)
+                activated = True
+                first_activation = k
+            else:
+                distinguished_reinitialization |= not np.allclose(
+                    gamma, 2 * typical, rtol=LINALG_RTOL, atol=LINALG_ATOL
+                )
         if activated:
             distance = violation / (old.sigma * np.sqrt(np.diag(old.covariance)))
             excess = np.maximum(0, distance - 3 * max(1, sqrt(2) / old.mu_eff))
@@ -491,6 +561,10 @@ def test_adaptive_penalty_matches_published_scale_and_coefficients(
             gamma *= np.exp(damping * np.tanh(excess / 3) / 2)
             gamma = np.where(gamma > 5 * typical, gamma * exp(-damping / 3), gamma)
         close(new.penalty, gamma)
+        if scale == 0 and np.all(old.penalty > 0):
+            adapted_without_observation |= not np.allclose(
+                gamma, old.penalty, rtol=LINALG_RTOL, atol=LINALG_ATOL
+            )
         penalties = np.array(
             [
                 float(gamma @ (point(p, raw=True) - point(p)) ** 2) / 2
@@ -501,6 +575,11 @@ def test_adaptive_penalty_matches_published_scale_and_coefficients(
         penalized |= bool(np.any(penalties > 0))
         assert_recombination(generation, "adaptive-penalty")
     assert activated and penalized
+    assert first_activation is not None and first_activation > 2
+    if history_stress:
+        assert infinite_spread and zero_spread and adapted_without_observation
+    else:
+        assert distinguished_reinitialization
 
 
 @pytest.mark.parametrize(
@@ -551,8 +630,12 @@ def test_mixed_infinities_use_feasible_negative_infinity_geometry(
                 repaired_negative |= value == -np.inf and not np.array_equal(
                     point(p), point(p, raw=True)
                 )
-        assert all(np.isfinite(item) and item > 0 for item in generation.after.history)
+        # This trajectory never has enough finite fitness values to estimate
+        # dispersion; infinities must not manufacture a penalty history.
+        assert sum(np.isfinite(fitness(p)) for p in generation.candidates) < 2
+        assert generation.after.history == []
     assert saw_finite and saw_positive and repaired_negative
+    assert run.local_best is not None and run.local_best.fitness == -np.inf
 
 
 def test_penalty_arithmetic_preserves_representable_scale_equivalence(
