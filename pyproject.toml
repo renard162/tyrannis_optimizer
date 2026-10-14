@@ -1,6 +1,6 @@
 [project]
 name = "tyrannis"
-version = "0.1.0a5"
+version = "0.1.0a4"
 description = "Flexible population-based metaheuristic optimization framework supporting diverse search spaces, parallel and distributed execution, and island-model migration."
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -13,6 +13,7 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -20,7 +21,6 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Topic :: Scientific/Engineering",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
-    "Topic :: Scientific/Engineering :: Information Analysis",
     "Topic :: Scientific/Engineering :: Mathematics",
 ]
 
@@ -29,33 +29,43 @@ keywords = [
     "metaheuristics",
     "global optimization",
     "black-box optimization",
+    "derivative-free optimization",
+    "stochastic optimization",
     "population-based optimization",
     "particle-based optimization",
     "evolutionary computation",
     "swarm intelligence",
-    "ant colony optimization",
-    "ACOR",
-    "artificial bee colony optimization",
-    "ABC",
-    "covariance matrix adaptation evolution strategy",
-    "CMA-ES",
+    "estimation of distribution algorithms",
+    "particle swarm optimization",
+    "PSO",
     "differential evolution",
     "DE",
     "genetic algorithm",
     "GA",
+    "CMA-ES",
+    "artificial bee colony",
+    "ABC",
+    "ant colony optimization",
+    "ACOR",
     "gravitational search algorithm",
     "GSA",
     "grey wolf optimization",
     "GWO",
-    "particle swarm optimization",
-    "PSO",
-    "PSOGSA",
     "whale optimization algorithm",
     "WOA",
+    "continuous optimization",
+    "integer optimization",
+    "binary optimization",
+    "categorical optimization",
+    "ordinal optimization",
+    "permutation optimization",
+    "sequence optimization",
+    "mixed-variable optimization",
     "parallel optimization",
     "distributed optimization",
     "island model",
-    "mixed search space",
+    "Apache Spark",
+    "MPI",
 ]
 
 requires-python = ">=3.11,<3.15"
