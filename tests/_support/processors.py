@@ -60,6 +60,7 @@ class ProcessorAlgorithmDouble(AlgorithmBase[ProcessorParticleDouble]):
         self._iter_worst: str | None = None
         self._double_particle_check = False
         self._double_check_ids: list[str] = []
+        self._force_iteration_stop: bool = False
         self.requested_double_check_ids: list[str] = []
         self.initialized_ids: list[str] = []
         self.updated_ids: list[str] = []
