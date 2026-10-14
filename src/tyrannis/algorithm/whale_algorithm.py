@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.linalg import norm
 
 from ..core.algorithm import (
     FITNESS_UNDEFINED,
@@ -349,7 +350,9 @@ class WhaleAlgorithm(AlgorithmBase[WhaleParticle]):
                 coefficient_a[variable] = 2.0 * self._a * r1 - self._a
                 coefficient_c[variable] = 2.0 * r2
 
-            a_infinity_norm = max(abs(value) for value in coefficient_a.values())
+            a_infinity_norm = float(
+                norm(tuple(coefficient_a.values()), ord=np.inf, check_finite=False)
+            )
             use_best_reference = a_infinity_norm < 1.0
         else:
             use_best_reference = True

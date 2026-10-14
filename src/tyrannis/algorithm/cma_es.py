@@ -2,7 +2,7 @@ import warnings
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.linalg import norm
+from scipy.linalg import eigh, norm
 
 from ..core.algorithm import FITNESS_UNDEFINED, AlgorithmBase, ParticleBase
 
@@ -492,13 +492,13 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
             return
 
         try:
-            eigensystem = np.linalg.eigh(covariance)
+            eigensystem = eigh(covariance, driver="evd", check_finite=False)
         except np.linalg.LinAlgError:
             self._stop_numerical_evolution("covariance eigendecomposition failed")
             return
 
-        eigenvalues: NDArray[np.float64] = eigensystem.eigenvalues
-        eigenvectors: NDArray[np.float64] = eigensystem.eigenvectors
+        eigenvalues: NDArray[np.float64] = eigensystem[0]
+        eigenvectors: NDArray[np.float64] = eigensystem[1]
         if not np.all(np.isfinite(eigenvalues)):
             self._stop_numerical_evolution("covariance eigenvalues are non-finite")
             return
@@ -1048,7 +1048,7 @@ class CMAES(AlgorithmBase[CMAESCandidateSolution]):
 
         gamma_sigma = (1.0 - cs) ** 2 * gamma_sigma + cs * (2.0 - cs)
 
-        p_sigma_norm = np.linalg.norm(p_sigma)
+        p_sigma_norm = norm(p_sigma, check_finite=False)
 
         h_sigma = int(
             p_sigma_norm**2 / gamma_sigma < (2.0 + 4.0 / (dimension + 1.0)) * dimension

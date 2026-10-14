@@ -1,10 +1,10 @@
 from collections.abc import Collection
 from copy import deepcopy
 from dataclasses import dataclass
-from math import sqrt
 from typing import cast
 
 import numpy as np
+from scipy.linalg import eigvalsh, inv, lstsq, solve
 from scipy.sparse.csgraph import shortest_path
 from scipy.special import gammaln
 from scipy.stats import chi2
@@ -657,7 +657,17 @@ class EGNA(AlgorithmBase[EGNAParticle]):
             if np.linalg.matrix_rank(design) < design.shape[1]:
                 return -np.inf
 
-            coefficients, _, _, _ = np.linalg.lstsq(design, y, rcond=None)
+            least_squares = lstsq(
+                design,
+                y,
+                cond=np.finfo(float).eps * max(design.shape),
+                lapack_driver="gelsd",
+                check_finite=False
+            )
+            # SciPy's untyped dispatcher includes None; gelsd returns four values.
+            coefficients, _, _, _ = cast(
+                tuple[_FloatArray, object, int, _FloatArray], least_squares
+            )
             residuals = y - design @ coefficients
         else:
             residuals = y - float(np.mean(y))
@@ -894,7 +904,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         centered = data - np.mean(data, axis=0)
         covariance = centered.T @ centered / len(data)
         covariance = 0.5 * (covariance + covariance.T)
-        eigenvalues = np.linalg.eigvalsh(covariance)
+        eigenvalues = eigvalsh(covariance, driver="evd", check_finite=False)
         scale = max(1.0, float(np.max(np.abs(np.diag(covariance)))))
         minimum_eigenvalue = np.finfo(float).eps * len(self._variable_names) * scale
         smallest = float(np.min(eigenvalues))
@@ -905,7 +915,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
             )
 
         try:
-            return np.linalg.inv(covariance)
+            return inv(covariance, check_finite=False)
         except np.linalg.LinAlgError as error:
             raise RuntimeError(
                 "Unable to invert the EGNA covariance matrix for edge-exclusion "
@@ -979,8 +989,16 @@ class EGNA(AlgorithmBase[EGNAParticle]):
                 parent_means = means[np.asarray(parent_indices, dtype=int)]
                 centered_parents = parent_values - parent_means
                 centered_y = y - mean
-                coefficients, _, _, _ = np.linalg.lstsq(
-                    centered_parents, centered_y, rcond=None
+                least_squares = lstsq(
+                    centered_parents,
+                    centered_y,
+                    cond=np.finfo(float).eps * max(centered_parents.shape),
+                    lapack_driver="gelsd",
+                    check_finite=False
+                )
+                # SciPy's untyped dispatcher includes None; gelsd returns four values.
+                coefficients, _, _, _ = cast(
+                    tuple[_FloatArray, object, int, _FloatArray], least_squares
                 )
                 residuals = centered_y - centered_parents @ coefficients
             else:
@@ -1033,9 +1051,11 @@ class EGNA(AlgorithmBase[EGNAParticle]):
             for node, adjacent in enumerate(neighbors):
                 other = [index for index in range(dimension) if index != node]
                 if adjacent:
-                    coefficients = np.linalg.solve(
+                    coefficients = solve(
                         covariance[np.ix_(adjacent, adjacent)],
-                        empirical[list(adjacent), node]
+                        empirical[list(adjacent), node],
+                        assume_a="pos",
+                        check_finite=False
                     )
                     column = covariance[np.ix_(other, adjacent)] @ coefficients
                 else:
@@ -1043,7 +1063,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
                 covariance[other, node] = column
                 covariance[node, other] = column
 
-            precision = np.linalg.inv(covariance)
+            precision = inv(covariance, check_finite=False)
             partial = precision / np.sqrt(
                 np.outer(np.diag(precision), np.diag(precision))
             )
@@ -1059,8 +1079,11 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         means = np.asarray(np.mean(data, axis=0), dtype=np.float64)
         conditionals: list[_ConditionalNormal] = []
         for variable in range(data.shape[1]):
-            coefficients = np.linalg.solve(
-                covariance[:variable, :variable], covariance[:variable, variable]
+            coefficients = solve(
+                covariance[:variable, :variable],
+                covariance[:variable, variable],
+                assume_a="pos",
+                check_finite=False
             )
             # NumPy scalar indexing/matmul erases the known float64 scalar dtype.
             variance = float(
@@ -1081,7 +1104,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
                     mean=means.item(variable),
                     parent_means=means[:variable].copy(),
                     coefficients=coefficients,
-                    standard_deviation=sqrt(variance)
+                    standard_deviation=float(np.sqrt(variance))
                 )
             )
         return tuple(conditionals)
@@ -1102,7 +1125,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
     def _regularize_covariance_matrix(self, covariance: _FloatArray) -> _FloatArray:
         covariance = np.asarray(covariance, dtype=float)
         covariance = 0.5 * (covariance + covariance.T)
-        eigenvalues = np.linalg.eigvalsh(covariance)
+        eigenvalues = eigvalsh(covariance, driver="evd", check_finite=False)
         scale = max(1.0, float(np.max(np.abs(np.diag(covariance)))))
         minimum_eigenvalue = np.finfo(float).eps * len(self._variable_names) * scale
         smallest = float(np.min(eigenvalues))
@@ -1139,7 +1162,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         system = np.eye(n_variables, dtype=float) - regression
 
         try:
-            transition = np.linalg.solve(system, np.eye(n_variables, dtype=float))
+            transition = inv(system, check_finite=False)
         except np.linalg.LinAlgError as error:
             raise RuntimeError(
                 "Unable to reconstruct the EGNA joint Gaussian covariance."
@@ -1171,7 +1194,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         covariance: _FloatArray, value: _FloatArray
     ) -> _FloatArray:
         try:
-            return np.linalg.solve(covariance, value)
+            return solve(covariance, value, assume_a="pos", check_finite=False)
         except np.linalg.LinAlgError as error:
             raise RuntimeError(
                 "Unable to solve an EGNA variance-scaling covariance system."

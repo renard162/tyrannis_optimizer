@@ -4,7 +4,8 @@ from copy import deepcopy
 from typing import cast
 
 import numpy as np
-from scipy.linalg import qr
+from scipy.linalg import norm, qr
+from scipy.special import softmax
 
 from ..core.algorithm import FITNESS_UNDEFINED, AlgorithmBase, ParticleBase
 
@@ -335,9 +336,9 @@ class AntColony(AlgorithmBase[ACORParticle]):
     def _calculate_archive_probabilities(self) -> np.ndarray:
         positions = np.arange(self._archive_size, dtype=float)
 
-        weights = np.exp(-(positions**2) / (2 * self._q**2 * self._archive_size**2))
+        log_weights = -(positions**2) / (2 * self._q**2 * self._archive_size**2)
 
-        return weights / np.sum(weights)
+        return softmax(log_weights)
 
     def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
         variables = tuple(self._boundaries)
@@ -468,7 +469,7 @@ class AntColony(AlgorithmBase[ACORParticle]):
 
         tolerance = np.finfo(float).eps * max(1, len(variables)) * 100
 
-        if np.linalg.norm(projected) > tolerance:
+        if norm(projected, check_finite=False) > tolerance:
             return projected
 
         for index in range(len(variables)):
@@ -479,7 +480,7 @@ class AntColony(AlgorithmBase[ACORParticle]):
                 canonical[np.newaxis, :], basis
             )[0]
 
-            if np.linalg.norm(projected) > tolerance:
+            if norm(projected, check_finite=False) > tolerance:
                 return projected
 
         raise RuntimeError("Unable to construct an ACOR coordinate direction.")
@@ -531,7 +532,7 @@ class AntColony(AlgorithmBase[ACORParticle]):
         for step, variable in enumerate(variables):
             residuals = self._project_to_remaining_subspace(differences, basis)
 
-            distances = np.linalg.norm(residuals, axis=1)
+            distances = np.asarray(norm(residuals, axis=1, check_finite=False))
 
             direction_index = self._select_direction_index(
                 distances=distances,
@@ -545,7 +546,7 @@ class AntColony(AlgorithmBase[ACORParticle]):
             else:
                 direction = residuals[direction_index]
 
-            if np.linalg.norm(direction) <= tolerance:
+            if norm(direction, check_finite=False) <= tolerance:
                 direction = self._fallback_direction(
                     particle=particle, step=step, variables=variables, basis=basis
                 )

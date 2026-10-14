@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.linalg import norm
 
 from ..core.algorithm import (
     FITNESS_UNDEFINED,
@@ -355,7 +356,7 @@ class GSA(AlgorithmBase[GSAParticle]):
                 continue
 
             other_particle = self._population[other_id]
-            distance = np.linalg.norm(
+            distance = norm(
                 np.asarray(
                     [
                         particle.variables[name] - other_particle.variables[name]
@@ -364,6 +365,7 @@ class GSA(AlgorithmBase[GSAParticle]):
                     dtype=float,
                 ),
                 ord=self._r_norm,
+                check_finite=False
             )
 
             denominator = distance**self._r_power + epsilon
