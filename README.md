@@ -25,7 +25,6 @@ Additional capabilities are available through optional dependency groups:
 | `cache` | `pip install "tyrannis[cache]"` | Additional dependencies for advanced caching resources. |
 | `spark` | `pip install "tyrannis[spark]"` | Support for the `SparkParallel` and `SparkDistributed` backends. |
 | `mpi` | `pip install "tyrannis[mpi]"` | Support for the `MPIParallel` and `MPIDistributed` backends and the `tyrannis-mpi` launcher. |
-| `all` | `pip install "tyrannis[all]"` | Installs all optional Tyrannis dependencies. |
 
 Extras can also be combined explicitly in a single installation. For example:
 
@@ -57,6 +56,7 @@ Algorithms are population-based metaheuristics used to search for a minimum with
 | `WhaleAlgorithm` | Whale Optimization Algorithm inspired by the bubble-net hunting behavior of humpback whales, with nonlinear control of the exploration-exploitation transition. |
 | `DifferentialEvolution` | Differential Evolution using differential mutation and crossover for continuous optimization. |
 | `CMAES`     | Covariance Matrix Adaptation Evolution Strategy for continuous optimization. |
+| `EGNA` | Estimation of Gaussian Networks Algorithm, a multivariate continuous Estimation of Distribution Algorithm that learns and samples Gaussian Bayesian networks. |
 
 ### Spaces
 
@@ -284,6 +284,7 @@ The roadmap below lists capabilities that are **not yet part of the current publ
 
 * Age-Layered Population Structure
 * Invasive Weed Optimization
+* More Estimation of Distribution Algorithms (EDAs)
 
 #### Spaces
 
