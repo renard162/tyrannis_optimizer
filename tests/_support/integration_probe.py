@@ -121,15 +121,19 @@ class IntegrationProbeAlgorithm(AlgorithmBase[IntegrationProbeParticle]):
             else ("second_update" if self._second_phase else "update")
         )
         for identifier in sorted(particle_ids):
+            scalar = float(self._rng.random())
+            array = self._rng.random(len(self._boundaries))
+            # Four uint32 words provide 128 bits of fresh entropy from this
+            # algorithm's advancing stream (including its island seed lineage).
+            entropy = self._rng.integers(0, 4_294_967_296, size=4, dtype=np.uint32)
+            seed_sequence = np.random.SeedSequence(entropy)
             self._population[identifier].random_cache = {
                 "particle_id": identifier,
                 "iteration": self._actual_iter,
                 "phase": phase,
-                "scalar": float(self._rng.random()),
-                "array": self._rng.random(len(self._boundaries)),
-                "generator": np.random.default_rng(
-                    self._rng.integers(0, 4_294_967_296, size=4, dtype=np.uint32)
-                ),
+                "scalar": scalar,
+                "array": array,
+                "generator": np.random.default_rng(seed_sequence),
             }
 
     def _process(self, identifier: str, phase: str) -> IntegrationProbeParticle:
