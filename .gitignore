@@ -223,6 +223,5 @@ clear-cache.bat
 tyrannis_test.py
 tyrannis_optimizer.zip
 
-AGENTS.md
-TESTING.md
 .agents
+.context
