@@ -7,20 +7,20 @@ from typing import Literal
 
 import numpy as np
 import pytest
-
-from tests._support.assertions import assert_particle_state_consistent
+from _support.assertions import assert_particle_state_consistent
 
 # The shared factory omits AlgorithmBase type parameters. Keep the concrete
 # probe reference below; its return annotation is an existing helper limitation.
-from tests._support.factories import (
+from _support.factories import (
     configure_algorithm,  # pyright: ignore[reportUnknownVariableType]
 )
-from tests._support.integration_probe import (
+from _support.integration_probe import (
     IntegrationProbeAlgorithm,
     IntegrationProbeParticle,
 )
-from tests._support.numerics import BASE_SEED
-from tests._support.objectives import CountingObjective
+from _support.numerics import BASE_SEED
+from _support.objectives import CountingObjective
+
 from tyrannis.core.algorithm import CostFunctionWrapperBase
 
 
