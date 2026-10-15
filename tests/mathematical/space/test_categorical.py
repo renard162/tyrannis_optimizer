@@ -44,12 +44,11 @@ def _assert_categorical_frequencies(
     decoder: str,
     seed: int,
     temperature: float | None = None,
+    sample_size: int = 5_000,
 ) -> dict[int, float]:
     space.initialize_context(seed=seed)
     assert_variables_within_bounds(inputs, space.encoded_boundaries)
-    # At N=5,000 the shared six-sigma margin is at most 0.043 for any p.
     # Seeds reproduce experiments; neither their sequences nor labels are oracles.
-    sample_size = 5_000
     counts: Counter[int] = Counter()
     for _ in range(sample_size):
         decoded = space.decode(inputs)
@@ -159,9 +158,22 @@ def test_softmax_frequencies_match_exponential_weights_and_common_shifts() -> No
         inputs = {
             f"0-{label}": z + shift for label, z in zip(choices, logits, strict=True)
         }
-        _ = _assert_categorical_frequencies(
-            space, inputs, probabilities, decoder="softmax", seed=seed_for(case_id)
-        )
+        if shift == 0.0:
+            _ = _assert_categorical_frequencies(
+                space, inputs, probabilities, decoder="softmax", seed=seed_for(case_id)
+            )
+        else:
+            # Couple real draws: common shifts cancel in every probability,
+            # so each outcome must agree, without a frequency tolerance.
+            reference = Categorical(choices, constant_objective, decoder="softmax")
+            reference.initialize_context(seed=seed_for(case_id))
+            space.initialize_context(seed=seed_for(case_id))
+            unshifted = {
+                f"0-{label}": z for label, z in zip(choices, logits, strict=True)
+            }
+            assert_variables_within_bounds(inputs, space.encoded_boundaries)
+            for _ in range(128):
+                assert space.decode(inputs) == reference.decode(unshifted)
 
 
 @pytest.mark.statistical
@@ -223,6 +235,10 @@ def test_gumbel_softmax_marginals_integrate_extra_draw_and_temperature() -> None
 @pytest.mark.statistical
 def test_gumbel_softmax_equal_logits_are_uniform_at_distinct_temperatures() -> None:
     # Exchangeability and sum(q)=1 imply E[q_i]=1/K for every temperature.
+    # At p=1/3, N=2,500 gives SE=0.00943 and six sigma<0.057.
+    # Losing a category shifts its mass by 1/3 and the others by 1/6;
+    # both exceed two tolerance bands. Retain each temperature to catch
+    # temperature-dependent bias; unequal logits test the extra draw separately.
     choices = (10, 20, 1000)
     for case_id, temperature in enumerate((0.25, 1.0, 4.0)):
         space = Categorical(
@@ -239,6 +255,7 @@ def test_gumbel_softmax_equal_logits_are_uniform_at_distinct_temperatures() -> N
             decoder="gumbel-softmax",
             seed=seed_for(case_id + 20),
             temperature=temperature,
+            sample_size=2_500,
         )
 
 

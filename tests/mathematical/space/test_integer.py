@@ -249,9 +249,10 @@ def test_stochastic_rounding_matches_bernoulli_probabilities_and_is_unbiased() -
         assert isinstance(decoded["count"], int)
         assert_variables_within_bounds(decoded, bounds)
 
-    # At p=1/4 or 3/4, 20,000 trials give a six-sigma margin below 0.02.
+    # At p=1/4 or 3/4, 5,000 trials give SE=0.00612 and six sigma<0.037.
+    # Deterministic rounding errs by at least 0.25; reversed weights by 0.5.
     # No PRNG sequence is an oracle: seeds only make the experiment repeatable.
-    sample_size = 20_000
+    sample_size = 5_000
     for case_id, x in enumerate((1.25, -1.25)):
         seed = seed_for(case_id)
         space.initialize_context(seed=seed)

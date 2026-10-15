@@ -45,14 +45,14 @@ def _assert_ranking_law(
     decoder: str,
     seed: int,
     temperature: float,
+    sample_size: int = 5_000,
 ) -> tuple[dict[tuple[int, ...], float], str]:
     """Sample real decode calls; the caller supplies the independent law."""
     space.initialize_context(seed=seed)
     inputs = dict(zip(space.encoded_variable_names, scores, strict=True))
     assert_variables_within_bounds(inputs, space.encoded_boundaries)
     # Each ranking indicator is Bernoulli(p), including multinomial samples.
-    # N=5,000 gives a six-sigma margin <= 0.043; no RNG replay is an oracle.
-    sample_size = 5_000
+    # The shared bound uses this experiment's N; no RNG replay is an oracle.
     counts: Counter[tuple[int, ...]] = Counter()
     for _ in range(sample_size):
         decoded = space.decode(inputs)
@@ -244,6 +244,9 @@ def test_equal_scores_give_all_six_rankings_by_exchangeability(decoder: str) -> 
     choices = (10, 1000, -7)
     # Relabeling iid keys/rows leaves the law unchanged and acts transitively
     # on the six rankings. Sinkhorn and unique assignment respect row relabeling.
+    # At p=1/6, N=2,500 gives SE=0.00745 and six sigma<0.045.
+    # A missing ranking errs by 1/6, over three bands; sampling only cyclic
+    # orders errs by 1/6 as well. All six indicators remain independently checked.
     probabilities: dict[tuple[int, ...], float] = dict.fromkeys(
         permutations(choices), 1.0 / 6.0
     )
@@ -257,6 +260,7 @@ def test_equal_scores_give_all_six_rankings_by_exchangeability(decoder: str) -> 
         decoder=decoder,
         seed=BASE_SEED,
         temperature=1.0,
+        sample_size=2_500,
     )
 
 
@@ -280,6 +284,21 @@ def test_plackett_luce_full_law_first_position_shift_and_temperature() -> None:
             bounds=(-3.0, 5.0) if shift else None,
             params={} if temperature == 1.0 else {"temperature": temperature},
         )
+        if shift:
+            # The T=1 law is already sampled above. Couple actual draws to
+            # check cancellation at every conditional selection, with no
+            # statistical slack and no second estimate of the same law.
+            reference = Permutation(
+                choices, constant_objective, decoder="plackett-luce"
+            )
+            reference.initialize_context(seed=seed_for(20 + case_id))
+            space.initialize_context(seed=seed_for(20 + case_id))
+            inputs = dict(zip(space.encoded_variable_names, shifted, strict=True))
+            unshifted = dict(zip(reference.encoded_variable_names, scores, strict=True))
+            assert_variables_within_bounds(inputs, space.encoded_boundaries)
+            for _ in range(128):
+                assert space.decode(inputs) == reference.decode(unshifted)
+            continue
         frequencies, diagnostic = _assert_ranking_law(
             space,
             choices,

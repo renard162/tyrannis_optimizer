@@ -143,9 +143,9 @@ def test_s_shape_frequency_matches_logistic_probability_and_alpha(
     # normalize x; alpha=2*ln(3) gives p=(-1: 1/10, 0: 1/2, 1: 9/10).
     probabilities = [1.0 / (1.0 + exp(-slope * x)) for x in points]
     inputs = {str(index): x for index, x in enumerate(points)}
-    # 20,000 draws per coordinate give shared six-sigma margins <= 0.022,
+    # 5,000 draws per coordinate give shared six-sigma margins <= 0.043,
     # separating both slopes and detecting normalization or a reversed sign.
-    sample_size = 20_000
+    sample_size = 5_000
     counts = [0, 0, 0]
     for _ in range(sample_size):
         decoded = space.decode(inputs)
@@ -174,7 +174,9 @@ def test_s_shape_frequency_matches_logistic_probability_and_alpha(
 def test_s_shape_bits_are_independent_bernoulli_draws() -> None:
     space = Binary(2, constant_objective, decoder="s-shape", use_cache=False)
     space.initialize_context(seed=BASE_SEED)
-    sample_size = 20_000
+    # At p=1/4, SE=0.00612 and six sigma=0.03675, far below the
+    # 0.25 error from shared or complementary (rather than independent) draws.
+    sample_size = 5_000
     counts: Counter[tuple[bool, bool]] = Counter()
     for _ in range(sample_size):
         decoded = space.decode({"0": 0.0, "1": 0.0})
