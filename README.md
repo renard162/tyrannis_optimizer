@@ -44,19 +44,19 @@ The core optimization requires three components: an **optimizer**, a **search sp
 
 Algorithms are population-based metaheuristics used to search for a minimum within the defined search space.
 
-| Import | Description |
-| --- | --- |
-| `PSO` | Particle Swarm Optimization for population-based search. |
-| `GSA` | Gravitational Search Algorithm using gravitational interactions between candidate solutions to guide population-based search. |
-| `PSOGSA` | Particle Swarm Optimization and Gravitational Search Algorithm for hybrid population-based search. |
-| `GeneticAlgorithm` | Real-coded Genetic Algorithm for continuous optimization. |
-| `AntColony` | Ant Colony Optimization for Continuous Domains (ACOR), which uses an archive of continuous solutions to guide the search. |
-| `BeeColony` | Artificial Bee Colony optimization inspired by the foraging behavior of honey bees. |
-| `GreyWolf` | Grey Wolf Optimization inspired by the social hierarchy and hunting behavior of grey wolves, with optional exploration enhancement through EEGWO. |
-| `WhaleAlgorithm` | Whale Optimization Algorithm inspired by the bubble-net hunting behavior of humpback whales, with nonlinear control of the exploration-exploitation transition. |
-| `DifferentialEvolution` | Differential Evolution using differential mutation and crossover for continuous optimization. |
-| `CMAES`     | Covariance Matrix Adaptation Evolution Strategy for continuous optimization. |
-| `EGNA` | Estimation of Gaussian Networks Algorithm, a multivariate continuous Estimation of Distribution Algorithm that learns and samples Gaussian Bayesian networks. |
+| Import | Description | Family |
+| --- | --- | --- |
+| `PSO` | Particle Swarm Optimization for population-based search. | Agent Dynamics Algorithm |
+| `GSA` | Gravitational Search Algorithm using gravitational interactions between candidate solutions to guide population-based search. | Agent Dynamics Algorithm |
+| `PSOGSA` | Particle Swarm Optimization and Gravitational Search Algorithm for hybrid population-based search. | Agent Dynamics Algorithm |
+| `AntColony` | Ant Colony Optimization for Continuous Domains (ACOR), which uses an archive of continuous solutions to guide the search. | Colony-Based Swarm Intelligence |
+| `BeeColony` | Artificial Bee Colony optimization inspired by the foraging behavior of honey bees. | Colony-Based Swarm Intelligence |
+| `GreyWolf` | Grey Wolf Optimization inspired by the social hierarchy and hunting behavior of grey wolves, with optional exploration enhancement through EEGWO. | Leader-Guided Collective Search |
+| `WhaleAlgorithm` | Whale Optimization Algorithm inspired by the bubble-net hunting behavior of humpback whales, with nonlinear control of the exploration-exploitation transition. | Leader-Guided Collective Search |
+| `GeneticAlgorithm` | Real-coded Genetic Algorithm for continuous optimization. | Evolutionary Algorithm |
+| `DifferentialEvolution` | Differential Evolution using differential mutation and crossover for continuous optimization. | Evolutionary Algorithm |
+| `CMAES`     | Covariance Matrix Adaptation Evolution Strategy for continuous optimization. | Evolutionary Algorithm |
+| `EGNA` | Estimation of Gaussian Networks Algorithm, a multivariate continuous Estimation of Distribution Algorithm that learns and samples Gaussian Bayesian networks. | Estimation of Distribution Algorithm |
 
 ### Spaces
 
