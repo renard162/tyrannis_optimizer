@@ -99,8 +99,7 @@ class SparkParallel(ParallelBackendBase):
             is `"sequential"`. Other available options are `"threading"`, which
             uses threads and is suitable for I/O-bound or GIL-releasing tasks,
             `"loky"`, which uses separate processes and is suitable for
-            CPU-bound tasks, and `"multiprocessing"`, which also uses separate
-            processes through Python's multiprocessing backend.
+            CPU-bound tasks.
 
         aux_batch_size:
             Number of tasks grouped into each batch for auxiliary Joblib

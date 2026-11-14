@@ -98,9 +98,6 @@ def test_joblib_forwards_parallel_configuration_and_closes_parallel(
     [
         pytest.param("loky", marks=pytest.mark.multiprocess, id="loky"),
         pytest.param("threading", id="threading"),
-        pytest.param(
-            "multiprocessing", marks=pytest.mark.multiprocess, id="multiprocessing"
-        ),
         pytest.param("sequential", id="sequential"),
     ],
 )
@@ -139,9 +136,6 @@ def test_joblib_accepts_default_configuration_and_empty_dispatch() -> None:
     [
         pytest.param("loky", marks=pytest.mark.multiprocess, id="loky"),
         pytest.param("threading", id="threading"),
-        pytest.param(
-            "multiprocessing", marks=pytest.mark.multiprocess, id="multiprocessing"
-        ),
         pytest.param("sequential", id="sequential"),
     ],
 )

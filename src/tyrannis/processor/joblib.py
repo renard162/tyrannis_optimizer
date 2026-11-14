@@ -57,8 +57,6 @@ class Joblib(ProcessorBase[EventProtocol]):
             workloads. (default)
             - ``"threading"``: Thread-based execution, suitable for workloads that
             release the GIL.
-            - ``"multiprocessing"``: Process-based execution using Python's
-            multiprocessing, with broad compatibility for CPU-bound workloads.
             - ``"sequential"``: Sequential execution without parallelism.
 
         batch_size:
