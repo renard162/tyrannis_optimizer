@@ -49,16 +49,19 @@ def test_optimizer_consolidates_results_from_spark_islands() -> None:
         except Exception as exc:  # noqa: BLE001 - Worker startup errors vary by runtime.
             pytest.skip(f"Spark Python workers unavailable: {exc}")
 
-        optimizer = Optimizer(
-            space=Continuous({"x": (-1.0, 1.0)}, cost_function=worker_fitness),
-            algorithm=IntegrationProbeAlgorithm(),
-            backend=SparkDistributed(spark, n_executors=2),
-            migration=IslandIsolation(),
-            n_particles=1,
-            n_iterations=1,
-            seed=BASE_SEED,
-            history="iteration",
-        ).fit()
+        with pytest.warns(UserWarning, match="CRITICAL WARNING"):
+            optimizer = Optimizer(
+                space=Continuous({"x": (-1.0, 1.0)}, cost_function=worker_fitness),
+                algorithm=IntegrationProbeAlgorithm(),
+                backend=SparkDistributed(
+                    spark, n_executors=2, communication_port=18081
+                ),
+                migration=IslandIsolation(),
+                n_particles=1,
+                n_iterations=1,
+                seed=BASE_SEED,
+                history="iteration",
+            ).fit()
 
     candidates: list[tuple[float, str, float]] = []
     for values in optimizer.history_generator:
