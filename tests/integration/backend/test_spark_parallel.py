@@ -44,6 +44,14 @@ def test_optimizer_consolidates_particles_from_spark_workers() -> None:
         pytest.skip(f"Spark runtime unavailable: {exc}")
 
     with spark:
+        try:
+            result = spark.sparkContext.parallelize([1], 1).map(lambda x: x).collect()
+        except Exception as exc:  # noqa: BLE001 - Any Spark startup error skips this test.
+            pytest.skip(f"Spark Python workers unavailable: {exc}")
+
+        assert result == [1]
+
+    with spark:
         optimizer = Optimizer(
             space=Continuous(
                 boundaries={"x": (-1.0, 1.0)}, cost_function=worker_fitness
