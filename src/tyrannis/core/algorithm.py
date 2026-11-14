@@ -342,8 +342,8 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         self._double_check_ids: list[str] = []
         self._force_iteration_stop: bool = False
         self._max_iterations: int = n_iter
-        # Start value of n_particles to initialize algorithm.
-        # Thre real value is dinamically set after migration step
+        # Initial value of n_particles used to initialize the algorithm.
+        # The actual value is updated dynamically after the migration step.
         self._n_particles: int = n_particles
 
     def configure(
