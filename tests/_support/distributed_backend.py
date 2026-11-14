@@ -15,7 +15,7 @@ from os import getpid
 from queue import Empty, Queue
 from threading import Barrier, Event, Lock, Thread
 from time import monotonic
-from typing import TypeVar, final, override
+from typing import Literal, TypeVar, final, override
 
 from tyrannis.core.algorithm import AlgorithmBase, CostFunctionWrapperBase, ParticleBase
 from tyrannis.core.backend_communication import (
@@ -49,6 +49,38 @@ class IslandTransport:
 
 
 MessageReceiver = Callable[[str], None]
+DriverObserver = Callable[[str, Literal["received", "sent"], str], None]
+
+
+@final
+class _DriverInbox(Queue[str]):
+    """Observe a message when the router takes it, after transport delivery."""
+
+    def __init__(self, island: str, observe: DriverObserver) -> None:
+        super().__init__()
+        self.island = island
+        self.observe = observe
+
+    @override
+    def get_nowait(self) -> str:
+        message = super().get_nowait()
+        self.observe(self.island, "received", message)
+        return message
+
+
+@final
+class _DriverOutbox(Queue[str]):
+    """Observe router sends before a bridge can deliver them to a worker."""
+
+    def __init__(self, island: str, observe: DriverObserver) -> None:
+        super().__init__()
+        self.island = island
+        self.observe = observe
+
+    @override
+    def put(self, item: str, block: bool = True, timeout: float | None = None) -> None:
+        self.observe(self.island, "sent", item)
+        super().put(item, block, timeout)
 
 
 @final
@@ -186,13 +218,22 @@ class TestBackendCommunicationDriver(CommunicationDriverBase):
     __test__ = False
 
     def __init__(
-        self, island_ids: list[str], transports: dict[str, IslandTransport]
+        self,
+        island_ids: list[str],
+        transports: dict[str, IslandTransport],
+        observe: DriverObserver | None = None,
     ) -> None:
         self._transports = {
             identifier: transports[identifier] for identifier in island_ids
         }
-        self._incoming_queues = {identifier: Queue[str]() for identifier in island_ids}
-        self._outgoing_queues = {identifier: Queue[str]() for identifier in island_ids}
+        self._incoming_queues: dict[str, Queue[str]] = {
+            island: Queue() if observe is None else _DriverInbox(island, observe)
+            for island in island_ids
+        }
+        self._outgoing_queues: dict[str, Queue[str]] = {
+            island: Queue() if observe is None else _DriverOutbox(island, observe)
+            for island in island_ids
+        }
         self._bridges: list[_Bridge] = []
 
     @property
@@ -254,9 +295,20 @@ class TestDistributedCostFunctionWrapper(CostFunctionWrapperBase):
 
 @final
 class PacedSerial(Serial):
-    """Pause a configured worker once, before its ordinary migration control."""
+    """Gate ordinary migration control or retirement on a test event."""
 
     _pause: tuple[int, Event, Event | None] | None = None
+    _retire_after: Event | None = None
+
+    def pause_before_retirement(self, until: Event) -> None:
+        """Wait before the processor enters its ordinary retirement handshake."""
+        self._retire_after = until
+
+    @override
+    def retire_migration(self) -> None:
+        if self._retire_after is not None and not self._retire_after.wait(WAIT_TIMEOUT):
+            raise TimeoutError(f"{self.identifier} timed out before retirement")
+        super().retire_migration()
 
     def pause_before(
         self, iteration: int, until: Event, *, ready: Event | None = None
@@ -284,15 +336,21 @@ class TestDistributedBackend(DistributedBackendBase):
     __test__ = False
 
     def __init__(
-        self, manager: SyncManager, *, first_deliveries: dict[str, Event] | None = None
+        self,
+        manager: SyncManager,
+        *,
+        first_deliveries: dict[str, Event] | None = None,
+        observe: DriverObserver | None = None,
     ) -> None:
         self._manager = manager
         self._first_deliveries = first_deliveries
+        self._observe = observe
         self._identifier = "TestDistributedBackend"
         self._cost_function_wrapper = TestDistributedCostFunctionWrapper
         self._n_executors = 2
         self._local_bests = {}
         self._worker_pids: dict[str, int] = {}
+        self.final_populations: dict[str, set[str]] = {}
 
     @property
     def n_executors(self) -> int:
@@ -340,7 +398,9 @@ class TestDistributedBackend(DistributedBackendBase):
             identifier: IslandTransport.create(self._manager)
             for identifier in island_ids
         }
-        communication_driver = TestBackendCommunicationDriver(island_ids, transports)
+        communication_driver = TestBackendCommunicationDriver(
+            island_ids, transports, self._observe
+        )
         self._migration.initialize_context(
             communication_driver=communication_driver,
             communication_processor_class=TestBackendCommunicationProcessor,
@@ -353,6 +413,7 @@ class TestDistributedBackend(DistributedBackendBase):
         )
         self._local_bests = {}
         self._worker_pids.clear()
+        self.final_populations.clear()
 
     def _require_serial(self) -> Serial:
         # BackendBase leaves the Processor signal type unspecified; narrow it here.
@@ -372,6 +433,7 @@ class TestDistributedBackend(DistributedBackendBase):
 
         self._local_bests = {}
         self._worker_pids.clear()
+        self.final_populations.clear()
         barrier = self._manager.Barrier(2, timeout=WAIT_TIMEOUT)
         try:
             self._migration.start()
@@ -384,11 +446,12 @@ class TestDistributedBackend(DistributedBackendBase):
                 ]
                 deadline = monotonic() + WAIT_TIMEOUT
                 for task in tasks:
-                    identifier, result, pid = task.get(
+                    identifier, result, pid, population = task.get(
                         timeout=max(0.0, deadline - monotonic())
                     )
                     self._local_bests[identifier] = result
                     self._worker_pids[identifier] = pid
+                    self.final_populations[identifier] = population
                 self.update_result()
         finally:
             self._migration.stop()
@@ -396,13 +459,18 @@ class TestDistributedBackend(DistributedBackendBase):
 
 def _run_island(
     processor: Serial, barrier: Barrier
-) -> tuple[str, ProcessorResult, int]:
+) -> tuple[str, ProcessorResult, int, set[str]]:
     """Materialize execution resources in the worker, then always finalize them."""
     _ = barrier.wait(timeout=WAIT_TIMEOUT)
     try:
         processor.initialize_execution_context()
         processor.run()
-        return processor.identifier, processor.result, getpid()
+        return (
+            processor.identifier,
+            processor.result,
+            getpid(),
+            set(processor.population),
+        )
     finally:
         processor.finalize_execution_context()
 

@@ -62,12 +62,17 @@ class IntegrationProbeAlgorithm(AlgorithmBase[IntegrationProbeParticle]):
     randomness and consolidate unconditionally.
     double_eval selects every other sorted ID for the second phase.
     force_stop_at_iteration requests stop after consolidation; zero denotes
-    initialization. The framework owns stopping and context reset.
+    initialization. force_stop_on_island limits that request to one replica.
+    The framework owns stopping and context reset.
     """
 
     @override
     def __init__(
-        self, *, double_eval: bool = False, force_stop_at_iteration: int | None = None
+        self,
+        *,
+        double_eval: bool = False,
+        force_stop_at_iteration: int | None = None,
+        force_stop_on_island: str | None = None,
     ) -> None:
         if force_stop_at_iteration is not None and (
             isinstance(force_stop_at_iteration, bool) or force_stop_at_iteration < 0
@@ -75,6 +80,7 @@ class IntegrationProbeAlgorithm(AlgorithmBase[IntegrationProbeParticle]):
             raise ValueError("force_stop_at_iteration must be a non-negative integer.")
         self.double_eval = double_eval
         self.force_stop_at_iteration = force_stop_at_iteration
+        self.force_stop_on_island = force_stop_on_island
         self._actual_iter = 0
         self._second_phase = False
 
@@ -215,6 +221,10 @@ class IntegrationProbeAlgorithm(AlgorithmBase[IntegrationProbeParticle]):
         if (
             self.force_stop_at_iteration is not None
             and actual_iter >= self.force_stop_at_iteration
+            and (
+                self.force_stop_on_island is None
+                or self.identifier == f"{self.force_stop_on_island}|algorithm"
+            )
             and not self.force_stop
         ):
             self._force_iteration_stop = True
