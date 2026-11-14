@@ -50,7 +50,6 @@ def test_optimizer_consolidates_particles_from_spark_workers() -> None:
         except Exception as exc:  # noqa: BLE001 - Any Spark startup error skips this test.
             pytest.skip(f"Spark Python workers unavailable: {exc}")
 
-    with spark:
         optimizer = Optimizer(
             space=Continuous(
                 boundaries={"x": (-1.0, 1.0)}, cost_function=worker_fitness
