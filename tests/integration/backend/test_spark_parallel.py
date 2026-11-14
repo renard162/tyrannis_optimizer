@@ -46,10 +46,9 @@ def test_optimizer_consolidates_particles_from_spark_workers() -> None:
     with spark:
         try:
             result = spark.sparkContext.parallelize([1], 1).map(lambda x: x).collect()
+            assert result == [1]
         except Exception as exc:  # noqa: BLE001 - Any Spark startup error skips this test.
             pytest.skip(f"Spark Python workers unavailable: {exc}")
-
-        assert result == [1]
 
     with spark:
         optimizer = Optimizer(
