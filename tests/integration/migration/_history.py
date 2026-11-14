@@ -22,13 +22,17 @@ class HistoryRecord(TypedDict):
 
 
 def population_at(
-    records: list[HistoryRecord], island: str, iteration: int
+    records: list[HistoryRecord],
+    island: str,
+    iteration: int,
+    *,
+    event: str = "iteration",
 ) -> dict[str, ParticleSnapshot]:
-    """Read membership after an iteration, without inspecting worker state."""
+    """Read one island's population at a recorded phase of its local iteration."""
     particles = [
         record["particle"]
         for record in records
-        if record["event"] == HistoryConfig.get_event("iteration")
+        if record["event"] == HistoryConfig.get_event(event)
         and record["origin"] == island
         and record["iteration"] == iteration
     ]

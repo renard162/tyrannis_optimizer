@@ -1,7 +1,7 @@
 """Integration-only distributed runtime, independent of Spark and MPI.
 
 The caller owns the spawn Manager and must keep it alive until communication
-and workers have stopped. Only queue proxies cross the process boundary.
+and workers have stopped. Manager queues carry all migration messages.
 """
 
 from __future__ import annotations
@@ -101,9 +101,15 @@ class TestBackendCommunicationProcessor(CommunicationProcessorBase):
 
     __test__ = False
 
-    def __init__(self, identifier: str, transports: dict[str, IslandTransport]) -> None:
+    def __init__(
+        self,
+        identifier: str,
+        transports: dict[str, IslandTransport],
+        first_deliveries: dict[str, Event] | None = None,
+    ) -> None:
         self._identifier = identifier
         self._transport = transports[identifier]
+        self._first_delivery = (first_deliveries or {}).get(identifier)
         self._bridges: list[_Bridge] = []
         self._messages: Queue[str] | None = None
         self._outgoing_queue: Queue[str] | None = None
@@ -140,6 +146,9 @@ class TestBackendCommunicationProcessor(CommunicationProcessorBase):
             self.messages.put_nowait(message)
             if self._message_signal is not None:
                 self._message_signal.set()
+            if self._first_delivery is not None:
+                self._first_delivery.set()
+                self._first_delivery = None
 
     @override
     def start(self) -> None:
@@ -244,13 +253,41 @@ class TestDistributedCostFunctionWrapper(CostFunctionWrapperBase):
 
 
 @final
+class PacedSerial(Serial):
+    """Pause a configured worker once, before its ordinary migration control."""
+
+    _pause: tuple[int, Event, Event | None] | None = None
+
+    def pause_before(
+        self, iteration: int, until: Event, *, ready: Event | None = None
+    ) -> None:
+        # Configure the replica after pool creation: Manager proxies must stay shared.
+        self._pause = (iteration, until, ready)
+
+    @override
+    def migration_control(self, actual_iter: int) -> None:
+        if self._pause is not None and actual_iter == self._pause[0]:
+            _, until, ready = self._pause
+            if ready is not None:
+                ready.set()
+            if not until.wait(timeout=WAIT_TIMEOUT):
+                raise TimeoutError(
+                    f"{self.identifier} timed out before iteration {actual_iter}"
+                )
+        super().migration_control(actual_iter)
+
+
+@final
 class TestDistributedBackend(DistributedBackendBase):
     """Exactly two Serial islands in one spawn pool; the caller owns Manager."""
 
     __test__ = False
 
-    def __init__(self, manager: SyncManager) -> None:
+    def __init__(
+        self, manager: SyncManager, *, first_deliveries: dict[str, Event] | None = None
+    ) -> None:
         self._manager = manager
+        self._first_deliveries = first_deliveries
         self._identifier = "TestDistributedBackend"
         self._cost_function_wrapper = TestDistributedCostFunctionWrapper
         self._n_executors = 2
@@ -307,7 +344,10 @@ class TestDistributedBackend(DistributedBackendBase):
         self._migration.initialize_context(
             communication_driver=communication_driver,
             communication_processor_class=TestBackendCommunicationProcessor,
-            communication_processor_kargs={"transports": transports},
+            communication_processor_kargs={
+                "transports": transports,
+                "first_deliveries": self._first_deliveries,
+            },
             history_config=history_config,
             seed=seed,
         )

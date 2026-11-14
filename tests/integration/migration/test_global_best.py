@@ -11,6 +11,7 @@ from _support.assertions import (  # pyright: ignore[reportImplicitRelativeImpor
     assert_optimizer_result_consistent,
 )
 from _support.distributed_backend import (  # pyright: ignore[reportImplicitRelativeImport]
+    PacedSerial,
     TestDistributedBackend,
 )
 
@@ -118,4 +119,51 @@ def test_global_best_copies_to_the_worst_slot_and_preserves_both_populations(
         assert isfinite(fitness)
         local_fitnesses.append(fitness)
     assert optimizer.best_fitness == min(local_fitnesses)
+    assert_optimizer_result_consistent(optimizer)
+
+
+def test_async_global_best_reaches_an_island_before_its_first_checkpoint(
+    manager: SyncManager,
+) -> None:
+    donor, receiver = "island:1", "island:0"
+    ready, delivered = manager.Event(), manager.Event()
+    backend = TestDistributedBackend(manager, first_deliveries={receiver: delivered})
+    processor = PacedSerial()
+    optimizer = make_optimizer(
+        Continuous({"x": (1.0, 3.0)}, cost_function=sphere),
+        IntegrationProbeAlgorithm(),
+        n_iterations=2,
+        n_particles=1,
+        backend=backend,
+        processor=processor,
+        migration=GlobalBest(initial_iter=2, synchronous=False),
+        history=["iteration", "pre_iteration", "migration"],
+    )
+    backend.init_processors()
+    # The receiver has a populated slot but has not reached its own checkpoint.
+    processor.processors_pool[receiver].pause_before(1, delivered, ready=ready)
+    processor.processors_pool[donor].pause_before(2, ready)
+    _ = optimizer.fit()
+
+    records: list[HistoryRecord] = [json.loads(row) for row in backend.result.history]
+    (publication,) = [
+        row
+        for row in records
+        if row["event"] == HistoryConfig.get_event("migration")
+        and row["origin"] == donor
+    ]
+    sent = publication["particle"]
+    assert sent == population_at(records, donor, 1)[sent["identifier"]]
+    assert set(population_at(records, donor, 2)) == {sent["identifier"]}
+    ((slot, previous),) = population_at(records, receiver, 0).items()
+    assert sent["fitness"] < previous["fitness"]
+    received = population_at(records, receiver, 1, event="pre_iteration")
+    assert sent["trace"]
+    assert received == {slot: {**sent, "identifier": slot}}
+    assert set(population_at(records, receiver, 2)) == {slot}
+    assert optimizer.best_fitness == min(
+        row["particle"]["fitness"]
+        for row in records
+        if row["event"] == HistoryConfig.get_event("iteration")
+    )
     assert_optimizer_result_consistent(optimizer)

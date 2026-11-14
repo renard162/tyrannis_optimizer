@@ -12,6 +12,7 @@ from _support.assertions import (  # pyright: ignore[reportImplicitRelativeImpor
     assert_optimizer_result_consistent,
 )
 from _support.distributed_backend import (  # pyright: ignore[reportImplicitRelativeImport]
+    PacedSerial,
     TestDistributedBackend,
 )
 
@@ -123,4 +124,59 @@ def test_island_migration_transfers_one_particle_and_conserves_global_population
         assert isfinite(fitness)
         local_fitnesses.append(fitness)
     assert optimizer.best_fitness == min(local_fitnesses)
+    assert_optimizer_result_consistent(optimizer)
+
+
+def test_async_island_migration_transfers_ownership_during_active_iterations(
+    manager: SyncManager,
+) -> None:
+    deliveries = {island: manager.Event() for island in ("island:0", "island:1")}
+    backend = TestDistributedBackend(manager, first_deliveries=deliveries)
+    processor = PacedSerial()
+    optimizer = make_optimizer(
+        Continuous({"x": (1.0, 3.0)}, cost_function=sphere),
+        IntegrationProbeAlgorithm(),
+        n_iterations=2,
+        n_particles=2,
+        backend=backend,
+        processor=processor,
+        migration=IslandMigration(
+            trigger="n_iter",
+            movement_strategy="ring_sequential",
+            min_interval=2,
+            min_population=1,
+        ),
+        history=["iteration", "pre_iteration", "migration"],
+    )
+    backend.init_processors()
+    # Both islands publish state in their first iteration. Each next control
+    # runs after its own delivery: a request at the donor, a particle at the receiver.
+    for island, delivered in deliveries.items():
+        processor.processors_pool[island].pause_before(2, delivered)
+    _ = optimizer.fit()
+
+    records: list[HistoryRecord] = [json.loads(row) for row in backend.result.history]
+    (transfer,) = [
+        row for row in records if row["event"] == HistoryConfig.get_event("migration")
+    ]
+    assert "destination" in transfer
+    donor, receiver = transfer["origin"], transfer["destination"]
+    assert {donor, receiver} == set(deliveries)
+    sent = transfer["particle"]
+    identifier = sent["identifier"]
+    source = population_at(records, donor, 1)
+    destination = population_at(records, receiver, 1)
+    assert source.keys().isdisjoint(destination)
+    assert sent == source[identifier]
+    assert set(population_at(records, donor, 2)) == source.keys() - {identifier}
+    assert set(population_at(records, receiver, 2)) == destination.keys() | {identifier}
+
+    # Snapshot on arrival, before local evaluation changes fitness or extends the trace.
+    arrivals = population_at(records, receiver, 2, event="pre_iteration")
+    assert sent["trace"] and arrivals[identifier] == sent
+    assert optimizer.best_fitness == min(
+        row["particle"]["fitness"]
+        for row in records
+        if row["event"] == HistoryConfig.get_event("iteration")
+    )
     assert_optimizer_result_consistent(optimizer)
