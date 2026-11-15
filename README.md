@@ -299,15 +299,6 @@ The roadmap below lists capabilities that are **not yet part of the current publ
 
 * Sysidentpy - MetaMSS
 
-#### Testing
-
-* Mathematical integrity tests for all algorithms completed
-* Completion and maintenance of mathematical tests for spaces
-* Completion and maintenance of unit tests
-* Construction and maintenance of integration tests
-* Increased coverage of algorithms, spaces, processors, backends, and migration strategies
-* Validation of distributed execution behavior
-
 ## License
 
 Tyrannis is distributed under the BSD 3-Clause License.
