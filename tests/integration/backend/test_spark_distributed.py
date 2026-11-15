@@ -1,6 +1,7 @@
 """Spark islands exchange a best particle and return their local updates."""
 
 import json
+import secrets
 from importlib.util import find_spec
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from tyrannis.space import Continuous
 
 @pytest.mark.optional
 @pytest.mark.multiprocess
+@pytest.mark.timeout(240, method="thread")
 def test_optimizer_consolidates_results_from_spark_islands() -> None:
     for dependency in ("pyspark", "pandas", "pyarrow"):
         if find_spec(dependency) is None:
@@ -51,7 +53,10 @@ def test_optimizer_consolidates_results_from_spark_islands() -> None:
         except Exception as exc:  # noqa: BLE001 - Worker startup errors vary by runtime.
             pytest.skip(f"Spark Python workers unavailable: {exc}")
 
-        backend = SparkDistributed(spark, n_executors=2, communication_port=18081)
+        communication_port = 18081 + secrets.randbelow(101)
+        backend = SparkDistributed(
+            spark, n_executors=2, communication_port=communication_port
+        )
         with pytest.warns(UserWarning, match="CRITICAL WARNING"):
             optimizer = Optimizer(
                 space=Continuous({"x": (-1.0, 1.0)}, cost_function=worker_fitness),

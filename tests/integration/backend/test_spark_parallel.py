@@ -16,6 +16,7 @@ from tyrannis.space import Continuous
 
 @pytest.mark.optional
 @pytest.mark.multiprocess
+@pytest.mark.timeout(240, method="thread")
 def test_optimizer_consolidates_particles_from_spark_workers() -> None:
     for dependency in ("pyspark", "pandas", "pyarrow"):
         if find_spec(dependency) is None:
