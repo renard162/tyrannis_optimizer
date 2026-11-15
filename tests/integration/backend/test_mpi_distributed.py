@@ -36,7 +36,7 @@ def _run_optimizer() -> None:
         space=Continuous({"x": (-1.0, 1.0)}, cost_function=worker_fitness),
         algorithm=IntegrationProbeAlgorithm(),
         backend=MPIDistributed(),
-        migration=GlobalBest(synchronous=True),
+        migration=GlobalBest(synchronous=True, initial_iter=1, check_interval=1),
         n_particles=1,
         n_iterations=1,
         seed=BASE_SEED,
@@ -60,12 +60,15 @@ def _run_optimizer() -> None:
         rank = history[0, iteration]["fitness"]
         assert isinstance(rank, float)
         ranks.append(rank)
-        # Both islands hold rank 1's fitness after the checkpoint, before reevaluation.
-        assert history[1, pre_iteration]["fitness"] == 1.0
+        # Rank 2 now holds rank 1's fitness in its own slot, before reevaluation.
+        slot = f"{island}|particle:0"
+        after_checkpoint = history[1, pre_iteration]
+        assert after_checkpoint["identifier"] == slot
+        assert after_checkpoint["fitness"] == 1.0
         updated = history[1, iteration]
         identifier, x = updated["identifier"], updated["x"]
         assert isinstance(identifier, str) and isinstance(x, float)
-        assert identifier == f"{island}|particle:0"
+        assert identifier == slot
         fitness = rank - sphere(x)
         assert updated["fitness"] == fitness < rank
         candidates.append((fitness, identifier, x))

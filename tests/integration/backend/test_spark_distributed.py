@@ -1,5 +1,6 @@
-"""The Optimizer selects the best particle returned by isolated Spark islands."""
+"""Spark islands exchange a best particle and return their local updates."""
 
+import json
 from importlib.util import find_spec
 from pathlib import Path
 
@@ -9,9 +10,10 @@ from tests._support.assertions import assert_optimizer_result_consistent
 from tests._support.integration_probe import IntegrationProbeAlgorithm
 from tests._support.numerics import BASE_SEED
 from tests._support.objectives import sphere
+from tests.integration.migration._history import HistoryRecord, population_at
 from tyrannis import Optimizer
 from tyrannis.backend import SparkDistributed
-from tyrannis.migration.island_isolation import IslandIsolation
+from tyrannis.migration import GlobalBest
 from tyrannis.space import Continuous
 
 
@@ -49,37 +51,54 @@ def test_optimizer_consolidates_results_from_spark_islands() -> None:
         except Exception as exc:  # noqa: BLE001 - Worker startup errors vary by runtime.
             pytest.skip(f"Spark Python workers unavailable: {exc}")
 
+        backend = SparkDistributed(spark, n_executors=2, communication_port=18081)
         with pytest.warns(UserWarning, match="CRITICAL WARNING"):
             optimizer = Optimizer(
                 space=Continuous({"x": (-1.0, 1.0)}, cost_function=worker_fitness),
                 algorithm=IntegrationProbeAlgorithm(),
-                backend=SparkDistributed(
-                    spark, n_executors=2, communication_port=18081
+                backend=backend,
+                migration=GlobalBest(
+                    synchronous=True, initial_iter=1, check_interval=1
                 ),
-                migration=IslandIsolation(),
                 n_particles=1,
                 n_iterations=1,
                 seed=BASE_SEED,
                 history="iteration",
             ).fit()
 
+    records: list[HistoryRecord] = [
+        json.loads(entry) for entry in backend.result.history
+    ]
     candidates: list[tuple[float, str, float]] = []
+    source_by_slot: dict[str, str] = {}
     for values in optimizer.history_generator:
         row: dict[str, object] = dict(
             zip(optimizer.history_columns, values, strict=True)
         )
         if row["iteration"] == 1:
-            identifier, x = row["identifier"], row["x"]
+            origin, identifier, x = row["origin"], row["identifier"], row["x"]
+            assert isinstance(origin, str)
             assert isinstance(identifier, str) and isinstance(x, float)
-            assert identifier == f"{row['origin']}|particle:0"
+            assert identifier == f"{origin}|particle:0"
             fitness = -sphere(x)
             assert row["fitness"] == fitness < 0.0
             candidates.append((fitness, identifier, x))
+
+            # The checkpoint copies the source's trace into the receiver's slot.
+            # The subsequent update records the local ID on that same particle.
+            trace = population_at(records, origin, 1)[identifier]["trace"]
+            source = trace[0]["particle_id"]
+            assert isinstance(source, str)
+            assert trace[-1]["particle_id"] == identifier
+            source_by_slot[identifier] = source
 
     assert sorted(identifier for _, identifier, _ in candidates) == [
         "island:0|particle:0",
         "island:1|particle:0",
     ]
+    # Either island can win the tie at initialization.
+    (donor,) = set(source_by_slot.values())
+    assert donor in source_by_slot
     fitness, identifier, x = min(candidates)
     assert optimizer.result_ == {
         "identifier": identifier,
