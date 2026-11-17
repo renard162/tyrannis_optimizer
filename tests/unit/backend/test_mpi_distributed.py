@@ -11,13 +11,13 @@ from typing import Protocol, Self, final
 from unittest.mock import Mock
 
 import pytest
-
-from tests._support.numerics import BASE_SEED
-from tests._support.processors import (
+from _support.numerics import BASE_SEED
+from _support.processors import (
     ProcessorAlgorithmDouble,
     ProcessorMigrationDriverDouble,
     configure_processor_for_dispatch,
 )
+
 from tyrannis.backend.distributed.communication.mpi_communication import (
     MPICommunicationProcessor,
 )

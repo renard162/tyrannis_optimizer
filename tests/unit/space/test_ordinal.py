@@ -4,8 +4,8 @@ from typing import cast
 
 import numpy as np
 import pytest
+from _support.numerics import seed_for
 
-from tests._support.numerics import seed_for
 from tyrannis.space import Ordinal
 from tyrannis.space.ordinal import PositionBoundaries, Positions
 

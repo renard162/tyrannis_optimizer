@@ -12,15 +12,15 @@ from unittest.mock import Mock
 import joblib  # pyright: ignore[reportMissingTypeStubs]  # Joblib lacks stubs.
 import numpy as np
 import pytest
-
-from tests._support.numerics import BASE_SEED
-from tests._support.objectives import constant_objective
-from tests._support.processors import (
+from _support.numerics import BASE_SEED
+from _support.objectives import constant_objective
+from _support.processors import (
     ProcessorAlgorithmDouble,
     ProcessorMigrationDriverDouble,
     ProcessorParticleDouble,
     assert_second_phase_dispatch,
 )
+
 from tyrannis.core.results import HistoryConfig, ProcessorResult
 from tyrannis.core.signals import EventProtocol
 

@@ -6,13 +6,13 @@ import json
 from typing import final
 
 import numpy as np
-from numpy.random import SeedSequence
-
-from tests._support.numerics import BASE_SEED
-from tests._support.processors import (
+from _support.numerics import BASE_SEED
+from _support.processors import (
     ProcessorMigrationDouble,
     ProcessorMigrationDriverDouble,
 )
+from numpy.random import SeedSequence
+
 from tyrannis.backend.distributed.communication.no_communication import (
     NoCommunicationDriver,
     NoCommunicationProcessor,

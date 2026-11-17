@@ -15,10 +15,10 @@ from collections import Counter
 from math import exp, floor, log
 
 import pytest
+from _support.assertions import assert_variables_within_bounds
+from _support.numerics import BASE_SEED, frequency_tolerance, seed_for
+from _support.objectives import constant_objective
 
-from tests._support.assertions import assert_variables_within_bounds
-from tests._support.numerics import BASE_SEED, frequency_tolerance, seed_for
-from tests._support.objectives import constant_objective
 from tyrannis.space import Integer
 
 

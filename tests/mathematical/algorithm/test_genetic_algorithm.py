@@ -29,15 +29,15 @@ from typing import cast, override
 
 import numpy as np
 import pytest
-from numpy.typing import NDArray
-
-from tests._support import factories
-from tests._support.assertions import (
+from _support import factories
+from _support.assertions import (
     assert_optimizer_result_consistent,
     assert_particle_state_consistent,
 )
-from tests._support.numerics import BASE_SEED, STRICT_ATOL, STRICT_RTOL, seed_for
-from tests._support.objectives import constant_objective, sphere
+from _support.numerics import BASE_SEED, STRICT_ATOL, STRICT_RTOL, seed_for
+from _support.objectives import constant_objective, sphere
+from numpy.typing import NDArray
+
 from tyrannis import Optimizer
 from tyrannis.algorithm.genetic_algorithm import GAParticle, GeneticAlgorithm
 from tyrannis.core.algorithm import FITNESS_UNDEFINED, AlgorithmBase

@@ -21,11 +21,11 @@ from typing import cast, override
 
 import numpy as np
 import pytest
+from _support import factories
+from _support.assertions import assert_variables_within_bounds
+from _support.numerics import BASE_SEED, LINALG_ATOL, LINALG_RTOL, seed_for
+from _support.objectives import CountingObjective, constant_objective, sphere
 
-from tests._support import factories
-from tests._support.assertions import assert_variables_within_bounds
-from tests._support.numerics import BASE_SEED, LINALG_ATOL, LINALG_RTOL, seed_for
-from tests._support.objectives import CountingObjective, constant_objective, sphere
 from tyrannis import Optimizer
 from tyrannis.algorithm.cma_es import CMAES, CMAESCandidateSolution
 from tyrannis.core.algorithm import ParticleBase

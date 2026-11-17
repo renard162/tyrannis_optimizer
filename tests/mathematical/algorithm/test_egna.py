@@ -49,13 +49,12 @@ from typing import cast, override
 
 import numpy as np
 import pytest
-
-from tests._support import factories
-from tests._support.assertions import (
+from _support import factories
+from _support.assertions import (
     assert_valid_permutation,
     assert_variables_within_bounds,
 )
-from tests._support.numerics import (
+from _support.numerics import (
     BASE_SEED,
     LINALG_ATOL,
     LINALG_RTOL,
@@ -63,7 +62,8 @@ from tests._support.numerics import (
     STRICT_RTOL,
     seed_for,
 )
-from tests._support.objectives import constant_objective, sphere
+from _support.objectives import constant_objective, sphere
+
 from tyrannis import Optimizer
 from tyrannis.algorithm.egna import EGNA, EGNAParticle
 
@@ -539,13 +539,13 @@ def test_bic_local_scores_and_first_forward_search(
 
 
 def test_bic_reuses_previous_structure_and_accepts_improving_deletion(
-    bounds: dict[str, tuple[float, float]]
+    bounds: dict[str, tuple[float, float]],
 ) -> None:
     a = run_egna(
         ObservedEGNA(selection_fraction=0.6, variance_scaling="no-scaling"),
         bounds,
         iterations=3,
-        seed=seed_for(6)
+        seed=seed_for(6),
     )
     additions = deletions = 0
     for t in range(1, 4):
@@ -560,7 +560,7 @@ def test_bic_reuses_previous_structure_and_accepts_improving_deletion(
 
 
 def test_bge_default_and_explicit_priors_local_evidence_and_search(
-    bounds: dict[str, tuple[float, float]]
+    bounds: dict[str, tuple[float, float]],
 ) -> None:
     scores: list[float] = []
     selected: list[Array] = []
@@ -605,7 +605,7 @@ def test_bge_default_and_explicit_priors_local_evidence_and_search(
 
 
 def test_edge_exclusion_partial_correlations_and_finite_sample_correction(
-    bounds: dict[str, tuple[float, float]]
+    bounds: dict[str, tuple[float, float]],
 ) -> None:
     bounds = dict(bounds, z=(-2.0, 6.0))
     a = run_egna(
@@ -685,7 +685,7 @@ def test_edge_exclusion_partial_correlations_and_finite_sample_correction(
                         float(
                             cast(
                                 np.float64,
-                                fitted_precision[i, i] * fitted_precision[j, j]
+                                fitted_precision[i, i] * fitted_precision[j, j],
                             )
                         )
                     )
@@ -758,12 +758,12 @@ def test_gaussian_roots_children_and_topological_order(
 
 
 def test_cached_generators_exact_joint_rejection_sampling(
-    bounds: dict[str, tuple[float, float]]
+    bounds: dict[str, tuple[float, float]],
 ) -> None:
     trajectory = run_egna(
         ObservedEGNA(selection_fraction=0.6, variance_scaling="no-scaling"),
         bounds,
-        seed=seed_for(0)
+        seed=seed_for(0),
     )
     attempts = 0
     offspring = 0
@@ -813,7 +813,7 @@ def test_affine_model_invariance(bounds: dict[str, tuple[float, float]]) -> None
 
 
 def test_one_synchronous_model_precedes_the_entire_sampling_sweep(
-    no_scaling_trajectory: ObservedEGNA
+    no_scaling_trajectory: ObservedEGNA,
 ) -> None:
     for t, g in no_scaling_trajectory.generations.items():
         if not t:
@@ -967,7 +967,7 @@ def assert_scaled_sampling(
             np.array(list(sample.values.values())),
             encoded,
             rtol=LINALG_RTOL,
-            atol=LINALG_ATOL
+            atol=LINALG_ATOL,
         )
         final_rng = particle.random_cache.get("random_generator")
         assert isinstance(final_rng, np.random.Generator)
@@ -1057,7 +1057,7 @@ def test_conditional_variance_floor_differs_from_no_scaling() -> None:
 
 
 def test_sdr_default_selected_retention_active_cache_and_replacement(
-    bounds: dict[str, tuple[float, float]]
+    bounds: dict[str, tuple[float, float]],
 ) -> None:
     configured = ObservedEGNA(selection_fraction=0.6)
     assert configured.variance_scaling == "sdr-avs"
@@ -1095,7 +1095,7 @@ def test_sdr_default_selected_retention_active_cache_and_replacement(
 
 
 def test_sdr_conditional_centroid_trigger_increases_variance_and_scales_sd(
-    bounds: dict[str, tuple[float, float]]
+    bounds: dict[str, tuple[float, float]],
 ) -> None:
     # Case 4 supplies a detectable dependency; its score is checked from data.
     a = run_egna(
@@ -1119,7 +1119,7 @@ def test_sdr_conditional_centroid_trigger_increases_variance_and_scales_sd(
 
 
 def test_sdr_no_improvement_decay_floor_and_below_trigger_unchanged(
-    bounds: dict[str, tuple[float, float]]
+    bounds: dict[str, tuple[float, float]],
 ) -> None:
     plateau_bounds = {"x": (-1.0, 1.0), "y": (-2.0, 2.0)}
     a = run_egna(

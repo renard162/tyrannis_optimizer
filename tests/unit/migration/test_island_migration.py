@@ -8,8 +8,8 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 import pytest
+from _support.numerics import BASE_SEED
 
-from tests._support.numerics import BASE_SEED
 from tyrannis.backend.distributed.communication.no_communication import (
     NoCommunicationDriver,
     NoCommunicationProcessor,

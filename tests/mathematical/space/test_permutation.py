@@ -19,20 +19,20 @@ from typing import cast, override
 
 import numpy as np
 import pytest
-from numpy.typing import NDArray
-
-from tests._support.assertions import (
+from _support.assertions import (
     assert_valid_permutation,
     assert_variables_within_bounds,
 )
-from tests._support.numerics import (
+from _support.numerics import (
     BASE_SEED,
     STRICT_ATOL,
     STRICT_RTOL,
     frequency_tolerance,
     seed_for,
 )
-from tests._support.objectives import constant_objective
+from _support.objectives import constant_objective
+from numpy.typing import NDArray
+
 from tyrannis.space import Permutation
 
 

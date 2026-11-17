@@ -28,14 +28,14 @@ from typing import override
 
 import numpy as np
 import pytest
-
-from tests._support import factories
-from tests._support.assertions import (
+from _support import factories
+from _support.assertions import (
     assert_optimizer_result_consistent,
     assert_particle_state_consistent,
 )
-from tests._support.numerics import BASE_SEED, STRICT_ATOL, STRICT_RTOL, seed_for
-from tests._support.objectives import sphere
+from _support.numerics import BASE_SEED, STRICT_ATOL, STRICT_RTOL, seed_for
+from _support.objectives import sphere
+
 from tyrannis.algorithm.grey_wolf import GreyWolf, GreyWolfParticle
 from tyrannis.core.algorithm import FITNESS_UNDEFINED
 from tyrannis.processor.serial import Serial

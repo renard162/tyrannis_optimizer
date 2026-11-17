@@ -2,10 +2,10 @@ from typing import Protocol
 
 import numpy as np
 import pytest
+from _support.integration_probe import IntegrationProbeParticle
+from _support.numerics import STRICT_ATOL, STRICT_RTOL, seed_for
+from _support.objectives import CountingObjective, constant_objective
 
-from tests._support.integration_probe import IntegrationProbeParticle
-from tests._support.numerics import STRICT_ATOL, STRICT_RTOL, seed_for
-from tests._support.objectives import CountingObjective, constant_objective
 from tyrannis.space import Binary, Categorical, Continuous, Integer, Mixed
 
 

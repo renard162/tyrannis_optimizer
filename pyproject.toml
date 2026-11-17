@@ -1,6 +1,6 @@
 [project]
 name = "tyrannis"
-version = "0.1.0a5"
+version = "0.1.0a6"
 description = "Flexible population-based metaheuristic optimization framework supporting diverse search spaces, parallel and distributed execution, and island-model migration."
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -137,3 +137,6 @@ addopts = "--import-mode=importlib"
 
 [tool.coverage.run]
 branch = true
+
+[tool.basedpyright]
+extraPaths = ["src", "tests"]

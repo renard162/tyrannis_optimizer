@@ -25,7 +25,9 @@ def seed_for(case_id: int) -> int:
     return int(sequence.generate_state(1, dtype=np.uint32)[0])
 
 
-def frequency_tolerance(probability: float, sample_size: int, *, floor: float = 0.015) -> float:
+def frequency_tolerance(
+    probability: float, sample_size: int, *, floor: float = 0.015
+) -> float:
     """Return a conservative six-sigma bound for an empirical frequency."""
     if not isinstance(probability, Real) or not 0.0 <= probability <= 1.0:
         raise ValueError("probability must be finite and between zero and one.")

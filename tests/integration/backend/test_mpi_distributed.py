@@ -8,12 +8,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from _support.assertions import assert_optimizer_result_consistent
+from _support.integration_probe import IntegrationProbeAlgorithm
+from _support.mpi import _run_mpi
+from _support.numerics import BASE_SEED
+from _support.objectives import sphere
 
-from tests._support.assertions import assert_optimizer_result_consistent
-from tests._support.integration_probe import IntegrationProbeAlgorithm
-from tests._support.mpi import _run_mpi
-from tests._support.numerics import BASE_SEED
-from tests._support.objectives import sphere
 from tyrannis import Optimizer
 from tyrannis.backend import MPIDistributed
 from tyrannis.core.results import HistoryConfig
@@ -123,7 +123,7 @@ def test_optimizer_consolidates_results_from_communicating_mpi_islands(
     ) == ["rank 0 of 2", "rank 1 of 2"], startup.stdout
 
     script = Path(__file__).resolve()
-    monkeypatch.setenv("PYTHONPATH", str(script.parents[3]), prepend=os.pathsep)
+    monkeypatch.setenv("PYTHONPATH", str(script.parents[2]), prepend=os.pathsep)
     monkeypatch.setenv("PATH", str(Path(sys.executable).parent), prepend=os.pathsep)
     monkeypatch.delenv("PYTHONOPTIMIZE", raising=False)
     result = _run_mpi(

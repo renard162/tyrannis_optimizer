@@ -7,8 +7,8 @@ from typing import Protocol, final, override
 
 import numpy as np
 import pytest
+from _support.objectives import CountingObjective, sphere
 
-from tests._support.objectives import CountingObjective, sphere
 from tyrannis.core.space import SpaceBase
 
 Decoded = tuple[float, ...] | dict[str, float]

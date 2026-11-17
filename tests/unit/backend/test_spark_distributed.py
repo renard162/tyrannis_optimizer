@@ -9,10 +9,9 @@ from unittest.mock import Mock
 
 import numpy as np
 import pytest
-
-from tests._support.numerics import BASE_SEED
-from tests._support.objectives import encoded_sphere
-from tests._support.processors import (
+from _support.numerics import BASE_SEED
+from _support.objectives import encoded_sphere
+from _support.processors import (
     ProcessorAlgorithmDouble,
     ProcessorMigrationDriverDouble,
 )

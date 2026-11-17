@@ -33,10 +33,9 @@ from typing import cast, override
 
 import numpy as np
 import pytest
-
-from tests._support import factories
-from tests._support.assertions import assert_variables_within_bounds
-from tests._support.numerics import (
+from _support import factories
+from _support.assertions import assert_variables_within_bounds
+from _support.numerics import (
     BASE_SEED,
     LINALG_ATOL,
     LINALG_RTOL,
@@ -44,7 +43,8 @@ from tests._support.numerics import (
     STRICT_RTOL,
     seed_for,
 )
-from tests._support.objectives import CountingObjective, constant_objective, sphere
+from _support.objectives import CountingObjective, constant_objective, sphere
+
 from tyrannis import Optimizer
 from tyrannis.algorithm.ant_colony import ACORParticle, AntColony
 from tyrannis.core.algorithm import FITNESS_UNDEFINED, ParticleBase

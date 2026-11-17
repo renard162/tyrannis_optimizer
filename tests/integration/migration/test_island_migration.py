@@ -10,24 +10,22 @@ from threading import Event
 from typing import NotRequired, TypedDict, final
 
 import pytest
-
-# pytest adds tests/ to pythonpath; basedpyright does not read that setting.
-from _support.assertions import (  # pyright: ignore[reportImplicitRelativeImport]
+from _support.assertions import (
     assert_optimizer_result_consistent,
 )
-from _support.distributed_backend import (  # pyright: ignore[reportImplicitRelativeImport]
+from _support.distributed_backend import (
     PacedSerial,
     TestDistributedBackend,
 )
 
 # The shared factory's production AlgorithmBase annotation omits its type argument.
-from _support.factories import (  # pyright: ignore[reportImplicitRelativeImport]
+from _support.factories import (
     make_optimizer,  # pyright: ignore[reportUnknownVariableType]
 )
-from _support.integration_probe import (  # pyright: ignore[reportImplicitRelativeImport]
+from _support.integration_probe import (
     IntegrationProbeAlgorithm,
 )
-from _support.objectives import sphere  # pyright: ignore[reportImplicitRelativeImport]
+from _support.objectives import sphere
 
 from tyrannis.core.backend_migration import RETIRE, RETIRE_ACK
 from tyrannis.core.results import HistoryConfig

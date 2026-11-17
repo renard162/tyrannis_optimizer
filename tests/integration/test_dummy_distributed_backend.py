@@ -9,24 +9,22 @@ from typing import TypedDict
 from unittest.mock import patch
 
 import pytest
-
-# pytest adds tests/ to pythonpath; basedpyright does not read that pytest setting.
-from _support.assertions import (  # pyright: ignore[reportImplicitRelativeImport]
+from _support.assertions import (
     assert_optimizer_result_consistent,
     assert_reproducible,
 )
-from _support.distributed_backend import (  # pyright: ignore[reportImplicitRelativeImport]
+from _support.distributed_backend import (
     TestDistributedBackend,
 )
 
 # The existing factory omits the Algorithm generic argument.
-from _support.factories import (  # pyright: ignore[reportImplicitRelativeImport]
+from _support.factories import (
     make_optimizer,  # pyright: ignore[reportUnknownVariableType]
 )
-from _support.integration_probe import (  # pyright: ignore[reportImplicitRelativeImport]
+from _support.integration_probe import (
     IntegrationProbeAlgorithm,
 )
-from _support.objectives import (  # pyright: ignore[reportImplicitRelativeImport]
+from _support.objectives import (
     fails_for_positive,
     sphere,
 )

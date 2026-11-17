@@ -7,15 +7,15 @@ from importlib.util import find_spec
 from pathlib import Path
 
 import pytest
-
-from tests._support.assertions import assert_optimizer_result_consistent
-from tests._support.integration_probe import (
+from _support.assertions import assert_optimizer_result_consistent
+from _support.integration_probe import (
     IntegrationProbeAlgorithm,
     assert_parallel_probe_continues,
 )
-from tests._support.mpi import _run_mpi
-from tests._support.numerics import BASE_SEED
-from tests._support.objectives import sphere
+from _support.mpi import _run_mpi
+from _support.numerics import BASE_SEED
+from _support.objectives import sphere
+
 from tyrannis import Optimizer
 from tyrannis.backend import MPIParallel
 from tyrannis.space import Continuous
@@ -91,7 +91,7 @@ def test_optimizer_consolidates_particles_from_mpi_workers(
 
     script = Path(__file__).resolve()
     # Ranks import the serialized probe from the checkout and use pytest's venv.
-    monkeypatch.setenv("PYTHONPATH", str(script.parents[3]), prepend=os.pathsep)
+    monkeypatch.setenv("PYTHONPATH", str(script.parents[2]), prepend=os.pathsep)
     monkeypatch.setenv("PATH", str(Path(sys.executable).parent), prepend=os.pathsep)
     # These script assertions run outside pytest's assertion rewriting.
     monkeypatch.delenv("PYTHONOPTIMIZE", raising=False)

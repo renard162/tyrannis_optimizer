@@ -7,12 +7,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from _support.assertions import assert_optimizer_result_consistent
+from _support.integration_probe import IntegrationProbeAlgorithm
+from _support.numerics import BASE_SEED
+from _support.objectives import sphere
+from integration.migration._history import HistoryRecord, population_at
 
-from tests._support.assertions import assert_optimizer_result_consistent
-from tests._support.integration_probe import IntegrationProbeAlgorithm
-from tests._support.numerics import BASE_SEED
-from tests._support.objectives import sphere
-from tests.integration.migration._history import HistoryRecord, population_at
 from tyrannis import Optimizer
 from tyrannis.backend import SparkDistributed
 from tyrannis.migration import GlobalBest
@@ -39,7 +39,7 @@ def test_optimizer_consolidates_results_from_spark_islands() -> None:
         SparkSession.builder.master("local[2]")
         .appName("tyrannis-spark-distributed-test")
         .config(
-            "spark.executorEnv.PYTHONPATH", str(Path(__file__).resolve().parents[3])
+            "spark.executorEnv.PYTHONPATH", str(Path(__file__).resolve().parents[2])
         )
     )
     try:

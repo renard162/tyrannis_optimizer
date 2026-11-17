@@ -6,9 +6,9 @@ from typing import override
 
 import numpy as np
 import pytest
+from _support.numerics import BASE_SEED
+from _support.objectives import encoded_sphere
 
-from tests._support.numerics import BASE_SEED
-from tests._support.objectives import encoded_sphere
 from tyrannis.core.algorithm import (
     FITNESS_UNDEFINED,
     AlgorithmBase,

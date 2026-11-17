@@ -5,13 +5,13 @@ from typing import Protocol, TypedDict, final, override
 from unittest.mock import patch
 
 import numpy as np
-
-from tests._support.numerics import BASE_SEED
-from tests._support.processors import (
+from _support.numerics import BASE_SEED
+from _support.processors import (
     ProcessorAlgorithmDouble,
     ProcessorMigrationDriverDouble,
     ProcessorParticleDouble,
 )
+
 from tyrannis.core.algorithm import CostFunctionWrapperBase
 from tyrannis.core.backend_migration import MigrationDriverBase
 from tyrannis.core.backend_parallel import ParallelBackendBase

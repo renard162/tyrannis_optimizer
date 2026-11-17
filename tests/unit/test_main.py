@@ -9,11 +9,11 @@ from pathlib import Path
 from typing import final, override
 
 import pytest
+from _support.assertions import assert_optimizer_result_consistent
+from _support.factories import make_optimizer
+from _support.numerics import BASE_SEED
+from _support.objectives import sphere
 
-from tests._support.assertions import assert_optimizer_result_consistent
-from tests._support.factories import make_optimizer
-from tests._support.numerics import BASE_SEED
-from tests._support.objectives import sphere
 from tyrannis import Optimizer
 from tyrannis.algorithm.pso import PSO
 from tyrannis.backend.local import Local

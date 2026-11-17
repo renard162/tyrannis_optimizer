@@ -8,15 +8,15 @@ from unittest.mock import patch
 
 import numpy as np
 import pytest
-
-from tests._support.numerics import BASE_SEED
-from tests._support.objectives import encoded_sphere
-from tests._support.processors import (
+from _support.numerics import BASE_SEED
+from _support.objectives import encoded_sphere
+from _support.processors import (
     ProcessorAlgorithmDouble,
     ProcessorMigrationDriverDouble,
     ProcessorParticleDouble,
     configure_processor_for_dispatch,
 )
+
 from tyrannis.core.algorithm import FITNESS_UNDEFINED, ParticleBase
 from tyrannis.core.processor import IntSequence, evaluate_particle
 from tyrannis.core.results import HistoryConfig

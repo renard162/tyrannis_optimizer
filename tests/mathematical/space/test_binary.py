@@ -15,15 +15,15 @@ from collections import Counter
 from math import cos, exp, log, sin, tau
 
 import pytest
-
-from tests._support.numerics import (
+from _support.numerics import (
     BASE_SEED,
     STRICT_ATOL,
     STRICT_RTOL,
     frequency_tolerance,
     seed_for,
 )
-from tests._support.objectives import constant_objective
+from _support.objectives import constant_objective
+
 from tyrannis.space import Binary
 
 

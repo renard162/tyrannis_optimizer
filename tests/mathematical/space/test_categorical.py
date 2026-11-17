@@ -17,6 +17,15 @@ from math import exp, log, log1p
 from typing import cast
 
 import pytest
+from _support.assertions import assert_variables_within_bounds
+from _support.numerics import (
+    BASE_SEED,
+    STRICT_ATOL,
+    STRICT_RTOL,
+    frequency_tolerance,
+    seed_for,
+)
+from _support.objectives import constant_objective
 
 # SciPy ships no integrate stubs in this environment. Only this external import
 # lacks typing; quad's default real-valued result is narrowed at its call below.
@@ -24,15 +33,6 @@ from scipy.integrate import (  # pyright: ignore[reportMissingTypeStubs]
     quad,  # pyright: ignore[reportUnknownVariableType]
 )
 
-from tests._support.assertions import assert_variables_within_bounds
-from tests._support.numerics import (
-    BASE_SEED,
-    STRICT_ATOL,
-    STRICT_RTOL,
-    frequency_tolerance,
-    seed_for,
-)
-from tests._support.objectives import constant_objective
 from tyrannis.space import Categorical
 
 

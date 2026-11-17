@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
+from _support.objectives import CountingObjective
 
-from tests._support.objectives import CountingObjective
 from tyrannis.space import Continuous
 
 

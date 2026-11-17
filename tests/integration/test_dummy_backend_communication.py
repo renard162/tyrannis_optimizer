@@ -6,9 +6,7 @@ from multiprocessing.managers import SyncManager
 from threading import enumerate as enumerate_threads
 
 import pytest
-
-# pytest adds tests/ to pythonpath; basedpyright does not read that pytest setting.
-from _support.distributed_backend import (  # pyright: ignore[reportImplicitRelativeImport]
+from _support.distributed_backend import (
     WAIT_TIMEOUT,
     IslandTransport,
     TestBackendCommunicationDriver,

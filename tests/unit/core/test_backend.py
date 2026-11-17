@@ -3,11 +3,12 @@
 from typing import Protocol, final, override
 from unittest.mock import patch
 
-from tests._support.numerics import BASE_SEED
-from tests._support.processors import (
+from _support.numerics import BASE_SEED
+from _support.processors import (
     ProcessorAlgorithmDouble,
     ProcessorMigrationDriverDouble,
 )
+
 from tyrannis.core.algorithm import CostFunctionWrapperBase
 from tyrannis.core.backend import BackendBase
 from tyrannis.core.results import HistoryConfig, ProcessorResult

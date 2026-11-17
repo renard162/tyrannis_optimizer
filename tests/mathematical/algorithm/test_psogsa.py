@@ -37,14 +37,14 @@ from typing import override
 
 import numpy as np
 import pytest
-
-from tests._support.assertions import (
+from _support.assertions import (
     assert_optimizer_result_consistent,
     assert_particle_state_consistent,
 )
-from tests._support.factories import make_optimizer
-from tests._support.numerics import BASE_SEED, STRICT_ATOL, STRICT_RTOL, seed_for
-from tests._support.objectives import constant_objective, sphere
+from _support.factories import make_optimizer
+from _support.numerics import BASE_SEED, STRICT_ATOL, STRICT_RTOL, seed_for
+from _support.objectives import constant_objective, sphere
+
 from tyrannis.algorithm.psogsa import PSOGSA, PSOGSAParticle
 from tyrannis.core.algorithm import FITNESS_UNDEFINED
 from tyrannis.processor.serial import Serial

@@ -4,14 +4,14 @@ from importlib.util import find_spec
 from pathlib import Path
 
 import pytest
-
-from tests._support.assertions import assert_optimizer_result_consistent
-from tests._support.integration_probe import (
+from _support.assertions import assert_optimizer_result_consistent
+from _support.integration_probe import (
     IntegrationProbeAlgorithm,
     assert_parallel_probe_continues,
 )
-from tests._support.numerics import BASE_SEED
-from tests._support.objectives import sphere
+from _support.numerics import BASE_SEED
+from _support.objectives import sphere
+
 from tyrannis import Optimizer
 from tyrannis.backend import SparkParallel
 from tyrannis.space import Continuous
@@ -39,7 +39,7 @@ def test_optimizer_consolidates_particles_from_spark_workers() -> None:
         .appName("tyrannis-spark-parallel-test")
         # Local workers need the same import root for the serialized probe as pytest.
         .config(
-            "spark.executorEnv.PYTHONPATH", str(Path(__file__).resolve().parents[3])
+            "spark.executorEnv.PYTHONPATH", str(Path(__file__).resolve().parents[2])
         )
     )
     try:

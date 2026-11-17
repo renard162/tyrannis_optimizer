@@ -4,13 +4,13 @@ from typing import override
 from unittest.mock import patch
 
 import pytest
-
-from tests._support.numerics import BASE_SEED
-from tests._support.processors import (
+from _support.numerics import BASE_SEED
+from _support.processors import (
     ProcessorAlgorithmDouble,
     ProcessorMigrationDriverDouble,
     ProcessorParticleDouble,
 )
+
 from tyrannis.core.algorithm import AlgorithmBase, CostFunctionWrapperBase
 from tyrannis.core.backend_distributed import DistributedBackendBase
 from tyrannis.core.backend_migration import MigrationDriverBase
