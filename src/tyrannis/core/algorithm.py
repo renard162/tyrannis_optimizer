@@ -20,7 +20,7 @@ Serializable: TypeAlias = (
 )
 
 FITNESS_UNDEFINED: np.float64 = np.float64(np.inf)
-_particle_identifier = ContextVar[str]("particle_identifier")
+particle_identifier_context = ContextVar[str]("particle_identifier")
 
 
 class CostFunctionWrapperBase(ABC):
@@ -204,11 +204,11 @@ class ParticleBase(ABC):
         self._candidate_variables = None
         self._candidate_fitness = None
         self._candidate_variables = variables
-        token = _particle_identifier.set(self._identifier)
+        token = particle_identifier_context.set(self._identifier)
         try:
             self._candidate_fitness = fitness_function(variables)
         finally:
-            _particle_identifier.reset(token)
+            particle_identifier_context.reset(token)
 
     def consolidate(self, consolidate_new: bool) -> None:
         if (self._candidate_variables is None) or (self._candidate_fitness is None):

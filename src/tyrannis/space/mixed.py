@@ -2,8 +2,7 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-# Shared with ParticleBase.update, private to the evaluation path.
-from ..core.algorithm import _particle_identifier  # pyright: ignore[reportPrivateUsage]
+from ..core.algorithm import particle_identifier_context
 from ..core.space import SpaceBase
 from . import get_space_class
 
@@ -82,10 +81,20 @@ class Mixed(SpaceBase):
 
         particle_identifier_as_argument:
             When enabled, pass the evaluating particle's identifier to the cost
-            function as the keyword argument ``particle_identifier``. This name
-            is then reserved in ``spaces``. Only optimized variables form the
-            cache key, so a cache hit reuses the result across particles.
-            Calling the cost function with this option requires a particle context.
+            function as the keyword argument ``particle_identifier``. Identifiers
+            distinguish particles within the optimization. Assignment begins when
+            particles are created during the first ``Optimizer.fit()`` call,
+            before their initial evaluation. Particles created later also receive
+            identifiers. Existing particles retain their identifiers across
+            consecutive ``fit()`` calls.
+
+            The name ``particle_identifier`` is reserved in ``spaces`` when this
+            option is enabled. An evaluation that needs the identifier raises
+            ``RuntimeError`` if no particle context is available.
+
+            When caching is enabled, different particles evaluating the same
+            variable values share the cached fitness, regardless of their
+            identifiers.
 
         Examples
         --------
@@ -219,7 +228,15 @@ class Mixed(SpaceBase):
     # typing.override is unavailable on supported Python 3.11.
     def _evaluate(self, inputs: dict[str, object]) -> float:  # pyright: ignore[reportImplicitOverride]
         if self._particle_identifier_as_argument:
-            inputs = {**inputs, "particle_identifier": _particle_identifier.get()}
+            try:
+                particle_identifier = particle_identifier_context.get()
+            except LookupError as exc:
+                raise RuntimeError(
+                    "No particle identifier is available for this evaluation. "
+                    + "Particle identifiers are assigned during Optimizer.fit() "
+                    + "and can be passed to the cost function through particle evaluations."
+                ) from exc
+            inputs = {**inputs, "particle_identifier": particle_identifier}
         return super()._evaluate(inputs)
 
     def encode_cache(self, inputs: dict[str, Any]) -> tuple[Any, ...]:
