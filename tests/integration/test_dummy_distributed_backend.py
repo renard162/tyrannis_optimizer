@@ -6,6 +6,7 @@ from multiprocessing import active_children, get_context
 from multiprocessing.managers import SyncManager
 from os import getpid
 from typing import TypedDict
+from unittest.mock import patch
 
 import pytest
 
@@ -118,6 +119,15 @@ def test_two_islands_and_consolidation(manager: SyncManager) -> None:
     assert backend.result.result["fitness"] == best_fitness
     assert all(not result.history for result in backend.local_bests.values())
     assert_optimizer_result_consistent(optimizer)
+    first_result = optimizer.result_
+    first_history = list(optimizer.internal_history_generator_)
+    with patch.object(backend, "execute") as execute:
+        with pytest.raises(RuntimeError):
+            _ = optimizer.fit()
+        execute.assert_not_called()
+    assert optimizer.result_ == first_result
+    assert list(optimizer.internal_history_generator_) == first_history
+    assert {child.pid for child in active_children()} == before
 
 
 def test_reproducible_independent_islands(manager: SyncManager) -> None:

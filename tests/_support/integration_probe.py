@@ -6,12 +6,14 @@ requests), not cache misses in a Space's fitness cache.
 """
 
 import warnings
+from collections import Counter
 from collections.abc import Callable
 from copy import deepcopy
 from typing import final, override
 
 import numpy as np
 
+from tyrannis import Optimizer
 from tyrannis.core.algorithm import (
     FITNESS_UNDEFINED,
     AlgorithmBase,
@@ -159,6 +161,7 @@ class IntegrationProbeAlgorithm(AlgorithmBase[IntegrationProbeParticle]):
         draws = [float(generator.random()) for _ in range(1 + int(3 * scalar))]
         evaluate = phase != "initialize" or particle.fitness == FITNESS_UNDEFINED
         event: dict[str, Serializable] = {
+            "max_iterations": self._max_iterations,
             "particle_id": identifier,
             "iteration": self._actual_iter,
             "phase": phase,
@@ -233,3 +236,55 @@ class IntegrationProbeAlgorithm(AlgorithmBase[IntegrationProbeParticle]):
                 UserWarning,
                 stacklevel=2,
             )
+
+
+def assert_parallel_probe_continues(
+    optimizer: Optimizer, probe: IntegrationProbeAlgorithm
+) -> None:
+    """Extend the two-particle, negative-sphere worker smoke on its live backend."""
+    from .assertions import assert_optimizer_result_consistent
+    from .objectives import sphere
+
+    first_history: list[list[object]] = list(optimizer.history_generator)
+    slot = optimizer.history_columns.index("identifier")
+    step = optimizer.history_columns.index("iteration")
+    traces = {
+        key: deepcopy(particle.trace) for key, particle in probe.population.items()
+    }
+    assert Counter((row[step], row[slot]) for row in first_history) == {
+        (iteration, key): 1 for iteration in (0, 1) for key in traces
+    }
+    first_result = optimizer.result_
+    first_fitness = optimizer.best_fitness
+
+    _ = optimizer.fit()
+
+    history: list[list[object]] = list(optimizer.history_generator)
+    assert history[: len(first_history)] == first_history
+    assert Counter((row[step], row[slot]) for row in history[len(first_history) :]) == {
+        (2, key): 1 for key in traces
+    }
+    assert probe.population.keys() == traces.keys()
+    for key, particle in probe.population.items():
+        assert particle.trace[:-1] == traces[key]
+        event = particle.trace[-1]
+        assert (event["particle_id"], event["iteration"], event["phase"]) == (
+            key,
+            2,
+            "update",
+        )
+        assert [entry["max_iterations"] for entry in particle.trace] == [1, 1, 2]
+        assert particle.fitness == -sphere(**particle.variables)
+
+    best = min(probe.population.values(), key=lambda particle: particle.fitness)
+    expected = (
+        first_result
+        if first_fitness <= best.fitness
+        else {
+            "identifier": best.identifier,
+            "variables": best.variables,
+            "fitness": best.fitness,
+        }
+    )
+    assert optimizer.result_ == expected
+    assert_optimizer_result_consistent(optimizer)

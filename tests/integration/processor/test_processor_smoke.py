@@ -4,23 +4,22 @@ import json
 from collections.abc import Callable, Sequence
 from copy import deepcopy
 from functools import partial
-from itertools import pairwise
 
 import pytest
-from _support.assertions import (
+
+import tyrannis.processor as processor_module
+from tests._support.assertions import (
     assert_optimizer_result_consistent,
     assert_variables_within_bounds,
 )
 
 # The shared factory's AlgorithmBase annotation omits its type parameter.
-from _support.factories import (
+from tests._support.factories import (
     make_optimizer,  # pyright: ignore[reportUnknownVariableType]
 )
-from _support.integration_probe import IntegrationProbeAlgorithm
-from _support.numerics import BASE_SEED
-from _support.objectives import sphere
-
-import tyrannis.processor as processor_module
+from tests._support.integration_probe import IntegrationProbeAlgorithm
+from tests._support.numerics import BASE_SEED
+from tests._support.objectives import sphere
 from tyrannis import Optimizer
 from tyrannis.backend.local import Local
 from tyrannis.core.algorithm import Serializable
@@ -132,12 +131,15 @@ def _assert_lifecycle(history: History, *, last_iteration: int) -> None:
         trace = state["trace"]
         assert isinstance(trace, list)
         assert state["evaluation_count"] == len(trace)
+        seen_draws: list[Serializable] = []
         for count, event in enumerate(trace, start=1):
             assert isinstance(event, dict)
             assert event["particle_id"] == event["cache_particle_id"] == identifier
             assert event["iteration"] == event["cache_iteration"]
             assert event["phase"] == event["cache_phase"]
             assert event["evaluation_count"] == count
+            assert event["draws"] not in seen_draws
+            seen_draws.append(event["draws"])
         # Complete trace equality below also checks materialized values and draws.
         first_phases = [
             (event["iteration"], event["phase"])
@@ -151,11 +153,6 @@ def _assert_lifecycle(history: History, *, last_iteration: int) -> None:
             previous = history[iteration - 1, identifier]["trace"]
             assert isinstance(previous, list)
             assert trace[: len(previous)] == previous
-            # A fresh stream must reach each new phase, including second_update.
-            for before, after in pairwise(trace):
-                assert isinstance(before, dict)
-                assert isinstance(after, dict)
-                assert before["draws"] != after["draws"]
 
 
 def _assert_result(optimizer: Optimizer, reference: Optimizer) -> dict[str, object]:
@@ -186,54 +183,74 @@ def _assert_result(optimizer: Optimizer, reference: Optimizer) -> dict[str, obje
     )
 
 
+def _fit_and_check_history(
+    optimizer: Optimizer, reference: Optimizer, previous: History, last_iteration: int
+) -> History:
+    _ = reference.fit()
+    _ = optimizer.fit()
+    history = _history(optimizer)
+    _assert_lifecycle(history, last_iteration=last_iteration)
+    assert history == _history(reference)
+    for key, state in history.items():
+        if key in previous:
+            assert state == previous[key]
+        else:
+            trace = state["trace"]
+            assert isinstance(trace, list)
+            event = trace[-1]
+            assert isinstance(event, dict)
+            assert event["max_iterations"] == last_iteration
+    assert previous.keys() <= history.keys()
+    _ = _assert_result(optimizer, reference)
+    return history
+
+
 @pytest.mark.parametrize("processor_factory", PROCESSORS)
 def test_single_evaluation_preserves_serial_lifecycle(
     processor_factory: ProcessorFactory | None,
 ) -> None:
-    reference = _optimizer(None).fit()
-    optimizer = _optimizer(processor_factory).fit()
-    history = _history(optimizer)
-    _assert_lifecycle(history, last_iteration=2)
-    assert history == _history(reference)
-    for (iteration, _), state in history.items():
-        assert state["evaluation_count"] == iteration + 1
-    _ = _assert_result(optimizer, reference)
+    reference = _optimizer(None)
+    optimizer = _optimizer(processor_factory)
+    history: History = {}
+    for last_iteration in (2, 4):
+        history = _fit_and_check_history(optimizer, reference, history, last_iteration)
+        for (iteration, _), state in history.items():
+            assert state["evaluation_count"] == iteration + 1
 
 
 @pytest.mark.parametrize("processor_factory", PROCESSORS)
 def test_second_evaluation_returns_only_selected_particles(
     processor_factory: ProcessorFactory | None,
 ) -> None:
-    reference = _optimizer(None, double_eval=True).fit()
-    optimizer = _optimizer(processor_factory, double_eval=True).fit()
-    expected = _history(reference)
-    history = _history(optimizer)
-    _assert_lifecycle(history, last_iteration=2)
-    assert history == expected
-    # Derive selection from Serial's trace, not the probe's concrete ID rule.
-    for iteration in (1, 2):
-        selected: set[str] = set()
-        for (step, identifier), state in expected.items():
-            if step != iteration:
-                continue
-            trace = state["trace"]
-            assert isinstance(trace, list)
-            event = trace[-1]
-            assert isinstance(event, dict)
-            if event["phase"] == "second_update":
-                selected.add(identifier)
-        assert 0 < len(selected) < N_PARTICLES
-        for (step, identifier), state in history.items():
-            if step != iteration:
-                continue
-            previous_count = history[step - 1, identifier]["evaluation_count"]
-            assert isinstance(previous_count, int)
-            assert state["evaluation_count"] == previous_count + 1 + int(
-                identifier in selected
-            )
-            # A returned second-update particle must replace the first version;
-            # full state equality above checks its variables and fitness too.
-    _ = _assert_result(optimizer, reference)
+    reference = _optimizer(None, double_eval=True)
+    optimizer = _optimizer(processor_factory, double_eval=True)
+    history: History = {}
+    for last_iteration in (2, 4):
+        history = _fit_and_check_history(optimizer, reference, history, last_iteration)
+        expected = _history(reference)
+        # Derive selection from Serial's trace, not the probe's concrete ID rule.
+        for iteration in range(last_iteration - 1, last_iteration + 1):
+            selected: set[str] = set()
+            for (step, identifier), state in expected.items():
+                if step != iteration:
+                    continue
+                trace = state["trace"]
+                assert isinstance(trace, list)
+                event = trace[-1]
+                assert isinstance(event, dict)
+                if event["phase"] == "second_update":
+                    selected.add(identifier)
+            assert 0 < len(selected) < N_PARTICLES
+            for (step, identifier), state in history.items():
+                if step != iteration:
+                    continue
+                previous_count = history[step - 1, identifier]["evaluation_count"]
+                assert isinstance(previous_count, int)
+                assert state["evaluation_count"] == previous_count + 1 + int(
+                    identifier in selected
+                )
+                # A returned second-update particle must replace the first version;
+                # full state equality above checks its variables and fitness too.
 
 
 @pytest.mark.parametrize("processor_factory", PROCESSORS)

@@ -6,7 +6,10 @@ from pathlib import Path
 import pytest
 
 from tests._support.assertions import assert_optimizer_result_consistent
-from tests._support.integration_probe import IntegrationProbeAlgorithm
+from tests._support.integration_probe import (
+    IntegrationProbeAlgorithm,
+    assert_parallel_probe_continues,
+)
 from tests._support.numerics import BASE_SEED
 from tests._support.objectives import sphere
 from tyrannis import Optimizer
@@ -60,20 +63,24 @@ def test_optimizer_consolidates_particles_from_spark_workers() -> None:
             n_particles=2,
             n_iterations=1,
             seed=BASE_SEED,
+            history="iteration",
         ).fit()
 
-    assert len(probe.population) == 2
-    for identifier, particle in probe.population.items():
-        assert [(event["particle_id"], event["phase"]) for event in particle.trace] == [
-            (identifier, "initialize"),
-            (identifier, "update"),
-        ]
-        assert particle.fitness == -sphere(**particle.variables) < 0.0
+        assert len(probe.population) == 2
+        for identifier, particle in probe.population.items():
+            assert [
+                (event["particle_id"], event["phase"]) for event in particle.trace
+            ] == [
+                (identifier, "initialize"),
+                (identifier, "update"),
+            ]
+            assert particle.fitness == -sphere(**particle.variables) < 0.0
 
-    best = min(probe.population.values(), key=lambda particle: particle.fitness)
-    assert optimizer.result_ == {
-        "identifier": best.identifier,
-        "variables": best.variables,
-        "fitness": best.fitness,
-    }
-    assert_optimizer_result_consistent(optimizer)
+        best = min(probe.population.values(), key=lambda particle: particle.fitness)
+        assert optimizer.result_ == {
+            "identifier": best.identifier,
+            "variables": best.variables,
+            "fitness": best.fitness,
+        }
+        assert_optimizer_result_consistent(optimizer)
+        assert_parallel_probe_continues(optimizer, probe)

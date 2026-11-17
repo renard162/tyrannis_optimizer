@@ -5,6 +5,7 @@ import shutil
 import sys
 from importlib.util import find_spec
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -32,10 +33,11 @@ def _run_optimizer() -> None:
         # At the initial midpoint x=0 the fitness identifies the worker rank.
         return rank - sphere(x)
 
+    backend = MPIDistributed()
     optimizer = Optimizer(
         space=Continuous({"x": (-1.0, 1.0)}, cost_function=worker_fitness),
         algorithm=IntegrationProbeAlgorithm(),
-        backend=MPIDistributed(),
+        backend=backend,
         migration=GlobalBest(synchronous=True, initial_iter=1, check_interval=1),
         n_particles=1,
         n_iterations=1,
@@ -81,6 +83,14 @@ def _run_optimizer() -> None:
         "fitness": fitness,
     }
     assert_optimizer_result_consistent(optimizer)
+    first_result = optimizer.result_
+    first_history = list(optimizer.internal_history_generator_)
+    with patch.object(backend, "execute") as execute:
+        with pytest.raises(RuntimeError):
+            _ = optimizer.fit()
+        execute.assert_not_called()
+    assert optimizer.result_ == first_result
+    assert list(optimizer.internal_history_generator_) == first_history
     print("MPI island exchange and global result verified", flush=True)
 
 

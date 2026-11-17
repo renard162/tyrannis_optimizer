@@ -4,11 +4,11 @@ from collections import Counter
 from math import inf
 
 import pytest
-from _support.assertions import assert_optimizer_result_consistent
-from _support.integration_probe import IntegrationProbeAlgorithm
-from _support.numerics import BASE_SEED
-from _support.objectives import fails_for_positive, sphere
 
+from tests._support.assertions import assert_optimizer_result_consistent
+from tests._support.integration_probe import IntegrationProbeAlgorithm
+from tests._support.numerics import BASE_SEED
+from tests._support.objectives import fails_for_positive, sphere
 from tyrannis import Optimizer
 from tyrannis.core.results import HistoryConfig
 from tyrannis.space.continuous import Continuous
@@ -29,51 +29,69 @@ def test_default_execution_exposes_consistent_result_and_requested_history() -> 
         history=["iteration", "best"],
     )
 
-    assert optimizer.fit() is optimizer
-    assert_optimizer_result_consistent(optimizer)
+    previous_rows: list[dict[str, object]] = []
+    previous_internal: list[dict[str, object]] = []
+    for last_iteration in (1, 2):
+        assert optimizer.fit() is optimizer
+        assert_optimizer_result_consistent(optimizer)
 
-    rows: list[dict[str, object]] = [
-        dict(zip(optimizer.history_columns, values, strict=True))
-        for values in optimizer.history_generator
-    ]
-    internal_rows: list[dict[str, object]] = [
-        dict(zip(optimizer.internal_history_columns_, values, strict=True))
-        for values in optimizer.internal_history_generator_
-    ]
-    iteration_event = HistoryConfig.get_event("iteration")
-    best_event = HistoryConfig.get_event("local_best")
-    assert Counter((row["event"], row["iteration"]) for row in rows) == {
-        (iteration_event, 0): 4,
-        (iteration_event, 1): 4,
-        (best_event, 0): 1,
-        (best_event, 1): 1,
-    }
-    # Continuous has identical encoded/decoded values. Compare by content,
-    # without imposing physical particle ordering on either generator.
-    assert Counter(tuple(row.values()) for row in rows) == Counter(
-        tuple(row[column] for column in optimizer.history_columns)
-        for row in internal_rows
-    )
-    identifiers = {row["identifier"] for row in rows if row["event"] == iteration_event}
-    assert len(identifiers) == 4
-    assert all(isinstance(identifier, str) and identifier for identifier in identifiers)
-    fitnesses: list[float] = []
-    for row in rows:
-        assert row["identifier"] in identifiers
-        x, fitness = row["x"], row["fitness"]
-        assert isinstance(x, float)
-        assert isinstance(fitness, float)
-        assert sphere(x=x) == fitness
-        if row["event"] == iteration_event:
-            fitnesses.append(fitness)
-        if row["event"] == best_event and row["iteration"] == 1:
-            assert optimizer.result_ == {
-                "identifier": row["identifier"],
-                "variables": {"x": x},
-                "fitness": fitness,
-            }
-            assert sphere(x=x) == optimizer.best_fitness
-    assert optimizer.best_fitness == min(fitnesses)
+        rows: list[dict[str, object]] = [
+            dict(zip(optimizer.history_columns, values, strict=True))
+            for values in optimizer.history_generator
+        ]
+        internal_rows: list[dict[str, object]] = [
+            dict(zip(optimizer.internal_history_columns_, values, strict=True))
+            for values in optimizer.internal_history_generator_
+        ]
+        iteration_event = HistoryConfig.get_event("iteration")
+        best_event = HistoryConfig.get_event("local_best")
+        assert rows[: len(previous_rows)] == previous_rows
+        assert internal_rows[: len(previous_internal)] == previous_internal
+        assert Counter((row["event"], row["iteration"]) for row in rows) == {
+            (event, step): count
+            for step in range(last_iteration + 1)
+            for event, count in ((iteration_event, 4), (best_event, 1))
+        }
+        # Continuous has identical encoded/decoded values. Compare by content,
+        # without imposing physical particle ordering on either generator.
+        assert Counter(tuple(row.values()) for row in rows) == Counter(
+            tuple(row[column] for column in optimizer.history_columns)
+            for row in internal_rows
+        )
+        identifiers = {
+            row["identifier"] for row in rows if row["event"] == iteration_event
+        }
+        assert len(identifiers) == 4
+        assert all(
+            isinstance(identifier, str) and identifier for identifier in identifiers
+        )
+        assert Counter(
+            (row["iteration"], row["identifier"])
+            for row in rows
+            if row["event"] == iteration_event
+        ) == {
+            (step, identifier): 1
+            for step in range(last_iteration + 1)
+            for identifier in identifiers
+        }
+        fitnesses: list[float] = []
+        for row in rows:
+            assert row["identifier"] in identifiers
+            x, fitness = row["x"], row["fitness"]
+            assert isinstance(x, float)
+            assert isinstance(fitness, float)
+            assert sphere(x=x) == fitness
+            if row["event"] == iteration_event:
+                fitnesses.append(fitness)
+            if row["event"] == best_event and row["iteration"] == last_iteration:
+                assert optimizer.result_ == {
+                    "identifier": row["identifier"],
+                    "variables": {"x": x},
+                    "fitness": fitness,
+                }
+                assert sphere(x=x) == optimizer.best_fitness
+        assert optimizer.best_fitness == min(fitnesses)
+        previous_rows, previous_internal = rows, internal_rows
 
 
 def test_raise_strategy_propagates_real_objective_failure() -> None:
@@ -90,6 +108,8 @@ def test_raise_strategy_propagates_real_objective_failure() -> None:
     )
 
     with pytest.raises(Exception):  # noqa: B017
+        _ = optimizer.fit()
+    with pytest.raises(RuntimeError, match="interrupted fit"):
         _ = optimizer.fit()
 
 

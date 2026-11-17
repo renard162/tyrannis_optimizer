@@ -9,7 +9,10 @@ from pathlib import Path
 import pytest
 
 from tests._support.assertions import assert_optimizer_result_consistent
-from tests._support.integration_probe import IntegrationProbeAlgorithm
+from tests._support.integration_probe import (
+    IntegrationProbeAlgorithm,
+    assert_parallel_probe_continues,
+)
 from tests._support.mpi import _run_mpi
 from tests._support.numerics import BASE_SEED
 from tests._support.objectives import sphere
@@ -36,6 +39,7 @@ def _run_optimizer() -> None:
         n_particles=2,
         n_iterations=1,
         seed=BASE_SEED,
+        history="iteration",
     ).fit()
 
     for identifier, particle in probe.population.items():
@@ -52,6 +56,7 @@ def _run_optimizer() -> None:
         "fitness": best.fitness,
     }
     assert_optimizer_result_consistent(optimizer)
+    assert_parallel_probe_continues(optimizer, probe)
     print(f"consolidated particles={len(probe.population)}", flush=True)
 
 
