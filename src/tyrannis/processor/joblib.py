@@ -202,6 +202,7 @@ class Joblib(ProcessorBase[EventProtocol]):
             second_update=True,
         )
 
+        iterations = self._iterations()
         try:
             with Parallel(
                 n_jobs=self._n_process,
@@ -210,11 +211,7 @@ class Joblib(ProcessorBase[EventProtocol]):
                 pre_dispatch=cast(str, self._pre_dispatch),
                 return_as="list",
             ) as parallel:
-                for actual_iter in range(self._n_iter + 2):
-                    if self._algorithm.force_stop or (actual_iter == self._n_iter + 1):
-                        self.retire_migration()
-                        break
-
+                for actual_iter in iterations:
                     self.migration_control(actual_iter)
 
                     self._algorithm.pre_iteration(actual_iter)
@@ -309,4 +306,5 @@ class Joblib(ProcessorBase[EventProtocol]):
                     self.best_log(actual_iter)
 
         finally:
+            iterations.close()
             self.finalize_loop_context()

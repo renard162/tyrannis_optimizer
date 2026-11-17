@@ -57,6 +57,8 @@ class Local(BackendBase):
         if len(self._processor.processors_pool) == 0:
             self._processor.create_processors_pool(1)
         executor = next(iter(self._processor.processors_pool.values()))
+        if executor.stopped_after_iteration:
+            return
 
         executor.initialize_execution_context()
 
@@ -64,6 +66,10 @@ class Local(BackendBase):
             executor.run()
             self._processor.update_processors_pool([executor])
             self._result = executor.result
+        except BaseException:
+            if executor.result.result is not None or executor.result.history:
+                self._result = executor.result
+            raise
 
         finally:
             executor.finalize_execution_context()

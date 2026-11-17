@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
+from contextlib import closing
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -239,6 +240,8 @@ class SparkParallel(ParallelBackendBase):
 
     def execute(self) -> None:
         """Execute iterations, checking local force stop before each iteration starts."""
+        if self._last_iteration >= 0 and self._algorithm.force_stop:
+            return
         if self._code_archive is not None:
             if not self._code_archive.is_file():
                 raise FileNotFoundError(
@@ -249,17 +252,17 @@ class SparkParallel(ParallelBackendBase):
 
         self.init_particles()
 
-        with Parallel(
-            n_jobs=self._n_process,
-            backend=self._joblib_backend,
-            batch_size=cast(str, self._batch_size),
-            pre_dispatch=cast(str, self._pre_dispatch),
-            return_as="list",
-        ) as parallel:
-            for actual_iter in range(self._n_iter + 1):
-                if self._algorithm.force_stop:
-                    break
-
+        with (
+            Parallel(
+                n_jobs=self._n_process,
+                backend=self._joblib_backend,
+                batch_size=cast(str, self._batch_size),
+                pre_dispatch=cast(str, self._pre_dispatch),
+                return_as="list",
+            ) as parallel,
+            closing(self._iterations()) as iterations,
+        ):
+            for actual_iter in iterations:
                 self._algorithm.pre_iteration(actual_iter)
                 self.pre_iteration_log(actual_iter)
 

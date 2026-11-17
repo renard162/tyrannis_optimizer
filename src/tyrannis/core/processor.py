@@ -1,6 +1,6 @@
 import json
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Generator, Iterable
 from copy import deepcopy
 from typing import Any, Generic, Self, TypeVar
 
@@ -57,6 +57,7 @@ class ProcessorBase(ABC, Generic[SignalType]):
     _migration_processor: MigrationProcessorBase | None
     _population: dict[str, np.float64]
     _result: ProcessorResult
+    _last_iteration: int = -1
 
     _excluded_attributes: tuple[str, ...] = (
         "_migration_signal",
@@ -220,8 +221,9 @@ class ProcessorBase(ABC, Generic[SignalType]):
         prevents an omitted orchestration parameter from being silently replaced by
         an internal default.
         """
-        self._algorithm = algorithm
+        self._algorithm: AlgorithmBase[ParticleBase] = algorithm
         self._n_iter = n_iter
+        self._last_iteration = -1
         self._n_particles = n_particles
 
         if fitness_failure_strategy not in ("invalidate", "raise"):
@@ -303,11 +305,15 @@ class ProcessorBase(ABC, Generic[SignalType]):
     def result(self) -> ProcessorResult:
         return self._result
 
+    @property
+    def stopped_after_iteration(self) -> bool:
+        return self._last_iteration >= 0 and self._algorithm.force_stop
+
     def set_identifier(self, identifier: str) -> None:
         self._identifier = identifier
 
     def init_particles(self) -> None:
-        if len(self._algorithm.population) > 0:
+        if self._last_iteration >= 0 or len(self._algorithm.population) > 0:
             return
 
         for p_idx in range(self._n_particles):
@@ -524,18 +530,31 @@ class ProcessorBase(ABC, Generic[SignalType]):
                 )
             )
 
+    def _iterations(self) -> Generator[int, None, None]:
+        if not self._algorithm.force_stop:
+            horizon = max(0, self._last_iteration) + self._n_iter
+            self._algorithm.set_max_iterations(horizon)
+            for actual_iter in range(self._last_iteration + 1, horizon + 1):
+                if self._algorithm.force_stop:
+                    break
+                with self._result.record_iteration():
+                    yield actual_iter
+                self._last_iteration = actual_iter
+
+        self.retire_migration()
+
     @abstractmethod
     def run(self) -> None:
         """
         Execute the algorithm iterations.
 
-        Valid algorithm iterations run with ``actual_iter`` from 0 through
-        ``self._n_iter``, inclusive. Iteration 0 represents the initial execution
-        required to establish the initial states of the algorithm and its particles
-        and does not represent an actual optimization iteration.
+        The first run covers 0 through ``self._n_iter``, inclusive. Subsequent
+        runs continue with the next ``self._n_iter`` iterations. Iteration 0
+        establishes the initial states of the algorithm and its particles and
+        does not represent an actual optimization iteration.
 
         The processor owns the loop. Its concrete implementations include one
-        additional terminal pass at ``actual_iter == self._n_iter + 1``. This pass
+        additional terminal pass after the last scheduled iteration. This pass
         is not an algorithm iteration and exists only to retire migration after the
         ordinary iteration budget has been exhausted.
 
@@ -544,10 +563,9 @@ class ProcessorBase(ABC, Generic[SignalType]):
         and whether the terminal pass has been reached. If either condition is true,
         it retires the local migration module and exits the loop. This prevents a
         force-stop request from starting an additional iteration while still allowing
-        the final scheduled iteration, ``actual_iter == self._n_iter``, to complete
-        fully. Retirement must finish before ``finalize_loop_context`` releases the
-        shared signal. Exceptional exits still finalize resources but do not claim
-        successful retirement.
+        the final scheduled iteration to complete fully. Retirement must finish
+        before ``finalize_loop_context`` releases the shared signal. Exceptional
+        exits still finalize resources but do not claim successful retirement.
 
         Before processing each iteration, the processor must call
         `migration_control` to allow the migration processor to enforce its

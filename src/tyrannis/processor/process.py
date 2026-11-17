@@ -238,6 +238,7 @@ class ProcessPool(ProcessorBase[PoolSignal]):
 
         context = get_context(self._multiprocessing_context)
 
+        iterations = self._iterations()
         try:
             with context.Manager() as manager:
                 try:
@@ -248,13 +249,7 @@ class ProcessPool(ProcessorBase[PoolSignal]):
                         processes=self._n_process,
                         maxtasksperchild=self._maxtasksperchild,
                     ) as pool:
-                        for actual_iter in range(self._n_iter + 2):
-                            if self._algorithm.force_stop or (
-                                actual_iter == self._n_iter + 1
-                            ):
-                                self.retire_migration()
-                                break
-
+                        for actual_iter in iterations:
                             self.migration_control(actual_iter)
 
                             self._algorithm.pre_iteration(actual_iter)
@@ -377,4 +372,5 @@ class ProcessPool(ProcessorBase[PoolSignal]):
                 finally:
                     migration_signal.clear_manager_signal()
         finally:
+            iterations.close()
             self.finalize_loop_context()

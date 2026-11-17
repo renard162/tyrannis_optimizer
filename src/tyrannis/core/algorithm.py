@@ -346,6 +346,10 @@ class AlgorithmBase(ABC, Generic[ParticleType]):
         # The actual value is updated dynamically after the migration step.
         self._n_particles: int = n_particles
 
+    def set_max_iterations(self, n_iter: int) -> None:
+        """Set the horizon for adaptive parameters in the current context."""
+        self._max_iterations = n_iter
+
     def configure(
         self,
         identifier: str,

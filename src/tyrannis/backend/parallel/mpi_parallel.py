@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from contextlib import closing
 from typing import TYPE_CHECKING, cast
 
 import cloudpickle
@@ -162,9 +163,14 @@ class MPIParallel(ParallelBackendBase):
 
     def execute(self) -> None:
         """Execute iterations, checking local force stop before each iteration starts."""
+        if self._last_iteration >= 0 and self._algorithm.force_stop:
+            return
         self.init_particles()
 
-        with self._executor_class() as executor:
+        with (
+            self._executor_class() as executor,
+            closing(self._iterations()) as iterations,
+        ):
             executor.bootup(wait=True)
 
             if executor.num_workers <= 0:
@@ -179,10 +185,7 @@ class MPIParallel(ParallelBackendBase):
                 pre_dispatch=cast(str, self._aux_pre_dispatch),
                 return_as="list",
             ) as parallel:
-                for actual_iter in range(self._n_iter + 1):
-                    if self._algorithm.force_stop:
-                        break
-
+                for actual_iter in iterations:
                     self._algorithm.pre_iteration(actual_iter)
                     self.pre_iteration_log(actual_iter)
 

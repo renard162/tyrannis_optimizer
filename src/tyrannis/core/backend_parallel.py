@@ -1,6 +1,6 @@
 import json
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Generator, Iterable
 
 from ..core.backend_migration import MigrationDriverBase
 from ..core.processor import ProcessorBase
@@ -94,6 +94,8 @@ class ParallelBackendBase(BackendBase, ABC):
     field is populated dynamically by the logging methods during execution.
     """
 
+    _algorithm: AlgorithmBase[ParticleBase]
+
     def initialize_context(
         self,
         algorithm: AlgorithmBase,
@@ -127,11 +129,26 @@ class ParallelBackendBase(BackendBase, ABC):
             history_config=history_config,
         )
 
+        self._last_iteration: int = -1
+
+    def _iterations(self) -> Generator[int, None, None]:
+        if self._algorithm.force_stop:
+            return
+        horizon = max(0, self._last_iteration) + self._n_iter
+        self._algorithm.set_max_iterations(horizon)
+        for actual_iter in range(self._last_iteration + 1, horizon + 1):
+            if self._algorithm.force_stop:
+                break
+            with self._result.record_iteration():
+                yield actual_iter
+            self._last_iteration = actual_iter
+
     def init_particles(self) -> None:
         """
         Create the initial population for the single optimization island.
 
-        If the algorithm already contains particles, no particles are created.
+        If execution has started or the algorithm already contains particles,
+        no particles are created.
         Otherwise, exactly `_n_particles` particles are created and registered
         in the algorithm.
 
@@ -139,7 +156,7 @@ class ParallelBackendBase(BackendBase, ABC):
         including the evaluation or establishment of their initial state, is
         performed later through the normal algorithm lifecycle.
         """
-        if self._algorithm.population:
+        if self._last_iteration >= 0 or self._algorithm.population:
             return
 
         for p_idx in range(self._n_particles):

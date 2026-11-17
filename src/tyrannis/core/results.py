@@ -1,3 +1,5 @@
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
@@ -48,3 +50,15 @@ class HistoryConfig:
 class ProcessorResult:
     result: dict[str, Any] | None = None
     history: list[str] = field(default_factory=list)
+
+    @contextmanager
+    def record_iteration(self) -> Generator[None, None, None]:
+        """Publish the best and history together when an iteration completes."""
+        best = self.result
+        history_size = len(self.history)
+        try:
+            yield
+        except BaseException:
+            self.result = best
+            del self.history[history_size:]
+            raise

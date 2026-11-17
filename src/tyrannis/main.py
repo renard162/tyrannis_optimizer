@@ -4,13 +4,14 @@ import json
 from collections.abc import Iterator
 from csv import writer
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 
 from .backend.local import Local
 from .core.algorithm import AlgorithmBase
 from .core.backend import BackendBase
+from .core.backend_distributed import DistributedBackendBase
 from .core.backend_migration import MigrationDriverBase
 from .core.processor import ProcessorBase
 from .core.results import HistoryConfig
@@ -65,7 +66,7 @@ class Optimizer:
             Optimization algorithm used to search for the best solution.
 
         n_iterations:
-            Number of iterations performed by the optimization. Must be an integer
+            Number of optimization iterations per call to `fit`. Must be an integer
             greater than or equal to 1.
 
         n_particles:
@@ -308,6 +309,7 @@ class Optimizer:
         self._seed = seed
         self._fitness_failure_strategy = fitness_failure_strategy
         self._result = None
+        self._fit_state: Literal["new", "unfinished", "completed"] = "new"
         self._history_config = self._configure_particle_history(history)
 
         self._space.initialize_context(
@@ -437,17 +439,31 @@ class Optimizer:
         }
 
     def fit(self) -> Optimizer:
-        """Execute the optimization and return the optimizer instance."""
+        """Execute the optimization and return the optimizer instance.
 
-        self._backend.execute()
+        Local and parallel executions continue from the last completed iteration.
+        Iteration zero prepares the population only on the first call. A force
+        stop remains active on later calls. Distributed execution supports one
+        successful call. An execution interrupted by an exception requires a
+        new optimizer.
+        """
+        if self._fit_state == "unfinished":
+            raise RuntimeError(
+                "Cannot resume an interrupted fit. Create a new Optimizer."
+            )
+        if self._fit_state == "completed" and isinstance(
+            self._backend, DistributedBackendBase
+        ):
+            raise RuntimeError(
+                "Repeated fit() calls are supported only for local and parallel backends."
+            )
 
-        backend_result = self._backend.result
-
-        if backend_result is None:
-            self._result = None
-            return self
-
-        self._result = backend_result
+        self._fit_state = "unfinished"
+        try:
+            self._backend.execute()
+        finally:
+            self._result = self._backend.result
+        self._fit_state = "completed"
 
         return self
 
