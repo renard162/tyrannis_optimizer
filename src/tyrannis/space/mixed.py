@@ -2,6 +2,8 @@ import json
 from collections.abc import Callable
 from typing import Any
 
+# Shared with ParticleBase.update, private to the evaluation path.
+from ..core.algorithm import _particle_identifier  # pyright: ignore[reportPrivateUsage]
 from ..core.space import SpaceBase
 from . import get_space_class
 
@@ -13,6 +15,7 @@ class Mixed(SpaceBase):
     _spaces: list[SpaceBase]
     _space_variables: list[list[str]]
     _space_encoded_variables: list[list[str]]
+    _particle_identifier_as_argument: bool = False
 
     def __init__(
         self,
@@ -21,6 +24,7 @@ class Mixed(SpaceBase):
         use_cache: bool = False,
         cache_type: str = "lru",
         cache_size: int = 100_000,
+        particle_identifier_as_argument: bool = False,
     ) -> None:
         """
         Initialize the user-facing mixed search space.
@@ -76,6 +80,13 @@ class Mixed(SpaceBase):
             number of cached records. This parameter has no effect when
             ``cache_type="disk"``.
 
+        particle_identifier_as_argument:
+            When enabled, pass the evaluating particle's identifier to the cost
+            function as the keyword argument ``particle_identifier``. This name
+            is then reserved in ``spaces``. Only optimized variables form the
+            cache key, so a cache hit reuses the result across particles.
+            Calling the cost function with this option requires a particle context.
+
         Examples
         --------
         >>> space = Mixed(
@@ -97,6 +108,11 @@ class Mixed(SpaceBase):
             cache_size=cache_size,
         )
 
+        if particle_identifier_as_argument and "particle_identifier" in spaces:
+            raise ValueError(
+                "'particle_identifier' is reserved when particle_identifier_as_argument=True."
+            )
+        self._particle_identifier_as_argument = particle_identifier_as_argument
         self._boundaries = []
         self._encoded_boundaries = {}
         self._is_kwargs = True
@@ -199,6 +215,12 @@ class Mixed(SpaceBase):
             decoded.update(space.decode(space_inputs))
 
         return decoded
+
+    # typing.override is unavailable on supported Python 3.11.
+    def _evaluate(self, inputs: dict[str, object]) -> float:  # pyright: ignore[reportImplicitOverride]
+        if self._particle_identifier_as_argument:
+            inputs = {**inputs, "particle_identifier": _particle_identifier.get()}
+        return super()._evaluate(inputs)
 
     def encode_cache(self, inputs: dict[str, Any]) -> tuple[Any, ...]:
         encoded = tuple(

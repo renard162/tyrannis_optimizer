@@ -1,6 +1,7 @@
 import json
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Mapping
+from contextvars import ContextVar
 from copy import deepcopy
 from typing import Any, Generic, TypeAlias, TypeVar
 
@@ -19,6 +20,7 @@ Serializable: TypeAlias = (
 )
 
 FITNESS_UNDEFINED: np.float64 = np.float64(np.inf)
+_particle_identifier = ContextVar[str]("particle_identifier")
 
 
 class CostFunctionWrapperBase(ABC):
@@ -202,7 +204,11 @@ class ParticleBase(ABC):
         self._candidate_variables = None
         self._candidate_fitness = None
         self._candidate_variables = variables
-        self._candidate_fitness = fitness_function(variables)
+        token = _particle_identifier.set(self._identifier)
+        try:
+            self._candidate_fitness = fitness_function(variables)
+        finally:
+            _particle_identifier.reset(token)
 
     def consolidate(self, consolidate_new: bool) -> None:
         if (self._candidate_variables is None) or (self._candidate_fitness is None):
