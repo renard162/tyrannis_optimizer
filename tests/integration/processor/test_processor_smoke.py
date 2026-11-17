@@ -6,20 +6,20 @@ from copy import deepcopy
 from functools import partial
 
 import pytest
-
-import tyrannis.processor as processor_module
-from tests._support.assertions import (
+from _support.assertions import (
     assert_optimizer_result_consistent,
     assert_variables_within_bounds,
 )
 
 # The shared factory's AlgorithmBase annotation omits its type parameter.
-from tests._support.factories import (
+from _support.factories import (
     make_optimizer,  # pyright: ignore[reportUnknownVariableType]
 )
-from tests._support.integration_probe import IntegrationProbeAlgorithm
-from tests._support.numerics import BASE_SEED
-from tests._support.objectives import sphere
+from _support.integration_probe import IntegrationProbeAlgorithm
+from _support.numerics import BASE_SEED
+from _support.objectives import sphere
+
+import tyrannis.processor as processor_module
 from tyrannis import Optimizer
 from tyrannis.backend.local import Local
 from tyrannis.core.algorithm import Serializable

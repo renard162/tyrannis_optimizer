@@ -4,11 +4,11 @@ from collections import Counter
 from math import inf
 
 import pytest
+from _support.assertions import assert_optimizer_result_consistent
+from _support.integration_probe import IntegrationProbeAlgorithm
+from _support.numerics import BASE_SEED
+from _support.objectives import fails_for_positive, sphere
 
-from tests._support.assertions import assert_optimizer_result_consistent
-from tests._support.integration_probe import IntegrationProbeAlgorithm
-from tests._support.numerics import BASE_SEED
-from tests._support.objectives import fails_for_positive, sphere
 from tyrannis import Optimizer
 from tyrannis.core.results import HistoryConfig
 from tyrannis.space.continuous import Continuous
