@@ -318,3 +318,46 @@ def test_continuous_positional_smoke() -> None:
     assert isinstance(solution, list)
     assert len(solution) == 2
     assert objective(*solution) == optimizer.best_fitness
+
+
+def test_mixed_preserves_particle_identifiers_through_fit() -> None:
+    evaluations: dict[str, list[dict[str, object]]] = {}
+
+    def objective(
+        *, x: object, count: object, color: object, particle_identifier: str
+    ) -> float:
+        fitness = _mixed_cost(x=x, count=count, color=color)
+        evaluations.setdefault(particle_identifier, []).append(
+            {"x": x, "count": count, "color": color}
+        )
+        return fitness
+
+    space = space_module.Mixed(
+        spaces={
+            "x": space_module.Continuous(CONTINUOUS_BOUNDS.copy()),
+            "count": space_module.Integer(INTEGER_BOUNDS.copy()),
+            "color": space_module.Categorical(COLORS),
+        },
+        cost_function=objective,
+        particle_identifier_as_argument=True,
+        use_cache=False,
+    )
+    optimizer = _run_smoke(space)
+
+    expected: dict[str, list[dict[str, object]]] = {}
+    for values in optimizer.internal_history_generator_:
+        row: dict[str, object] = dict(
+            zip(optimizer.internal_history_columns_, values, strict=True)
+        )
+        identifier = row["identifier"]
+        assert isinstance(identifier, str)
+        variables: dict[str, float] = {}
+        for name in space.encoded_boundaries:
+            value = row[name]
+            assert isinstance(value, float)
+            variables[name] = value
+        decoded: dict[str, object] = space.decode(variables)
+        expected.setdefault(identifier, []).append(decoded)
+        assert row["fitness"] == _mixed_cost(**decoded)
+
+    assert evaluations == expected

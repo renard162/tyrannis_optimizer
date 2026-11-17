@@ -3,6 +3,7 @@ from typing import Protocol
 import numpy as np
 import pytest
 
+from tests._support.integration_probe import IntegrationProbeParticle
 from tests._support.numerics import STRICT_ATOL, STRICT_RTOL, seed_for
 from tests._support.objectives import CountingObjective, constant_objective
 from tyrannis.space import Binary, Categorical, Continuous, Integer, Mixed
@@ -182,6 +183,37 @@ def test_mixed_decode_rejects_missing_encoded_variable() -> None:
 
     with pytest.raises(Exception):  # noqa: B017
         _ = space.decode({"position": 0.0})
+
+
+def test_mixed_forwards_particle_identifier_and_shares_cached_fitness() -> None:
+    evaluations: list[tuple[int, str]] = []
+
+    def objective(*, count: int, particle_identifier: str) -> float:
+        assert isinstance(count, int)
+        evaluations.append((count, particle_identifier))
+        return float(count)
+
+    space = Mixed(
+        spaces={"count": Integer([(0, 4)])},
+        cost_function=objective,
+        particle_identifier_as_argument=True,
+        use_cache=True,
+    )
+    space.initialize_context(seed=seed_for(509))
+    variables = {"count": 1.2}
+    first = IntegrationProbeParticle("first", variables)
+    second = IntegrationProbeParticle("second", variables)
+
+    first.update(variables, space)
+    second.update(variables, space)
+
+    assert evaluations == [(1, first.identifier)]
+    assert first.candidate_fitness == second.candidate_fitness == 1.0
+    with pytest.raises(
+        RuntimeError,
+        match=r"No particle identifier is available for this evaluation\.",
+    ):
+        _ = space({"count": 2.2})
 
 
 def test_mixed_decode_rejects_unrecognized_encoded_variable() -> None:
