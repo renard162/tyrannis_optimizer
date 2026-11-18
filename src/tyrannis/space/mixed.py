@@ -1,6 +1,6 @@
 import json
 from collections.abc import Callable
-from typing import Any
+from typing import Any, override
 
 from ..core.algorithm import particle_identifier_context
 from ..core.space import SpaceBase
@@ -225,8 +225,8 @@ class Mixed(SpaceBase):
 
         return decoded
 
-    # typing.override is unavailable on supported Python 3.11.
-    def _evaluate(self, inputs: dict[str, object]) -> float:  # pyright: ignore[reportImplicitOverride]
+    @override
+    def _evaluate(self, inputs: dict[str, object]) -> float:
         if self._particle_identifier_as_argument:
             try:
                 particle_identifier = particle_identifier_context.get()
