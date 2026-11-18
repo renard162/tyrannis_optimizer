@@ -145,6 +145,9 @@ target-version = "py312"
 line-length = 88
 indent-width = 4
 
+[tool.ruff.lint]
+extend-ignore = ["UP040", "UP046"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
