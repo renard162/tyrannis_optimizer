@@ -1,0 +1,253 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.13.5"
+
+jobs:
+  static-quality:
+    name: Static Quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: static-quality
+      - name: Install dependencies
+        run: uv sync --locked --all-extras --dev
+      - name: Ruff lint
+        run: uv run --no-sync ruff check .
+      - name: Ruff format
+        run: uv run --no-sync ruff format --check .
+      - name: Type check
+        run: uv run --no-sync basedpyright --pythonpath .venv/bin/python
+      # Hidden directories are not necessarily discovered by the static tools.
+      - name: Check CI helpers
+        run: |
+          uv run --no-sync ruff check .github/scripts
+          uv run --no-sync ruff format --check .github/scripts
+          uv run --no-sync basedpyright --pythonpath .venv/bin/python .github/scripts
+
+  core-tests:
+    name: Core Tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            python: "3.11"
+          - os: ubuntu-24.04
+            python: "3.12"
+          - os: ubuntu-24.04
+            python: "3.13"
+          - os: ubuntu-24.04
+            python: "3.14"
+          - os: windows-2025
+            python: "3.12"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: core-tests
+      - name: Install dependencies
+        run: uv sync --locked --dev
+      - name: Run all non-optional tests
+        run: uv run --no-sync pytest -m "not optional"
+
+  cache-tests:
+    name: Cache Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: cache-tests
+      - name: Install dependencies
+        run: uv sync --locked --dev --extra cache
+      - name: Run optional cache tests
+        id: tests
+        run: >-
+          uv run --no-sync pytest tests/unit/core/test_space.py -m optional
+          --junitxml=reports/cache.xml
+      - name: Require executed tests without skips
+        if: ${{ always() && steps.tests.outcome != 'skipped' }}
+        run: uv run --no-sync python .github/scripts/check_junit.py reports/cache.xml
+
+  spark-tests:
+    name: Spark Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: spark-tests
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install dependencies
+        run: uv sync --locked --dev --extra spark
+      - name: Run Spark unit and local integration tests
+        id: tests
+        env:
+          PYSPARK_PYTHON: ${{ github.workspace }}/.venv/bin/python
+        run: >-
+          uv run --no-sync pytest
+          tests/unit/backend/test_spark_parallel.py
+          tests/unit/backend/test_spark_distributed.py
+          tests/integration/backend/test_spark_parallel.py
+          tests/integration/backend/test_spark_distributed.py
+          --junitxml=reports/spark.xml
+      - name: Require executed tests without skips
+        if: ${{ always() && steps.tests.outcome != 'skipped' }}
+        run: uv run --no-sync python .github/scripts/check_junit.py reports/spark.xml
+
+  mpi-tests:
+    name: MPI Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # The integration tests launch three ranks even on two-core runners.
+      OMPI_MCA_rmaps_base_oversubscribe: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: mpi-tests
+      - name: Install OpenMPI runtime and development libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends openmpi-bin libopenmpi-dev
+      - name: Install dependencies
+        run: uv sync --locked --dev --extra mpi
+      - name: Require MPI thread support
+        run: |
+          uv run --no-sync python - <<'PY'
+          from mpi4py import MPI
+
+          print(MPI.Get_library_version())
+          if MPI.Query_thread() < MPI.THREAD_MULTIPLE:
+              raise SystemExit("MPIDistributed requires MPI_THREAD_MULTIPLE")
+          PY
+      - name: Run real MPI integration tests
+        id: tests
+        run: >-
+          uv run --no-sync pytest
+          tests/integration/backend/test_mpi_parallel.py
+          tests/integration/backend/test_mpi_distributed.py
+          --junitxml=reports/mpi.xml
+      - name: Require executed tests without skips
+        if: ${{ always() && steps.tests.outcome != 'skipped' }}
+        run: uv run --no-sync python .github/scripts/check_junit.py reports/mpi.xml
+
+  package-build:
+    name: Package Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: package-build
+      - name: Validate locked base dependencies
+        run: uv sync --locked --no-dev
+      - name: Build wheel and sdist
+        run: uv build
+      - name: Verify artifacts and metadata
+        shell: bash
+        run: |
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          sdists=(dist/*.tar.gz)
+          test "${#wheels[@]}" -eq 1
+          test "${#sdists[@]}" -eq 1
+          uvx --from twine==6.2.0 twine check --strict "${wheels[0]}" "${sdists[0]}"
+      - name: Install and smoke test both distributions independently
+        shell: bash
+        run: |
+          smoke_dir="$(mktemp -d "$RUNNER_TEMP/tyrannis-package.XXXXXX")"
+          cp .github/scripts/smoke_package.py "$smoke_dir/smoke_package.py"
+          wheels=("$GITHUB_WORKSPACE"/dist/*.whl)
+          sdists=("$GITHUB_WORKSPACE"/dist/*.tar.gz)
+          cd "$smoke_dir"
+          unset PYTHONPATH
+          for artifact in "${wheels[0]}" "${sdists[0]}"; do
+            environment="$smoke_dir/$(basename "$artifact").venv"
+            uv venv --python 3.12 "$environment"
+            uv pip install --python "$environment/bin/python" "$artifact"
+            "$environment/bin/python" -I "$smoke_dir/smoke_package.py"
+          done
+
+  ci-gate:
+    name: CI Gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    needs:
+      - static-quality
+      - core-tests
+      - cache-tests
+      - spark-tests
+      - mpi-tests
+      - package-build
+    if: ${{ always() }}
+    steps:
+      - name: Require every job and matrix combination to succeed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          printf '%s\n' "$NEEDS_JSON" | jq .
+          printf '%s\n' "$NEEDS_JSON" | jq --exit-status \
+            'length == 6 and all(.[]; .result == "success")'
