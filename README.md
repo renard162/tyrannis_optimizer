@@ -134,8 +134,7 @@ def cost_function(x, y):
 
 
 space = Continuous(
-    boundaries={"x": (-10, 10), "y": (-10, 10)},
-    cost_function=cost_function
+    boundaries={"x": (-10, 10), "y": (-10, 10)}, cost_function=cost_function
 )
 
 algorithm = PSO()
@@ -144,7 +143,7 @@ optimizer = Optimizer(
     space=space,
     algorithm=algorithm,
     n_iterations=100,
-    n_particles=50
+    n_particles=50,
 )
 
 optimizer.fit()
@@ -179,9 +178,9 @@ def cost_function(x, category):
 space = Mixed(
     spaces={
         "x": Continuous((-5.0, 5.0)),
-        "category": Categorical(("low", "medium", "high"))
+        "category": Categorical(("low", "medium", "high")),
     },
-    cost_function=cost_function
+    cost_function=cost_function,
 )
 
 algorithm = BeeColony()
@@ -192,7 +191,7 @@ optimizer = Optimizer(
     algorithm=algorithm,
     processor=processor,
     n_iterations=100,
-    n_particles=50
+    n_particles=50,
 )
 
 optimizer.fit()
@@ -220,7 +219,7 @@ optimizer = Optimizer(
     algorithm=algorithm,
     n_iterations=50,
     n_particles=300,
-    backend=backend
+    backend=backend,
 )
 ```
 
@@ -236,7 +235,7 @@ optimizer = Optimizer(
     algorithm=algorithm,
     n_iterations=300,
     n_particles=50,
-    backend=backend
+    backend=backend,
 )
 ```
 

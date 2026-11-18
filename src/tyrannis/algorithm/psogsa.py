@@ -398,7 +398,7 @@ class PSOGSA(AlgorithmBase[PSOGSAParticle]):
                     dtype=float,
                 ),
                 ord=self._r_norm,
-                check_finite=False
+                check_finite=False,
             )
 
             denominator = distance**self._r_power + epsilon

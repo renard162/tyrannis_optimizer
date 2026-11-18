@@ -50,7 +50,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         bge_alpha_mu: float = 1.0,
         bge_alpha_w: float | None = None,
         sdr_avs_eta_decay: float = 0.9,
-        sdr_avs_threshold: float = 1.0
+        sdr_avs_threshold: float = 1.0,
     ) -> None:
         """
         Estimation of Gaussian Networks Algorithm (EGNA).
@@ -604,7 +604,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
 
     @staticmethod
     def _adjacency_from_parents(
-        parents: list[set[int]] | tuple[tuple[int, ...], ...]
+        parents: list[set[int]] | tuple[tuple[int, ...], ...],
     ) -> np.ndarray[tuple[int, ...], np.dtype[np.uint8]]:
         n_variables = len(parents)
         adjacency = np.zeros((n_variables, n_variables), dtype=np.uint8)
@@ -662,7 +662,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
                 y,
                 cond=np.finfo(float).eps * max(design.shape),
                 lapack_driver="gelsd",
-                check_finite=False
+                check_finite=False,
             )
             # SciPy's untyped dispatcher includes None; gelsd returns four values.
             coefficients, _, _, _ = cast(
@@ -994,7 +994,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
                     centered_y,
                     cond=np.finfo(float).eps * max(centered_parents.shape),
                     lapack_driver="gelsd",
-                    check_finite=False
+                    check_finite=False,
                 )
                 # SciPy's untyped dispatcher includes None; gelsd returns four values.
                 coefficients, _, _, _ = cast(
@@ -1055,7 +1055,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
                         covariance[np.ix_(adjacent, adjacent)],
                         empirical[list(adjacent), node],
                         assume_a="pos",
-                        check_finite=False
+                        check_finite=False,
                     )
                     column = covariance[np.ix_(other, adjacent)] @ coefficients
                 else:
@@ -1083,14 +1083,14 @@ class EGNA(AlgorithmBase[EGNAParticle]):
                 covariance[:variable, :variable],
                 covariance[:variable, variable],
                 assume_a="pos",
-                check_finite=False
+                check_finite=False,
             )
             # NumPy scalar indexing/matmul erases the known float64 scalar dtype.
             variance = float(
                 cast(
                     np.float64,
                     covariance[variable, variable]
-                    - covariance[variable, :variable] @ coefficients
+                    - covariance[variable, :variable] @ coefficients,
                 )
             )
             if variance <= 0 or not np.isfinite(variance):
@@ -1104,7 +1104,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
                     mean=means.item(variable),
                     parent_means=means[:variable].copy(),
                     coefficients=coefficients,
-                    standard_deviation=float(np.sqrt(variance))
+                    standard_deviation=float(np.sqrt(variance)),
                 )
             )
         return tuple(conditionals)
@@ -1206,7 +1206,7 @@ class EGNA(AlgorithmBase[EGNAParticle]):
         previous_model_covariance: _FloatArray,
         population_mean: _FloatArray,
         population_covariance: _FloatArray,
-        current_model_mean: _FloatArray
+        current_model_mean: _FloatArray,
     ) -> float:
         dimension = len(previous_model_mean)
         population_shift = previous_model_mean - population_mean
