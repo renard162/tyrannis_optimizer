@@ -139,3 +139,15 @@ branch = true
 
 [tool.basedpyright]
 extraPaths = ["src", "tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+indent-width = 4
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+docstring-code-format = false
+skip-magic-trailing-comma = true
