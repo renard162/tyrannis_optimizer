@@ -144,7 +144,14 @@ addopts = "--import-mode=importlib"
 branch = true
 
 [tool.basedpyright]
+include = ["src", "tests", ".github/scripts"]
+# Keep CI helpers visible instead of applying the default **/.* exclusion.
+exclude = ["**/node_modules", "**/__pycache__", "**/__editable__.*"]
 extraPaths = ["src", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "recommended"
+failOnWarnings = false
+baselineFile = ".basedpyright/baseline.json"
 
 [tool.ruff]
 target-version = "py312"

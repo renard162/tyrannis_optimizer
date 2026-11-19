@@ -39,13 +39,12 @@ jobs:
       - name: Ruff format
         run: uv run --no-sync ruff format --check .
       - name: Type check
-        run: uv run --no-sync basedpyright --pythonpath .venv/bin/python
+        run: uv run --no-sync basedpyright --pythonpath .venv/bin/python --baselinemode=lock
       # Hidden directories are not necessarily discovered by the static tools.
       - name: Check CI helpers
         run: |
           uv run --no-sync ruff check .github/scripts
           uv run --no-sync ruff format --check .github/scripts
-          uv run --no-sync basedpyright --pythonpath .venv/bin/python .github/scripts
 
   core-tests:
     name: Core Tests (${{ matrix.os }}, Python ${{ matrix.python }})
