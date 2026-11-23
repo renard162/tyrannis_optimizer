@@ -1,6 +1,6 @@
 [project]
 name = "tyrannis"
-version = "0.1.0a6"
+version = "1.0.0"
 description = "Flexible population-based metaheuristic optimization framework supporting diverse search spaces, parallel and distributed execution, and island-model migration."
 readme = "README.md"
 license = "BSD-3-Clause"
@@ -10,7 +10,7 @@ authors = [
 ]
 
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "Operating System :: OS Independent",
@@ -31,34 +31,38 @@ keywords = [
     "derivative-free optimization",
     "stochastic optimization",
     "population-based optimization",
-    "particle-based optimization",
     "evolutionary computation",
     "swarm intelligence",
-    "estimation of distribution algorithms",
+    "combinatorial optimization",
     "estimation of distribution algorithms",
     "EDA",
     "particle swarm optimization",
     "PSO",
-    "differential evolution",
-    "DE",
-    "genetic algorithm",
-    "GA",
-    "CMA-ES",
-    "artificial bee colony",
-    "ABC",
-    "ant colony optimization",
-    "ACOR",
     "gravitational search algorithm",
     "GSA",
+    "particle swarm optimization and gravitational search algorithm",
+    "PSOGSA",
+    "ant colony optimization for continuous domains",
+    "ACOR",
+    "artificial bee colony",
+    "ABC",
     "grey wolf optimization",
     "GWO",
     "whale optimization algorithm",
     "WOA",
+    "genetic algorithm",
+    "GA",
+    "differential evolution",
+    "DE",
+    "covariance matrix adaptation evolution strategy",
+    "CMA-ES",
+    "estimation of gaussian networks algorithm",
+    "EGNA",
     "continuous optimization",
     "integer optimization",
     "binary optimization",
     "categorical optimization",
-    "ordinal optimization",
+    "ordinal-variable optimization",
     "permutation optimization",
     "sequence optimization",
     "mixed-variable optimization",
