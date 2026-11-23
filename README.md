@@ -4,6 +4,8 @@
 
 Tyrannis is a Python framework for solving optimization problems with population-based metaheuristic algorithms while keeping the problem definition independent from the execution strategy. Define your search space, choose an optimization algorithm, and select whether to execute it locally, in parallel, or in a distributed environment. Tyrannis also provides support for mixed-variable optimization, allowing continuous, integer, binary, categorical, and permutation variables to coexist in the same problem.
 
+<br>
+
 ## Installation
 
 ### Basic installation
@@ -15,6 +17,7 @@ pip install tyrannis
 ```
 
 The base installation includes the core optimization framework, local execution, and the basic LRU and disk caching mechanisms.
+
 
 ### Optional features
 
@@ -33,6 +36,8 @@ pip install "tyrannis[cache,spark,mpi]"
 ```
 
 The `spark` and `mpi` extras install the Python dependencies required by their respective backends. A compatible Spark or MPI runtime and execution infrastructure must also be available in the environment where those backends are used.
+
+<br>
 
 ## Public API
 
@@ -58,6 +63,7 @@ Algorithms are population-based metaheuristics used to search for a minimum with
 | `CMAES`     | Covariance Matrix Adaptation Evolution Strategy for continuous optimization. [14, 15] | Evolutionary Algorithm |
 | `EGNA` | Estimation of Gaussian Networks Algorithm, a multivariate continuous Estimation of Distribution Algorithm that learns and samples Gaussian Bayesian networks. [16, 17] | Estimation of Distribution Algorithm |
 
+
 ### Spaces
 
 `tyrannis.space`
@@ -75,6 +81,7 @@ Spaces define the search domain, including the variables, their bounds or availa
 | `Sequence` | Variable-length ordered sequences selected from a finite set of choices, with repetition allowed and categorical or ordinal decoding. |
 | `Mixed` | Composition of multiple spaces, allowing heterogeneous variable types in the same optimization problem. |
 
+
 ### Processors
 
 `tyrannis.processor`
@@ -88,6 +95,7 @@ Processors define how the optimization loop is executed within each machine or e
 | `ThreadsPool` | Executes particle processing in parallel using a pool of threads. |
 
 When no processor is provided, `Optimizer` uses its internal serial processor. This keeps the default execution sequential while allowing parallel particle evaluation to be enabled explicitly.
+
 
 ### Backends
 
@@ -104,6 +112,7 @@ Backends define how optimization execution is organized across machines and, for
 
 When no backend is provided, `Optimizer` uses the local backend and executes the optimization on a single machine.
 
+
 ### Migrations
 
 `tyrannis.migration`
@@ -117,9 +126,11 @@ Migration strategies define how solutions are exchanged between optimization isl
 
 When no migration strategy is provided for an island-based backend, the islands remain isolated and do not exchange solutions.
 
+<br>
+
 ## Usage
 
-Run each example independently. Unless redefined, the examples reuse the imports and problem definition from the basic example.
+The examples reuse imports and definitions from the basic example unless otherwise specified.
 
 ### Basic optimization
 
@@ -153,16 +164,23 @@ print(optimizer.best_solution)
 print(optimizer.best_fitness)
 ```
 
+---
+
 #### Non-continuous search space
 
-Replace `Continuous` with another space type, such as `Integer`, to optimize discrete variables.
+Use `Permutation` to optimize the ordering of a set of choices. The cost function receives the decoded ordering as a list.
 
 ```python
-from tyrannis.space import Integer
+from tyrannis.space import Permutation
 
-space = Integer(
-    boundaries={"x": (0, 10), "y": (0, 10)},
-    cost_function=cost_function
+
+def permutation_cost_function(order):
+    return sum(abs(a - b) for a, b in zip(order, order[1:]))
+
+
+space = Permutation(
+    choices=(1, 2, 3, 4, 5),
+    cost_function=permutation_cost_function,
 )
 
 optimizer = Optimizer(
@@ -175,23 +193,55 @@ optimizer = Optimizer(
 optimizer.fit()
 ```
 
-#### Mixed search space
+---
 
-Use `Mixed` to combine different types of variables in one optimization problem.
+#### Binary search space
+
+`Binary(bits=32)` represents 32 independent Boolean decisions. The decoded solution is a list of Boolean values, which Tyrannis unpacks into positional arguments when calling the cost function. The `*selected` parameter collects these arguments into a tuple named `selected`. This example selects eight options while maximizing their combined value.
 
 ```python
-from tyrannis.space import Categorical, Continuous, Mixed
+from tyrannis.space import Binary
 
 
-def mixed_cost_function(x, category):
+def selection_cost(*selected):
+    benefit = sum(index for index, chosen in enumerate(selected, start=1) if chosen)
+    return 100 * abs(sum(selected) - 8) - benefit
+
+
+space = Binary(bits=32, cost_function=selection_cost)
+
+optimizer = Optimizer(
+    space=space,
+    algorithm=PSO(),
+    n_iterations=100,
+    n_particles=50,
+)
+
+optimizer.fit()
+```
+
+---
+
+#### Mixed search space
+
+Use `Mixed` to combine continuous, categorical, and binary variables. Each variable has its own search-space type and independently defined bounds or available values. The cost function receives the named variables as keyword arguments.
+
+```python
+from tyrannis.space import Binary, Categorical, Continuous, Mixed
+
+
+def mixed_cost_function(x, category, option_a, option_b):
     targets = {"low": 0.0, "medium": 1.0, "high": 2.0}
-    return (x - targets[category]) ** 2
+    target = targets[category] + option_a - option_b
+    return (x - target) ** 2 + 0.1 * (option_a + option_b)
 
 
 space = Mixed(
     spaces={
         "x": Continuous((-5.0, 5.0)),
-        "category": Categorical(("low", "medium", "high"))
+        "category": Categorical(("low", "medium", "high")),
+        "option_a": Binary(),
+        "option_b": Binary(),
     },
     cost_function=mixed_cost_function,
 )
@@ -206,17 +256,21 @@ optimizer = Optimizer(
 optimizer.fit()
 ```
 
+---
+
 #### Caching
 
-Enable caching on the search space to reuse previous cost-function evaluations when the same solution is evaluated again.
+Enable caching on `Binary` to reuse cost-function results when the same decoded bit pattern is evaluated again. This example reuses `selection_cost` from the binary search space example.
 
 ```python
-space = Continuous(
-    boundaries={"x": (-10, 10), "y": (-10, 10)},
-    cost_function=cost_function,
+from tyrannis.space import Binary
+
+space = Binary(
+    bits=32,
+    cost_function=selection_cost,
     use_cache=True,
     cache_type="lru",
-    cache_size=10000
+    cache_size=10_000,
 )
 
 optimizer = Optimizer(
@@ -228,6 +282,8 @@ optimizer = Optimizer(
 
 optimizer.fit()
 ```
+
+---
 
 ### Parallel processing with processors
 
@@ -246,6 +302,8 @@ optimizer = Optimizer(
 
 optimizer.fit()
 ```
+
+---
 
 ### Spark backends
 
@@ -274,7 +332,9 @@ optimizer = Optimizer(
 optimizer.fit()
 ```
 
-#### Parallel optimization
+<br>
+
+#### Spark Parallel optimization
 
 `SparkParallel` distributes particle processing through Spark while retaining a single optimization population. On Databricks, it can also use Serverless compute when `spark_code_archive` is not required.
 
@@ -292,11 +352,13 @@ optimizer = Optimizer(
 optimizer.fit()
 ```
 
+---
+
 ### MPI backends
 
 Save the imports, cost function, and search space from the basic example together with one of the following MPI configurations in `optimizer.py`. Execute the script using `tyrannis-mpi` through an MPI runtime.
 
-#### Distributed optimization
+#### MPI Distributed optimization
 
 `MPIDistributed` assigns one optimization island to each worker rank, with rank 0 reserved for the driver.
 
@@ -318,7 +380,9 @@ optimizer.fit()
 mpiexec --map-by ppr:1:node -n <total-ranks> tyrannis-mpi distributed optimizer.py
 ```
 
-#### Parallel optimization
+<br>
+
+#### MPI Parallel optimization
 
 `MPIParallel` keeps a single population on rank 0 and distributes particle processing across the remaining ranks.
 
@@ -342,6 +406,8 @@ mpiexec --map-by core -n <total-ranks> tyrannis-mpi parallel optimizer.py
 
 For additional options, run `tyrannis-mpi --help`.
 
+---
+
 ### Migration
 
 Use the `migration` parameter to exchange solutions between islands in a distributed backend. For example, `GlobalBest` shares improvements in the best solution found across islands.
@@ -361,6 +427,8 @@ optimizer = Optimizer(
 
 optimizer.fit()
 ```
+
+<br>
 
 ## Roadmap
 
@@ -384,6 +452,8 @@ The following features are planned for upcoming releases:
 #### Compatibility
 
 * SysIdentPy - CustomMetaMSS integration
+
+<br>
 
 ## Bibliography
 
@@ -420,6 +490,8 @@ The following features are planned for upcoming releases:
 [16] Bengoetxea, E., Miquélez, T., Larrañaga, P. and Lozano, J.A. (2002) 'Experimental results in function optimization with EDAs in continuous domain', in *Estimation of Distribution Algorithms: A New Tool for Evolutionary Computation*, pp. 181–194. https://doi.org/10.1007/978-1-4615-1539-5_8
 
 [17] Geiger, D. and Heckerman, D. (1994) 'Learning Gaussian networks', *Uncertainty Proceedings 1994*, pp. 235–243. https://doi.org/10.1016/B978-1-55860-332-5.50035-3
+
+<br>
 
 ## License
 
