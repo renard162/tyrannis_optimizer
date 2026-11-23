@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  push:
+    branches: [master]
   pull_request:
     branches: [master]
     types: [opened, synchronize, reopened]
@@ -11,7 +13,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   UV_VERSION: "0.13.5"
@@ -90,14 +92,18 @@ jobs:
             --cov-report=json:reports/coverage.json
           test -s reports/coverage.xml
           test -s reports/coverage.json
+      - name: Bind coverage evidence to this attempt
+        if: ${{ matrix.os == 'ubuntu-24.04' && matrix.python == '3.12' }}
+        run: uv run --no-sync python .github/scripts/pages.py record reports coverage-core-python312
       - name: Upload core coverage reports
         if: ${{ matrix.os == 'ubuntu-24.04' && matrix.python == '3.12' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: coverage-core-python312
+          name: coverage-core-python312-attempt-${{ github.run_attempt }}
           path: |
             reports/coverage.xml
             reports/coverage.json
+            reports/execution.json
           if-no-files-found: error
 
   cache-tests:
@@ -211,14 +217,20 @@ jobs:
         run: >-
           "$DATABRICKS_ENV/bin/python" .github/scripts/databricks_compat.py
           test "$RUNTIME" "reports/databricks-$RUNTIME"
+      - name: Bind Databricks evidence to this attempt
+        if: ${{ !cancelled() }}
+        env:
+          RUNTIME: ${{ matrix.runtime }}
+        run: python3 .github/scripts/pages.py record "reports/databricks-$RUNTIME" "databricks-$RUNTIME-lts-ml"
       - name: Upload Databricks compatibility evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: databricks-${{ matrix.runtime }}-lts-ml
+          name: databricks-${{ matrix.runtime }}-lts-ml-attempt-${{ github.run_attempt }}
           path: |
             reports/databricks-${{ matrix.runtime }}/compatibility.json
             reports/databricks-${{ matrix.runtime }}/spark.xml
+            reports/databricks-${{ matrix.runtime }}/execution.json
           if-no-files-found: warn
 
   mpi-tests:
@@ -330,3 +342,80 @@ jobs:
           printf '%s\n' "$NEEDS_JSON" | jq .
           printf '%s\n' "$NEEDS_JSON" | jq --exit-status \
             'length == 7 and all(.[]; .result == "success")'
+
+  pages-build:
+    name: Compose complete Pages site
+    needs: [core-tests, databricks-lts-ml-tests, ci-gate]
+    # A status function is essential: failure/skips upstream must not skip this job.
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No token/run-id override: downloads are confined to this workflow run.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: '*-attempt-${{ github.run_attempt }}'
+          path: badge-inputs
+      - name: Prepare complete static site
+        run: python3 .github/scripts/pages.py prepare
+      # Future MkDocs/Sphinx build replaces ONLY the preparation step above.
+      # Always incorporate badges after the full documentation build.
+      - name: Consolidate current-attempt evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_GATE_RESULT: ${{ needs.ci-gate.result }}
+        run: python3 .github/scripts/pages.py compose
+      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+        with:
+          name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
+          path: site
+
+  pages-deploy:
+    name: Deploy complete Pages site
+    needs: [pages-build]
+    if: ${{ !cancelled() && needs.pages-build.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+        with:
+          enablement: false
+      # Check after environment approval and queueing, immediately before deployment.
+      - name: Reject obsolete runs and attempts
+        id: freshness
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/pages.py guard
+      - uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+        if: ${{ steps.freshness.outputs.allowed == 'true' }}
+        id: deployment
+        with:
+          artifact_name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Report published endpoints
+        if: ${{ steps.deployment.outcome == 'success' }}
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+        run: |
+          for name in coverage databricks-lts-ml provenance; do
+            printf '%s\n' "${PAGE_URL%/}/badges/$name.json" >> "$GITHUB_STEP_SUMMARY"
+          done
