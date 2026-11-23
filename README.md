@@ -119,9 +119,11 @@ When no migration strategy is provided for an island-based backend, the islands 
 
 ## Usage
 
+Run each example independently. Unless redefined, the examples reuse the imports and problem definition from the basic example.
+
 ### Basic optimization
 
-A simple continuous optimization problem can be configured by defining a search space, selecting an algorithm, and creating an optimizer:
+Define a cost function, choose a search space and an algorithm, then run the optimizer. By default, execution is local and sequential.
 
 ```python
 from tyrannis import Optimizer
@@ -138,11 +140,9 @@ space = Continuous(
     cost_function=cost_function,
 )
 
-algorithm = PSO()
-
 optimizer = Optimizer(
     space=space,
-    algorithm=algorithm,
+    algorithm=PSO(),
     n_iterations=100,
     n_particles=50,
 )
@@ -150,81 +150,110 @@ optimizer = Optimizer(
 optimizer.fit()
 
 print(optimizer.best_solution)
-
 print(optimizer.best_fitness)
 ```
 
-### Mixed search space and parallel processing
+#### Non-continuous search space
 
-Tyrannis can combine different variable types in the same optimization problem. In this example, a continuous variable and a categorical variable are optimized together using the Artificial Bee Colony algorithm and a Joblib (parallel) processor:
+Replace `Continuous` with another space type, such as `Integer`, to optimize discrete variables.
 
 ```python
-from tyrannis import Optimizer
-from tyrannis.algorithm import BeeColony
-from tyrannis.processor import Joblib
+from tyrannis.space import Integer
+
+space = Integer(
+    boundaries={"x": (0, 10), "y": (0, 10)},
+    cost_function=cost_function
+)
+
+optimizer = Optimizer(
+    space=space,
+    algorithm=PSO(),
+    n_iterations=100,
+    n_particles=50,
+)
+
+optimizer.fit()
+```
+
+#### Mixed search space
+
+Use `Mixed` to combine different types of variables in one optimization problem.
+
+```python
 from tyrannis.space import Categorical, Continuous, Mixed
 
 
-def cost_function(x, category):
-    category_target = {
-        "low": 0.0,
-        "medium": 1.0,
-        "high": 2.0,
-    }
-    return (x - category_target[category]) ** 2
+def mixed_cost_function(x, category):
+    targets = {"low": 0.0, "medium": 1.0, "high": 2.0}
+    return (x - targets[category]) ** 2
 
 
 space = Mixed(
     spaces={
         "x": Continuous((-5.0, 5.0)),
-        "category": Categorical(("low", "medium", "high")),
+        "category": Categorical(("low", "medium", "high"))
     },
-    cost_function=cost_function,
+    cost_function=mixed_cost_function,
 )
-
-algorithm = BeeColony()
-processor = Joblib(joblib_backend="loky")
 
 optimizer = Optimizer(
     space=space,
-    algorithm=algorithm,
-    processor=processor,
+    algorithm=PSO(),
     n_iterations=100,
     n_particles=50,
 )
 
 optimizer.fit()
-
-print(optimizer.best_solution)
-
-print(optimizer.best_fitness)
 ```
 
-In this example, no backend is specified, so the optimization runs locally. The `Joblib` processor parallelizes particle evaluation across the available CPUs.
+#### Caching
 
-### Spark backends
-
-The examples below reuse the `space` and `algorithm` from the preceding mixed-search-space example.
-
-The Spark backends require an active `SparkSession`, which is passed directly to the backend. In Databricks, the preconfigured `spark` session can be used directly. `SparkParallel` keeps a single optimization population and is compatible with Databricks compute, including Serverless when `spark_code_archive` is not required. Because updated particle data is collected by the driver during every iteration, communication overhead can become significant; workloads with larger populations and fewer iterations are therefore generally more appropriate.
+Enable caching on the search space to reuse previous cost-function evaluations when the same solution is evaluated again.
 
 ```python
-from tyrannis.backend import SparkParallel
-
-backend = SparkParallel(spark)
+space = Continuous(
+    boundaries={"x": (-10, 10), "y": (-10, 10)},
+    cost_function=cost_function,
+    use_cache=True,
+    cache_type="lru",
+    cache_size=10000
+)
 
 optimizer = Optimizer(
     space=space,
-    algorithm=algorithm,
-    n_iterations=50,
-    n_particles=300,
-    backend=backend,
+    algorithm=PSO(),
+    n_iterations=100,
+    n_particles=50,
 )
 
 optimizer.fit()
 ```
 
-`SparkDistributed` creates independent optimization islands, with their number explicitly defined by `n_executors`. Each island is submitted as a Spark partition, and Spark schedules these partitions on the available executors; `n_executors` does not set or guarantee the number of physical executors. Since each island performs its optimization locally, it avoids the per-iteration particle-transfer overhead of `SparkParallel`. In Databricks, this backend **does not work with Serverless compute** and therefore requires a cluster. It has been tested with **Access Mode Dedicated** (formerly Single User) and does not work with **Access Mode Shared**. **Access Mode No Isolation** has not been tested. A typical Databricks use case is execution through Jobs using `job_clusters`, which can be configured with Dedicated access mode. When the available executor count is unknown, using the number of worker machines as the initial value for `n_executors` is a reasonable approximation.
+### Parallel processing with processors
+
+Select a processor to parallelize particle processing on the local machine. `Joblib` with the `loky` backend is the recommended general-purpose option.
+
+```python
+from tyrannis.processor import Joblib
+
+optimizer = Optimizer(
+    space=space,
+    algorithm=PSO(),
+    n_iterations=100,
+    n_particles=50,
+    processor=Joblib(joblib_backend="loky"),
+)
+
+optimizer.fit()
+```
+
+### Spark backends
+
+Spark requires an active `SparkSession`, available as `spark` in the following examples.
+
+#### Distributed optimization
+
+`SparkDistributed` runs independent optimization islands as Spark partitions. `n_executors` sets the number of islands, not the number of physical executors. On Databricks, use a Dedicated cluster rather than Serverless or Shared access mode.
 
 ```python
 from tyrannis.backend import SparkDistributed
@@ -236,8 +265,8 @@ backend = SparkDistributed(
 
 optimizer = Optimizer(
     space=space,
-    algorithm=algorithm,
-    n_iterations=300,
+    algorithm=PSO(),
+    n_iterations=100,
     n_particles=50,
     backend=backend,
 )
@@ -245,58 +274,114 @@ optimizer = Optimizer(
 optimizer.fit()
 ```
 
-### MPI backends
+#### Parallel optimization
 
-MPI backends are configured in the optimizer normally, but the script must be executed through an MPI runtime using the corresponding `tyrannis-mpi` mode. `MPIParallel` keeps a single population on rank 0 and distributes particle processing among the remaining ranks. For this backend, the recommended topology is **one MPI rank per available CPU core**, allowing particle evaluations to be distributed across the available processing capacity.
+`SparkParallel` distributes particle processing through Spark while retaining a single optimization population. On Databricks, it can also use Serverless compute when `spark_code_archive` is not required.
 
 ```python
-from tyrannis.backend import MPIParallel
+from tyrannis.backend import SparkParallel
 
-backend = MPIParallel()
+optimizer = Optimizer(
+    space=space,
+    algorithm=PSO(),
+    n_iterations=100,
+    n_particles=50,
+    backend=SparkParallel(spark),
+)
+
+optimizer.fit()
 ```
 
-A typical execution with OpenMPI is:
+### MPI backends
 
-```bash
-mpiexec --map-by core -n <total-ranks> tyrannis-mpi parallel optimizer.py
-```
+Save the imports, cost function, and search space from the basic example together with one of the following MPI configurations in `optimizer.py`. Execute the script using `tyrannis-mpi` through an MPI runtime.
 
-`MPIDistributed` reserves rank 0 for the driver and assigns one complete optimization island to each remaining MPI rank. For this backend, the recommended topology is **one MPI rank per machine or node**, so each island can use the resources of its machine independently through its configured Tyrannis processor. The number of islands is therefore equal to the total number of MPI ranks minus one.
+#### Distributed optimization
+
+`MPIDistributed` assigns one optimization island to each worker rank, with rank 0 reserved for the driver.
 
 ```python
 from tyrannis.backend import MPIDistributed
 
-backend = MPIDistributed()
-```
+optimizer = Optimizer(
+    space=space,
+    algorithm=PSO(),
+    n_iterations=100,
+    n_particles=50,
+    backend=MPIDistributed(),
+)
 
-A typical distributed execution is:
+optimizer.fit()
+```
 
 ```bash
 mpiexec --map-by ppr:1:node -n <total-ranks> tyrannis-mpi distributed optimizer.py
 ```
 
-For additional execution options and usage details, run `tyrannis-mpi --help`.
+#### Parallel optimization
+
+`MPIParallel` keeps a single population on rank 0 and distributes particle processing across the remaining ranks.
+
+```python
+from tyrannis.backend import MPIParallel
+
+optimizer = Optimizer(
+    space=space,
+    algorithm=PSO(),
+    n_iterations=100,
+    n_particles=50,
+    backend=MPIParallel(),
+)
+
+optimizer.fit()
+```
+
+```bash
+mpiexec --map-by core -n <total-ranks> tyrannis-mpi parallel optimizer.py
+```
+
+For additional options, run `tyrannis-mpi --help`.
+
+### Migration
+
+Use the `migration` parameter to exchange solutions between islands in a distributed backend. For example, `GlobalBest` shares improvements in the best solution found across islands.
+
+```python
+from tyrannis.backend import SparkDistributed
+from tyrannis.migration import GlobalBest
+
+optimizer = Optimizer(
+    space=space,
+    algorithm=PSO(),
+    n_iterations=100,
+    n_particles=50,
+    backend=SparkDistributed(spark, n_executors=4),
+    migration=GlobalBest(check_interval=10),
+)
+
+optimizer.fit()
+```
 
 ## Roadmap
 
 The following features are planned for upcoming releases:
 
-### Algorithms
+#### Algorithms
 
 * Age-Layered Population Structure
 * Invasive Weed Optimization
 * More Estimation of Distribution Algorithms (EDAs)
 
-### Spaces
+#### Spaces
 
 * Graph-Constrained Search Spaces
 
-### Backends
+#### Backends
 
 * Ray
 * Dask
 
-### Compatibility
+#### Compatibility
 
 * SysIdentPy - CustomMetaMSS integration
 
