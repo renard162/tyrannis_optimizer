@@ -312,7 +312,7 @@ optimizer.fit()
 
 ### Parallel processing with processors
 
-Processors control how particles are processed and can be changed without redefining the optimization problem. This example uses `Joblib` with the `loky` backend (process-based parallelism) for local parallel processing.
+Processors control how particles are processed and can be changed without redefining the optimization problem. This example uses `Joblib` with the `loky` backend (default process-based parallelism) for local parallel processing.
 
 ```python
 from tyrannis.processor import Joblib
@@ -322,7 +322,7 @@ optimizer = Optimizer(
     algorithm=PSO(),
     n_iterations=100,
     n_particles=50,
-    processor=Joblib(joblib_backend="loky"),
+    processor=Joblib(),
 )
 
 optimizer.fit()
@@ -332,7 +332,7 @@ optimizer.fit()
 
 ### Spark backends
 
-Spark backends support both independent optimization islands and parallel processing of a single population. The following examples use an active `SparkSession` assigned to `spark`. For Databricks, Runtime 17.3 LTS ML or newer is recommended, provided its Python and Spark versions meet the Tyrannis requirements.
+Spark backends support both independent optimization islands and parallel processing of a single population. The following examples use an active `SparkSession` assigned to `spark`.
 
 #### Distributed optimization
 
@@ -369,8 +369,8 @@ from tyrannis.backend import SparkParallel
 optimizer = Optimizer(
     space=space,
     algorithm=PSO(),
-    n_iterations=100,
-    n_particles=50,
+    n_iterations=50,
+    n_particles=200,
     backend=SparkParallel(spark),
 )
 
@@ -417,8 +417,8 @@ from tyrannis.backend import MPIParallel
 optimizer = Optimizer(
     space=space,
     algorithm=PSO(),
-    n_iterations=100,
-    n_particles=50,
+    n_iterations=50,
+    n_particles=200,
     backend=MPIParallel(),
 )
 
