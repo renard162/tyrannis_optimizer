@@ -46,17 +46,17 @@ Algorithms are population-based metaheuristics used to search for a minimum with
 
 | Import | Description | Family |
 | --- | --- | --- |
-| `PSO` | Particle Swarm Optimization for population-based search. | Agent Dynamics Algorithm |
-| `GSA` | Gravitational Search Algorithm using gravitational interactions between candidate solutions to guide population-based search. | Agent Dynamics Algorithm |
-| `PSOGSA` | Particle Swarm Optimization and Gravitational Search Algorithm for hybrid population-based search. | Agent Dynamics Algorithm |
-| `AntColony` | Ant Colony Optimization for Continuous Domains (ACOR), which uses an archive of continuous solutions to guide the search. | Colony-Based Swarm Intelligence |
-| `BeeColony` | Artificial Bee Colony optimization inspired by the foraging behavior of honey bees. | Colony-Based Swarm Intelligence |
-| `GreyWolf` | Grey Wolf Optimization inspired by the social hierarchy and hunting behavior of grey wolves, with optional exploration enhancement through EEGWO. | Leader-Guided Collective Search |
-| `WhaleAlgorithm` | Whale Optimization Algorithm inspired by the bubble-net hunting behavior of humpback whales, with nonlinear control of the exploration-exploitation transition. | Leader-Guided Collective Search |
-| `GeneticAlgorithm` | Real-coded Genetic Algorithm for continuous optimization. | Evolutionary Algorithm |
-| `DifferentialEvolution` | Differential Evolution using differential mutation and crossover for continuous optimization. | Evolutionary Algorithm |
-| `CMAES`     | Covariance Matrix Adaptation Evolution Strategy for continuous optimization. | Evolutionary Algorithm |
-| `EGNA` | Estimation of Gaussian Networks Algorithm, a multivariate continuous Estimation of Distribution Algorithm that learns and samples Gaussian Bayesian networks. | Estimation of Distribution Algorithm |
+| `PSO` | Particle Swarm Optimization for population-based search. [1, 2] | Agent Dynamics Algorithm |
+| `GSA` | Gravitational Search Algorithm using gravitational interactions between candidate solutions to guide population-based search. [3] | Agent Dynamics Algorithm |
+| `PSOGSA` | Particle Swarm Optimization and Gravitational Search Algorithm for hybrid population-based search. [4] | Agent Dynamics Algorithm |
+| `AntColony` | Ant Colony Optimization for Continuous Domains (ACOR), which uses an archive of continuous solutions to guide the search. [5] | Colony-Based Swarm Intelligence |
+| `BeeColony` | Artificial Bee Colony optimization inspired by the foraging behavior of honey bees. [6] | Colony-Based Swarm Intelligence |
+| `GreyWolf` | Grey Wolf Optimization inspired by the social hierarchy and hunting behavior of grey wolves, with optional exploration enhancement through EEGWO. [7, 8] | Leader-Guided Collective Search |
+| `WhaleAlgorithm` | Whale Optimization Algorithm inspired by the bubble-net hunting behavior of humpback whales, with nonlinear control of the exploration-exploitation transition. [9, 10] | Leader-Guided Collective Search |
+| `GeneticAlgorithm` | Real-coded Genetic Algorithm for continuous optimization. [11, 12] | Evolutionary Algorithm |
+| `DifferentialEvolution` | Differential Evolution using differential mutation and crossover for continuous optimization. [13] | Evolutionary Algorithm |
+| `CMAES`     | Covariance Matrix Adaptation Evolution Strategy for continuous optimization. [14, 15] | Evolutionary Algorithm |
+| `EGNA` | Estimation of Gaussian Networks Algorithm, a multivariate continuous Estimation of Distribution Algorithm that learns and samples Gaussian Bayesian networks. [16, 17] | Estimation of Distribution Algorithm |
 
 ### Spaces
 
@@ -299,6 +299,42 @@ The following features are planned for upcoming releases:
 ### Compatibility
 
 * SysIdentPy - CustomMetaMSS integration
+
+## Bibliography
+
+[1] Kennedy, J. and Eberhart, R. (1995) 'Particle swarm optimization', *Proceedings of ICNN'95 - International Conference on Neural Networks*, pp. 1942–1948. https://doi.org/10.1109/ICNN.1995.488968
+
+[2] Clerc, M. and Kennedy, J. (2002) 'The particle swarm - explosion, stability, and convergence in a multidimensional complex space', *IEEE Transactions on Evolutionary Computation*, 6(1), pp. 58–73. https://doi.org/10.1109/4235.985692
+
+[3] Rashedi, E., Nezamabadi-pour, H. and Saryazdi, S. (2009) 'GSA: A gravitational search algorithm', *Information Sciences*, 179(13), pp. 2232–2248. https://doi.org/10.1016/j.ins.2009.03.004
+
+[4] Mirjalili, S. and Hashim, S.Z.M. (2010) 'A new hybrid PSOGSA algorithm for function optimization', *Proceedings of the International Conference on Computer and Information Application (ICCIA 2010)*, pp. 374–377. https://doi.org/10.1109/ICCIA.2010.6141614
+
+[5] Socha, K. and Dorigo, M. (2008) 'Ant colony optimization for continuous domains', *European Journal of Operational Research*, 185(3), pp. 1155–1173. https://doi.org/10.1016/j.ejor.2006.06.046
+
+[6] Karaboga, D. and Basturk, B. (2007) 'A powerful and efficient algorithm for numerical function optimization: Artificial Bee Colony (ABC) algorithm', *Journal of Global Optimization*, 39(3), pp. 459–471. https://doi.org/10.1007/s10898-007-9149-x
+
+[7] Mirjalili, S., Mirjalili, S.M. and Lewis, A. (2014) 'Grey Wolf Optimizer', *Advances in Engineering Software*, 69, pp. 46–61. https://doi.org/10.1016/j.advengsoft.2013.12.007
+
+[8] Long, W., Jiao, J., Liang, X. and Tang, M. (2018) 'An exploration-enhanced grey wolf optimizer to solve high-dimensional numerical optimization', *Engineering Applications of Artificial Intelligence*, 68, pp. 63–80. https://doi.org/10.1016/j.engappai.2017.10.024
+
+[9] Mirjalili, S. and Lewis, A. (2016) 'The Whale Optimization Algorithm', *Advances in Engineering Software*, 95, pp. 51–67. https://doi.org/10.1016/j.advengsoft.2016.01.008
+
+[10] Zhong, M. and Long, W. (2017) 'Whale optimization algorithm with nonlinear control parameter', *MATEC Web of Conferences*, 139, 00157. https://doi.org/10.1051/matecconf/201713900157
+
+[11] Eshelman, L.J. and Schaffer, J.D. (1993) 'Real-coded genetic algorithms and interval-schemata', *Foundations of Genetic Algorithms*, 2, pp. 187–202. https://doi.org/10.1016/B978-0-08-094832-4.50018-0
+
+[12] Deb, K. and Deb, D. (2014) 'Analysing mutation schemes for real-parameter genetic algorithms', *International Journal of Artificial Intelligence and Soft Computing*, 4(1), pp. 1–28. https://doi.org/10.1504/IJAISC.2014.059280
+
+[13] Storn, R. and Price, K. (1997) 'Differential Evolution - a simple and efficient heuristic for global optimization over continuous spaces', *Journal of Global Optimization*, 11, pp. 341–359. https://doi.org/10.1023/A:1008202821328
+
+[14] Hansen, N. and Ostermeier, A. (2001) 'Completely derandomized self-adaptation in evolution strategies', *Evolutionary Computation*, 9(2), pp. 159–195. https://doi.org/10.1162/106365601750190398
+
+[15] Hansen, N. (2006) 'The CMA Evolution Strategy: A comparing review', in *Towards a New Evolutionary Computation*, pp. 75–102. https://doi.org/10.1007/3-540-32494-1_4
+
+[16] Bengoetxea, E., Miquélez, T., Larrañaga, P. and Lozano, J.A. (2002) 'Experimental results in function optimization with EDAs in continuous domain', in *Estimation of Distribution Algorithms: A New Tool for Evolutionary Computation*, pp. 181–194. https://doi.org/10.1007/978-1-4615-1539-5_8
+
+[17] Geiger, D. and Heckerman, D. (1994) 'Learning Gaussian networks', *Uncertainty Proceedings 1994*, pp. 235–243. https://doi.org/10.1016/B978-1-55860-332-5.50035-3
 
 ## License
 
