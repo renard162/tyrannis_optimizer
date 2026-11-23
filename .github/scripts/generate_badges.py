@@ -310,10 +310,8 @@ def generate(
         color = next(
             color
             for minimum, color in (
-                (90, "brightgreen"),
                 (80, "green"),
-                (70, "yellowgreen"),
-                (60, "yellow"),
+                (75, "yellow"),
                 (0, "red"),
             )
             if value >= minimum
