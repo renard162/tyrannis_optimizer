@@ -134,7 +134,7 @@ The examples reuse imports and definitions from the basic example unless otherwi
 
 ### Basic optimization
 
-Define a cost function, choose a search space and an algorithm, then run the optimizer. By default, execution is local and sequential.
+Optimization problems are defined by a cost function, a search space, and an algorithm. This example minimizes a two-variable quadratic function using `Continuous` and `PSO` with the default local, sequential execution.
 
 ```python
 from tyrannis import Optimizer
@@ -168,7 +168,7 @@ print(optimizer.best_fitness)
 
 #### Non-continuous search space
 
-Use `Permutation` to optimize the ordering of a set of choices. The cost function receives the decoded ordering as a list.
+Non-continuous search spaces support discrete decisions and combinatorial problems. This example uses `Permutation` to optimize the ordering of five choices, with the cost function receiving the decoded order as a list.
 
 ```python
 from tyrannis.space import Permutation
@@ -197,7 +197,7 @@ optimizer.fit()
 
 #### Binary search space
 
-`Binary(bits=32)` represents 32 independent Boolean decisions. The decoded solution is a list of Boolean values, which Tyrannis unpacks into positional arguments when calling the cost function. The `*selected` parameter collects these arguments into a tuple named `selected`. This example selects eight options while maximizing their combined value.
+`Binary` represents Boolean decisions and supports positional or named inputs to the cost function. In this example, 32 bits represent option selections. Tyrannis unpacks the decoded list of Boolean values into positional arguments, which `*selected` collects into a tuple. The objective favors selecting eight options with the greatest combined benefit.
 
 ```python
 from tyrannis.space import Binary
@@ -224,7 +224,7 @@ optimizer.fit()
 
 #### Mixed search space
 
-Use `Mixed` to combine continuous, categorical, and binary variables. Each variable has its own search-space type and independently defined bounds or available values. The cost function receives the named variables as keyword arguments.
+`Mixed` combines different supported search-space types in one optimization problem, with each component's type and search range defined independently. This example uses one continuous, one categorical, and two binary variables, passing their decoded values to the cost function as keyword arguments.
 
 ```python
 from tyrannis.space import Binary, Categorical, Continuous, Mixed
@@ -260,7 +260,7 @@ optimizer.fit()
 
 #### Caching
 
-Enable caching on `Binary` to reuse cost-function results when the same decoded bit pattern is evaluated again. This example reuses `selection_cost` from the binary search space example.
+Caching can be enabled on search spaces to reuse cost-function results when equivalent solutions are evaluated again. This example applies an LRU cache to the 32-bit `Binary` selection problem, reusing `selection_cost` from the earlier binary example.
 
 ```python
 from tyrannis.space import Binary
@@ -287,7 +287,7 @@ optimizer.fit()
 
 ### Parallel processing with processors
 
-Select a processor to parallelize particle processing on the local machine. `Joblib` with the `loky` backend is the recommended general-purpose option.
+Processors control how particles are processed and can be changed without redefining the optimization problem. This example uses `Joblib` with the `loky` backend (process-based parallelism) for local parallel processing.
 
 ```python
 from tyrannis.processor import Joblib
@@ -307,11 +307,11 @@ optimizer.fit()
 
 ### Spark backends
 
-Spark requires an active `SparkSession`, available as `spark` in the following examples.
+Spark backends support both independent optimization islands and parallel processing of a single population. The following examples use an active `SparkSession` assigned to `spark`.
 
 #### Distributed optimization
 
-`SparkDistributed` runs independent optimization islands as Spark partitions. `n_executors` sets the number of islands, not the number of physical executors. On Databricks, use a Dedicated cluster rather than Serverless or Shared access mode.
+Distributed Spark optimization runs independent islands, which can exchange solutions through migration strategies. This example uses `SparkDistributed` to create four islands as Spark partitions; `n_executors` sets the island count, not the number of physical executors. On Databricks, use a Dedicated cluster rather than Serverless or Shared access mode.
 
 ```python
 from tyrannis.backend import SparkDistributed
@@ -336,7 +336,7 @@ optimizer.fit()
 
 #### Spark Parallel optimization
 
-`SparkParallel` distributes particle processing through Spark while retaining a single optimization population. On Databricks, it can also use Serverless compute when `spark_code_archive` is not required.
+Parallel Spark optimization distributes particle processing while keeping a single optimization population. This example uses `SparkParallel` with the existing Spark session; on Databricks, it can also run on Serverless compute when `spark_code_archive` is not required.
 
 ```python
 from tyrannis.backend import SparkParallel
@@ -356,11 +356,11 @@ optimizer.fit()
 
 ### MPI backends
 
-Save the imports, cost function, and search space from the basic example together with one of the following MPI configurations in `optimizer.py`. Execute the script using `tyrannis-mpi` through an MPI runtime.
+MPI backends support both independent optimization islands and parallel processing of a single population. The following examples add an MPI backend to the basic optimization script, saved as `optimizer.py`, and execute it through an MPI runtime with `tyrannis-mpi`.
 
 #### MPI Distributed optimization
 
-`MPIDistributed` assigns one optimization island to each worker rank, with rank 0 reserved for the driver.
+Distributed MPI optimization assigns independent islands to worker ranks, with rank 0 reserved for the driver. This example uses `MPIDistributed` and launches one rank per node.
 
 ```python
 from tyrannis.backend import MPIDistributed
@@ -384,7 +384,7 @@ mpiexec --map-by ppr:1:node -n <total-ranks> tyrannis-mpi distributed optimizer.
 
 #### MPI Parallel optimization
 
-`MPIParallel` keeps a single population on rank 0 and distributes particle processing across the remaining ranks.
+Parallel MPI optimization keeps a single population while distributing particle processing across ranks. This example uses `MPIParallel`, which keeps the population on rank 0, and maps ranks to CPU cores.
 
 ```python
 from tyrannis.backend import MPIParallel
@@ -410,7 +410,7 @@ For additional options, run `tyrannis-mpi --help`.
 
 ### Migration
 
-Use the `migration` parameter to exchange solutions between islands in a distributed backend. For example, `GlobalBest` shares improvements in the best solution found across islands.
+Migration strategies coordinate solution exchange between islands in distributed optimization. This example uses `GlobalBest` with `SparkDistributed`, checking for improvements in the best solution at intervals of ten iterations.
 
 ```python
 from tyrannis.backend import SparkDistributed
