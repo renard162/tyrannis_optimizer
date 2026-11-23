@@ -2,7 +2,7 @@
 
 **A flexible metaheuristic optimization framework built for diverse search spaces and scalable execution.**
 
-Tyrannis is a Python framework for solving optimization problems with population-based metaheuristic algorithms while keeping the problem definition independent from the execution strategy. Define your search space, choose an optimization algorithm, and decide how the workload should run—from a simple local execution to parallel or distributed processing. Tyrannis also provides support for mixed-variable optimization, allowing continuous, integer, binary, categorical, and permutation variables to coexist in the same problem.
+Tyrannis is a Python framework for solving optimization problems with population-based metaheuristic algorithms while keeping the problem definition independent from the execution strategy. Define your search space, choose an optimization algorithm, and select whether to execute it locally, in parallel, or in a distributed environment. Tyrannis also provides support for mixed-variable optimization, allowing continuous, integer, binary, categorical, and permutation variables to coexist in the same problem.
 
 ## Installation
 
@@ -22,7 +22,7 @@ Additional capabilities are available through optional dependency groups:
 
 | Extra | Installation | Adds |
 | --- | --- | --- |
-| `cache` | `pip install "tyrannis[cache]"` | Additional dependencies for advanced caching resources. |
+| `cache` | `pip install "tyrannis[cache]"` | Additional LFU, FIFO, and Random Replacement caching strategies. |
 | `spark` | `pip install "tyrannis[spark]"` | Support for the `SparkParallel` and `SparkDistributed` backends. |
 | `mpi` | `pip install "tyrannis[mpi]"` | Support for the `MPIParallel` and `MPIDistributed` backends and the `tyrannis-mpi` launcher. |
 
@@ -98,9 +98,9 @@ Backends define how optimization execution is organized across machines and, for
 | Import | Description |
 | --- | --- |
 | `SparkParallel` | Distributes particle initialization and updates through Spark while keeping the optimization as a single population without islands; compatible with Databricks, including shared-access clusters. |
-| `SparkDistributed` | Distributes independent optimization islands across Spark executors and supports inter-island migration; compatible with Databricks single-user clusters. |
+| `SparkDistributed` | Distributes independent optimization islands as Spark partitions and supports inter-island migration; compatible with Databricks Dedicated access mode clusters. |
 | `MPIParallel` | Distributes particle initialization and updates through MPI while keeping the optimization as a single population without islands. |
-| `MPIDistributed` | Distributes independent optimization islands across MPI worker nodes and supports inter-island migration. |
+| `MPIDistributed` | Distributes independent optimization islands across MPI worker ranks and supports inter-island migration. |
 
 When no backend is provided, `Optimizer` uses the local backend and executes the optimization on a single machine.
 
@@ -134,7 +134,8 @@ def cost_function(x, y):
 
 
 space = Continuous(
-    boundaries={"x": (-10, 10), "y": (-10, 10)}, cost_function=cost_function
+    boundaries={"x": (-10, 10), "y": (-10, 10)},
+    cost_function=cost_function,
 )
 
 algorithm = PSO()
@@ -149,10 +150,8 @@ optimizer = Optimizer(
 optimizer.fit()
 
 print(optimizer.best_solution)
-# {"x": 0.0, "y": 0.0}
 
 print(optimizer.best_fitness)
-# 0.0
 ```
 
 ### Mixed search space and parallel processing
@@ -197,15 +196,15 @@ optimizer = Optimizer(
 optimizer.fit()
 
 print(optimizer.best_solution)
-# {"x": 0.0, "category": "low"}
 
 print(optimizer.best_fitness)
-# 0.0
 ```
 
 In this example, no backend is specified, so the optimization runs locally. The `Joblib` processor parallelizes particle evaluation across the available CPUs.
 
 ### Spark backends
+
+The examples below reuse the `space` and `algorithm` from the preceding mixed-search-space example.
 
 The Spark backends require an active `SparkSession`, which is passed directly to the backend. In Databricks, the preconfigured `spark` session can be used directly. `SparkParallel` keeps a single optimization population and is compatible with Databricks compute, including Serverless when `spark_code_archive` is not required. Because updated particle data is collected by the driver during every iteration, communication overhead can become significant; workloads with larger populations and fewer iterations are therefore generally more appropriate.
 
@@ -221,14 +220,19 @@ optimizer = Optimizer(
     n_particles=300,
     backend=backend,
 )
+
+optimizer.fit()
 ```
 
-`SparkDistributed` creates independent optimization islands, with their number explicitly defined by `n_executors`. Since each island performs its optimization locally, it avoids the per-iteration particle-transfer overhead of `SparkParallel`. In Databricks, this backend **does not work with Serverless compute** and therefore requires a cluster. It has been tested with **Access Mode Dedicated** (formerly Single User) and does not work with **Access Mode Shared**. **Access Mode No Isolation** has not been tested. A typical Databricks use case is execution through Jobs using `job_clusters`, which can be configured with Dedicated access mode. When the available executor count is unknown, using the number of worker machines as the initial value for `n_executors` is a reasonable approximation.
+`SparkDistributed` creates independent optimization islands, with their number explicitly defined by `n_executors`. Each island is submitted as a Spark partition, and Spark schedules these partitions on the available executors; `n_executors` does not set or guarantee the number of physical executors. Since each island performs its optimization locally, it avoids the per-iteration particle-transfer overhead of `SparkParallel`. In Databricks, this backend **does not work with Serverless compute** and therefore requires a cluster. It has been tested with **Access Mode Dedicated** (formerly Single User) and does not work with **Access Mode Shared**. **Access Mode No Isolation** has not been tested. A typical Databricks use case is execution through Jobs using `job_clusters`, which can be configured with Dedicated access mode. When the available executor count is unknown, using the number of worker machines as the initial value for `n_executors` is a reasonable approximation.
 
 ```python
 from tyrannis.backend import SparkDistributed
 
-backend = SparkDistributed(spark, n_executors=4)
+backend = SparkDistributed(
+    spark,
+    n_executors=4,
+)
 
 optimizer = Optimizer(
     space=space,
@@ -237,6 +241,8 @@ optimizer = Optimizer(
     n_particles=50,
     backend=backend,
 )
+
+optimizer.fit()
 ```
 
 ### MPI backends
@@ -271,32 +277,28 @@ mpiexec --map-by ppr:1:node -n <total-ranks> tyrannis-mpi distributed optimizer.
 
 For additional execution options and usage details, run `tyrannis-mpi --help`.
 
-## Status
+## Roadmap
 
-Tyrannis is currently in the **alpha stage of development**. The core architecture, multiple optimization algorithms, heterogeneous search spaces, local and parallel processors, Spark backends, and migration strategies are already implemented, while the API and implementation continue to evolve.
+The following features are planned for upcoming releases:
 
-The roadmap below lists capabilities that are **not yet part of the current public API** and are planned for future releases.
-
-### Roadmap
-
-#### Algorithms
+### Algorithms
 
 * Age-Layered Population Structure
 * Invasive Weed Optimization
 * More Estimation of Distribution Algorithms (EDAs)
 
-#### Spaces
+### Spaces
 
 * Graph-Constrained Search Spaces
 
-#### Backends
+### Backends
 
 * Ray
 * Dask
 
-#### Compatibility
+### Compatibility
 
-* Sysidentpy - MetaMSS
+* SysIdentPy - CustomMetaMSS integration
 
 ## License
 
