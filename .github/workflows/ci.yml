@@ -162,6 +162,65 @@ jobs:
         if: ${{ always() && steps.tests.outcome != 'skipped' }}
         run: uv run --no-sync python .github/scripts/check_junit.py reports/spark.xml
 
+  databricks-lts-ml-tests:
+    name: Databricks ${{ matrix.runtime }} LTS ML (equivalent dependencies)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: ["17.3", "18"]
+    env:
+      SPARK_LOCAL_IP: "127.0.0.1"
+      PYTEST_ADDOPTS: ""
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            .github/scripts/databricks_compat.py
+          cache-suffix: databricks-${{ matrix.runtime }}
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install exact CPU dependencies in an isolated environment
+        env:
+          RUNTIME: ${{ matrix.runtime }}
+        run: |
+          DATABRICKS_ENV="$RUNNER_TEMP/databricks-$RUNTIME"
+          echo "DATABRICKS_ENV=$DATABRICKS_ENV" >> "$GITHUB_ENV"
+          echo "PYSPARK_PYTHON=$DATABRICKS_ENV/bin/python" >> "$GITHUB_ENV"
+          echo "PYSPARK_DRIVER_PYTHON=$DATABRICKS_ENV/bin/python" >> "$GITHUB_ENV"
+          uv venv --python 3.12 "$DATABRICKS_ENV"
+          "$DATABRICKS_ENV/bin/python" .github/scripts/databricks_compat.py requirements "$RUNTIME" > "$RUNNER_TEMP/databricks-requirements.txt"
+          uv pip install --python "$DATABRICKS_ENV/bin/python" \
+            '.[spark]' 'pytest==9.1.1' 'pytest-timeout==2.4.0' \
+            --requirements "$RUNNER_TEMP/databricks-requirements.txt"
+      # The helper validates versions/import provenance and uv pip check first,
+      # then runs the existing tests and check_junit.py before recording success.
+      - name: Validate dependencies, run Spark tests and write evidence
+        env:
+          RUNTIME: ${{ matrix.runtime }}
+        run: >-
+          "$DATABRICKS_ENV/bin/python" .github/scripts/databricks_compat.py
+          test "$RUNTIME" "reports/databricks-$RUNTIME"
+      - name: Upload Databricks compatibility evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: databricks-${{ matrix.runtime }}-lts-ml
+          path: |
+            reports/databricks-${{ matrix.runtime }}/compatibility.json
+            reports/databricks-${{ matrix.runtime }}/spark.xml
+          if-no-files-found: warn
+
   mpi-tests:
     name: MPI Tests
     runs-on: ubuntu-24.04
@@ -259,6 +318,7 @@ jobs:
       - core-tests
       - cache-tests
       - spark-tests
+      - databricks-lts-ml-tests
       - mpi-tests
       - package-build
     if: ${{ always() }}
@@ -269,4 +329,4 @@ jobs:
         run: |
           printf '%s\n' "$NEEDS_JSON" | jq .
           printf '%s\n' "$NEEDS_JSON" | jq --exit-status \
-            'length == 6 and all(.[]; .result == "success")'
+            'length == 7 and all(.[]; .result == "success")'
