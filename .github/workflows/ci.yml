@@ -76,7 +76,29 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --dev
       - name: Run all non-optional tests
+        if: ${{ matrix.os != 'ubuntu-24.04' || matrix.python != '3.12' }}
         run: uv run --no-sync pytest -m "not optional"
+      # Measure src/tyrannis once, using only the non-optional suite.
+      # Optional Spark, MPI and cache tests run separately and are not measured.
+      # Branch coverage comes from pyproject.toml; no coverage threshold is imposed.
+      - name: Run all non-optional tests with coverage
+        if: ${{ matrix.os == 'ubuntu-24.04' && matrix.python == '3.12' }}
+        run: |
+          mkdir -p reports
+          uv run --no-sync pytest -m "not optional" --cov=tyrannis \
+            --cov-report=term --cov-report=xml:reports/coverage.xml \
+            --cov-report=json:reports/coverage.json
+          test -s reports/coverage.xml
+          test -s reports/coverage.json
+      - name: Upload core coverage reports
+        if: ${{ matrix.os == 'ubuntu-24.04' && matrix.python == '3.12' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-core-python312
+          path: |
+            reports/coverage.xml
+            reports/coverage.json
+          if-no-files-found: error
 
   cache-tests:
     name: Cache Tests
