@@ -148,7 +148,7 @@ source = ["src"]
 branch = true
 
 [tool.basedpyright]
-include = ["src", "tests", ".github/scripts"]
+include = ["src/**/*.py", "tests/**/*.py", ".github/scripts/**/*.py"]
 # Keep CI helpers visible instead of applying the default **/.* exclusion.
 exclude = ["**/node_modules", "**/__pycache__", "**/__editable__.*"]
 extraPaths = ["src", "tests"]
@@ -158,14 +158,20 @@ failOnWarnings = false
 baselineFile = ".basedpyright/baseline.json"
 
 [tool.ruff]
+include = ["*.py"]
+force-exclude = true
 target-version = "py312"
 line-length = 88
 indent-width = 4
 
 [tool.ruff.lint]
+# Explicit paths bypass include; exclude the complement of *.py.
+exclude = ["*[!y]", "*[!p]y", "*[!.]py", "py", "y"]
 extend-ignore = ["UP040", "UP046"]
 
 [tool.ruff.format]
+# Explicit formatter paths bypass include; exclude the complement of *.py.
+exclude = ["*[!y]", "*[!p]y", "*[!.]py", "py", "y"]
 quote-style = "double"
 indent-style = "space"
 line-ending = "auto"
