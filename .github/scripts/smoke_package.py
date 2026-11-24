@@ -25,7 +25,7 @@ def main() -> None:
 
     installed = distribution("tyrannis")
     module_path = Path(tyrannis.__file__).resolve()
-    expected_path = Path(installed.locate_file("tyrannis/__init__.py")).resolve()
+    expected_path = Path(installed.locate_file("tyrannis/__init__.py")).resolve() # type: ignore
     if module_path != expected_path or not module_path.is_relative_to(
         Path(sys.prefix).resolve()
     ):

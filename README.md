@@ -2,26 +2,17 @@
 <h1 align="center">Tyrannis Optimizer</h1>
 
 <p align="center">
-  <a href="https://pypi.org/project/tyrannis/">
-    <img alt="PyPI Version" src="https://img.shields.io/pypi/v/tyrannis">
-  </a>
   <a href="https://github.com/renard162/tyrannis_optimizer/blob/master/LICENSE">
-    <img alt="License" src="https://img.shields.io/github/license/renard162/tyrannis_optimizer">
+    <img src="https://img.shields.io/badge/license-BSD--3--Clause-blue?logo=opensourceinitiative&logoColor=white" alt="License">
   </a>
   <a href="https://github.com/renard162/tyrannis_optimizer">
     <img alt="GitHub Repository" src="https://img.shields.io/badge/github-repo-blue?logo=github">
   </a>
-  <a href="https://pypi.org/project/tyrannis/">
-    <img alt="Python Versions" src="https://img.shields.io/pypi/pyversions/tyrannis">
+  <a href="https://www.databricks.com/">
+    <img alt="Databricks" src="https://img.shields.io/badge/Databricks-LTS%20ML-blue?logo=databricks">
   </a>
-  <a href="https://renard162.github.io/tyrannis_optimizer/badges/provenance.json">
-    <img alt="Databricks LTS ML" src="https://img.shields.io/endpoint?url=https%3A%2F%2Frenard162.github.io%2Ftyrannis_optimizer%2Fbadges%2Fdatabricks-lts-ml.json">
-  </a>
-  <a href="https://github.com/renard162/tyrannis_optimizer/actions/workflows/ci.yml">
-    <img alt="CI Status" src="https://img.shields.io/github/actions/workflow/status/renard162/tyrannis_optimizer/ci.yml?branch=master&label=CI">
-  </a>
-  <a href="https://renard162.github.io/tyrannis_optimizer/badges/provenance.json">
-    <img alt="Code Coverage" src="https://img.shields.io/endpoint?url=https%3A%2F%2Frenard162.github.io%2Ftyrannis_optimizer%2Fbadges%2Fcoverage.json">
+  <a href="https://www.mpi-forum.org/">
+    <img src="https://img.shields.io/badge/MPI-supported-blue?logo=data:image/svg%2Bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyMTAgMTYwIj48cGF0aCBmaWxsPSIjMDAzNjZiIiBkPSJNMTA0IDkgMjA5IDEyIDE3NSAxMTIgNjkgMTA5WiIvPjxwYXRoIGZpbGw9IiMwMDU2OWYiIGQ9Ik03MCAzMiAxNzYgMzUgMTQyIDEzNSAzNSAxMzJaIi8%2BPHBhdGggZmlsbD0iIzAwN2NlMCIgZD0iTTM3IDU1IDE0MyA1OCAxMDkgMTU4IDMgMTU1WiIvPjwvc3ZnPg%3D%3D" alt="MPI">
   </a>
 </p>
 
@@ -62,6 +53,8 @@ pip install "tyrannis[cache,spark,mpi]"
 ```
 
 The `spark` and `mpi` extras install the Python dependencies required by their respective backends. A compatible Spark or MPI runtime and execution infrastructure must also be available in the environment where those backends are used.
+
+Official Databricks support targets Databricks Runtime LTS ML environments.
 
 <br>
 
