@@ -339,7 +339,7 @@ def generate(
         else "failed"
         if any(item["state"] == "failed" for item in runtimes)
         else "not verified",
-        "green"
+        "blue"
         if approved
         else "red"
         if any(item["state"] == "failed" for item in runtimes)

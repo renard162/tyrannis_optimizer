@@ -5,23 +5,23 @@
   <a href="https://pypi.org/project/tyrannis/">
     <img alt="PyPI Version" src="https://img.shields.io/pypi/v/tyrannis">
   </a>
-  <a href="https://pypi.org/project/tyrannis/">
-    <img alt="Python Versions" src="https://img.shields.io/pypi/pyversions/tyrannis">
-  </a>
   <a href="https://github.com/renard162/tyrannis_optimizer/blob/master/LICENSE">
     <img alt="License" src="https://img.shields.io/github/license/renard162/tyrannis_optimizer">
   </a>
   <a href="https://github.com/renard162/tyrannis_optimizer">
     <img alt="GitHub Repository" src="https://img.shields.io/badge/github-repo-blue?logo=github">
   </a>
+  <a href="https://pypi.org/project/tyrannis/">
+    <img alt="Python Versions" src="https://img.shields.io/pypi/pyversions/tyrannis">
+  </a>
+  <a href="https://renard162.github.io/tyrannis_optimizer/badges/provenance.json">
+    <img alt="Databricks LTS ML" src="https://img.shields.io/endpoint?url=https%3A%2F%2Frenard162.github.io%2Ftyrannis_optimizer%2Fbadges%2Fdatabricks-lts-ml.json">
+  </a>
   <a href="https://github.com/renard162/tyrannis_optimizer/actions/workflows/ci.yml">
     <img alt="CI Status" src="https://img.shields.io/github/actions/workflow/status/renard162/tyrannis_optimizer/ci.yml?branch=master&label=CI">
   </a>
   <a href="https://renard162.github.io/tyrannis_optimizer/badges/provenance.json">
     <img alt="Code Coverage" src="https://img.shields.io/endpoint?url=https%3A%2F%2Frenard162.github.io%2Ftyrannis_optimizer%2Fbadges%2Fcoverage.json">
-  </a>
-  <a href="https://renard162.github.io/tyrannis_optimizer/badges/provenance.json">
-    <img alt="Databricks LTS ML" src="https://img.shields.io/endpoint?url=https%3A%2F%2Frenard162.github.io%2Ftyrannis_optimizer%2Fbadges%2Fdatabricks-lts-ml.json">
   </a>
 </p>
 
