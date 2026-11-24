@@ -16,6 +16,54 @@ The CI/CD infrastructure consists of two GitHub Actions workflows and three oper
 
 CI does not automatically publish packages to either index. CD-1 and CD-2 use separate event conditions within the same release workflow. A successful TestPyPI publication does not automatically trigger a PyPI publication.
 
+### 1.1. README badges and update policy
+
+All seven badges in [README.md](../README.md) are rendered by Shields.io. However, their data sources and update conditions differ: the coverage and Databricks badges use project-generated JSON endpoints, while the other dynamic badges obtain information directly from external services. The repository link badge is static.
+
+| Badge | Data source | Update condition |
+| --- | --- | --- |
+| PyPI Version | Official PyPI project JSON API, `info.version` | Changes when a published version becomes the version reported by PyPI and Shields.io refreshes its cached data. |
+| Python Versions | Python version classifiers in the official PyPI project metadata | Changes when a published release supplies different Python version classifiers and Shields.io refreshes its cached data. |
+| License | License metadata detected by GitHub | Changes when GitHub detects a different repository license and Shields.io refreshes its cached data. |
+| GitHub Repository | Static Shields.io badge URL | Does not require an automatic update. Its text, color, and logo are defined in the README. |
+| CI Status | GitHub Actions workflow status for `ci.yml`, filtered by `master` | Reflects the workflow status reported by GitHub after the cached badge is refreshed. The badge is not restricted to the `push` event. |
+| Code Coverage | GitHub Pages, `badges/coverage.json` | Regenerated from the designated CI coverage evidence and exposed after an authorized Pages deployment. |
+| Databricks LTS ML | GitHub Pages, `badges/databricks-lts-ml.json` | Regenerated from the current CI compatibility evidence and exposed after an authorized Pages deployment. |
+
+#### Project-generated badges
+
+The coverage and Databricks badges are produced by [generate_badges.py](../.github/scripts/generate_badges.py) and [pages.py](../.github/scripts/pages.py). On a non-cancelled push-triggered CI run on `master`, the Pages build consolidates evidence from the current workflow attempt, generates the endpoint JSON files, and includes them in the complete Pages site. The deployment guard requires the current `master` HEAD, the latest push-triggered CI run, and the matching run and attempt identifiers. Only an authorized, successful deployment replaces the publicly hosted endpoint data.
+
+The Pages build can run even when the CI Gate fails. If the gate or a required badge-producing job fails, both custom badges report `failed` (red); if approval is unavailable without an explicit failure, they report `not verified` (light grey). Missing or invalid evidence cannot be reused from a previous successful run.
+
+When the evidence is approved, the coverage badge displays the coverage percentage rounded to a whole number. Its color is based on the unrounded percentage: red below 75%, yellow from 75% up to but excluding 80%, and green at or above 80%. These thresholds affect presentation only, not CI acceptance. The Databricks badge displays the verified LTS ML runtime versions in blue. An individual runtime is listed only if its compatibility evidence is approved; see Section 2 for the distinction between runtime-equivalent dependency environments and actual Databricks clusters.
+
+The current published data and its execution provenance can be inspected directly:
+
+- [Coverage endpoint](https://renard162.github.io/tyrannis_optimizer/badges/coverage.json)
+- [Databricks LTS ML endpoint](https://renard162.github.io/tyrannis_optimizer/badges/databricks-lts-ml.json)
+- [Evidence and provenance](https://renard162.github.io/tyrannis_optimizer/badges/provenance.json)
+
+Pull request CI runs, manual CI dispatches, CD-1, and CD-2 do not deploy these endpoints. If a Pages deployment is skipped, rejected, or unsuccessful, the last successfully deployed data remains available until another deployment replaces it. Shields.io renders the JSON data when the endpoint badge is requested and its cached data is refreshed; a successful Pages deployment does not guarantee an immediate visual update.
+
+#### Standard badges and caching
+
+The PyPI Version and Python Versions badges query the [official PyPI project JSON API](https://pypi.org/pypi/tyrannis/json). They do not read the repository's current `pyproject.toml`, Git tags, GitHub Releases, or TestPyPI metadata. Updating a version or Python compatibility declaration in the source code does not change these badges until the relevant metadata is published to PyPI and retrieved by Shields.io. The Python Versions badge uses published `Programming Language :: Python :: X.Y` classifiers rather than deriving supported versions from `requires-python` or the CI matrix.
+
+The public Shields.io implementation currently defines the following service-specific cache lengths:
+
+| Standard badge | Configured Shields.io cache length |
+| --- | --- |
+| PyPI Version | 21,600 seconds (6 hours) |
+| Python Versions | 43,200 seconds (12 hours) |
+| CI Status | 60 seconds (1 minute) |
+
+These values are taken from the public Shields.io service implementations ([PyPI Version](https://github.com/badges/shields/blob/master/services/pypi/pypi-version.service.js), [Python Versions](https://github.com/badges/shields/blob/master/services/pypi/pypi-python-versions.service.js), and [CI Status](https://github.com/badges/shields/blob/master/services/github/github-actions-workflow-status.service.js)). They are external cache settings, not scheduled Tyrannis jobs or guaranteed refresh deadlines measured from package publication. The other dynamic badges are also subject to the service's applicable cache policies.
+
+The README does not specify a custom `cacheSeconds` value, and the project-generated JSON endpoints do not specify one either. Shields.io applies its own defaults and minimum cache lifetimes. Setting `cacheSeconds` below the applicable default does not force faster updates. Additional caching by the [PyPI CDN](https://docs.pypi.org/api/#caching), GitHub Pages delivery infrastructure, GitHub's [Camo image proxy](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-anonymized-urls), and the browser may further delay the displayed image.
+
+If a badge appears outdated, first inspect its authoritative data source. For PyPI badges, compare `info.version` and `info.classifiers` in the project JSON response with the expected published metadata. For custom badges, inspect the endpoint JSON and `provenance.json` to confirm the deployed commit and workflow attempt. Then open the Shields.io image URL directly, independently of the README. If the source data is correct but the displayed badge is stale, allow the external caches to refresh; another CI run or package publication is not required solely to refresh the image. A stale badge does not establish that a package publication or CI run has failed. See the Shields.io [badge parameter documentation](https://shields.io/badges/py-pi-version) and [endpoint badge documentation](https://shields.io/badges/endpoint-badge) for the external caching rules.
+
 ## 2. Continuous Integration (CI)
 
 ### 2.1. Triggering events
