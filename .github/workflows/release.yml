@@ -50,12 +50,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PUBLISH_TESTPYPI: ${{ inputs.publish_testpypi }}
           CONFIRM_VERSION: ${{ inputs.confirm_version }}
-        run: python3 .github/scripts/release.py guard
+        run: |
+          python3 .github/scripts/release.py guard
+          if [ "$PUBLISH_TESTPYPI" = true ]; then
+            python3 .github/scripts/release.py absent --index testpypi
+          fi
       - name: Authorize official release, tag and master ancestry
         if: ${{ github.event_name == 'release' }}
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 .github/scripts/release_official.py guard
+        run: |
+          python3 .github/scripts/release_official.py
+          python3 .github/scripts/release.py absent --index pypi
 
   ci:
     name: Validate authorized source with full CI
@@ -69,7 +75,7 @@ jobs:
   package-validate:
     name: Validate manual release identity and CI artifacts
     needs: [ci]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'renard162/tyrannis_optimizer' && github.ref == 'refs/heads/master' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_testpypi == false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -86,15 +92,12 @@ jobs:
           CONFIRM_VERSION: ${{ inputs.confirm_version }}
         run: python3 .github/scripts/release.py guard
       # An absent ID must not fall back to downloading every artifact in the run.
-      # Publication verifies its own download after protected-environment approval.
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        if: ${{ inputs.publish_testpypi == false }}
         with:
           artifact-ids: ${{ needs.ci.outputs.artifact_id || '0' }}
           merge-multiple: true
           path: release
       - name: Verify CI artifact identity and individual hashes
-        if: ${{ inputs.publish_testpypi == false }}
         env:
           MANIFEST_SHA256: ${{ needs.ci.outputs.manifest_sha256 }}
           PRODUCER_ATTEMPT: ${{ needs.ci.outputs.producer_attempt }}
@@ -104,8 +107,8 @@ jobs:
 
   publish-testpypi:
     name: Publish exact validated bytes to TestPyPI
-    needs: [ci, package-validate]
-    if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'renard162/tyrannis_optimizer' && github.ref == 'refs/heads/master' && inputs.publish_testpypi == true && needs.package-validate.result == 'success' }}
+    needs: [ci]
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_testpypi == true && needs.ci.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment:
@@ -124,18 +127,18 @@ jobs:
           artifact-ids: ${{ needs.ci.outputs.artifact_id || '0' }}
           merge-multiple: true
           path: release
-      - name: Verify original artifact identity and hashes without rebuilding
+      # Recheck after waiting for concurrency/environment approval, before upload.
+      - name: Recheck identity, hashes, version absence and manual authorization
         env:
           MANIFEST_SHA256: ${{ needs.ci.outputs.manifest_sha256 }}
           PRODUCER_ATTEMPT: ${{ needs.ci.outputs.producer_attempt }}
-        run: python3 .github/scripts/release.py verify --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
-      # Recheck after waiting for environment approval and immediately before upload.
-      - name: Recheck current master and explicit version authorization
-        env:
           GH_TOKEN: ${{ github.token }}
           PUBLISH_TESTPYPI: ${{ inputs.publish_testpypi }}
           CONFIRM_VERSION: ${{ inputs.confirm_version }}
-        run: python3 .github/scripts/release.py guard
+        run: |
+          python3 .github/scripts/release.py verify --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
+          python3 .github/scripts/release.py absent --index testpypi
+          python3 .github/scripts/release.py guard
       - name: Publish using TestPyPI Trusted Publishing
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
@@ -191,30 +194,10 @@ jobs:
             "$environment/bin/python" -I "$smoke_dir/smoke_package.py"
           done
 
-  release-validate:
-    name: Validate official release authorization
-    needs: [ci]
-    if: ${{ github.event_name == 'release' && github.event.action == 'published' && github.repository == 'renard162/tyrannis_optimizer' && github.event.release.draft == false && github.event.release.prerelease == false }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: Require official event, exact tag and master ancestry
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 .github/scripts/release_official.py guard
-      - name: Require version absence on PyPI
-        run: python3 .github/scripts/release_official.py absent
-
   publish-pypi:
     name: Publish exact validated bytes to PyPI
-    needs: [ci, release-validate]
-    if: ${{ github.event_name == 'release' && github.event.action == 'published' && github.repository == 'renard162/tyrannis_optimizer' && github.event.release.draft == false && github.event.release.prerelease == false && needs.release-validate.result == 'success' }}
+    needs: [ci]
+    if: ${{ github.event_name == 'release' && needs.ci.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment:
@@ -240,8 +223,8 @@ jobs:
           PRODUCER_ATTEMPT: ${{ needs.ci.outputs.producer_attempt }}
         run: |
           python3 .github/scripts/release.py verify --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
-          python3 .github/scripts/release_official.py absent
-          python3 .github/scripts/release_official.py guard
+          python3 .github/scripts/release.py absent --index pypi
+          python3 .github/scripts/release_official.py
       - name: Publish using official PyPI Trusted Publishing
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:

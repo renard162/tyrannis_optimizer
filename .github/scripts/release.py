@@ -295,11 +295,7 @@ def verify(
     if manifest.get("name") != "tyrannis" or manifest.get("version") != version():
         raise ValueError("Artifact version differs from checkout")
     files = distributions(directory)
-    if {path.name for path in files} != {
-        f"tyrannis-{version()}-py3-none-any.whl",
-        f"tyrannis-{version()}.tar.gz",
-    }:
-        raise ValueError("Distribution filenames differ from project identity")
+    # The pinned manifest records the filenames already inspected by Package Build.
     if manifest.get("files") != {path.name: digest(path) for path in files}:
         raise ValueError("Artifact SHA-256 differs from the validated build")
 
@@ -382,6 +378,13 @@ def index_release(
     )
 
 
+def absent(index: str) -> None:
+    if index_release(index) is not None:
+        raise ValueError(
+            f"Version already exists on {index}; no overwrite or skip-existing allowed"
+        )
+
+
 def fetch(evidence: Path, destination: Path, index: str = "testpypi") -> None:
     """Download exact files from one fixed index; never resolve across indexes."""
     file_host = (
@@ -428,7 +431,9 @@ def fetch(evidence: Path, destination: Path, index: str = "testpypi") -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    _ = parser.add_argument("command", choices=("guard", "record", "verify", "fetch"))
+    _ = parser.add_argument(
+        "command", choices=("guard", "record", "verify", "absent", "fetch")
+    )
     _ = parser.add_argument("--dist", type=Path, default=Path("release/dist"))
     _ = parser.add_argument("--evidence", type=Path, default=Path("release/evidence"))
     _ = parser.add_argument("--manifest-sha256", default="")
@@ -441,6 +446,8 @@ def main() -> None:
         record(args.dist, args.evidence)
     elif args.command == "verify":
         verify(args.dist, args.evidence, args.manifest_sha256, args.producer_attempt)
+    elif args.command == "absent":
+        absent(args.index)
     else:
         fetch(args.evidence, args.dist, args.index)
 

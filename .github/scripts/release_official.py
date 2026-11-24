@@ -1,6 +1,5 @@
 """Official-release authorization; shared artifact checks live in release.py."""
 
-import argparse
 import json
 import os
 import re
@@ -99,22 +98,5 @@ def guard() -> None:
         )
 
 
-def absent() -> None:
-    if release.index_release("pypi") is not None:
-        raise ValueError(
-            "Version already exists on PyPI; no overwrite or skip-existing allowed"
-        )
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    _ = parser.add_argument("command", choices=("guard", "absent"))
-    args = parser.parse_args()
-    if args.command == "guard":
-        guard()
-    else:
-        absent()
-
-
 if __name__ == "__main__":
-    main()
+    guard()
