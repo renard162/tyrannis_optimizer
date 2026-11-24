@@ -215,7 +215,7 @@ jobs:
           done
 
   release-validate:
-    name: Validate official release and select exact artifacts
+    name: Build and validate official release distributions
     if: ${{ github.event_name == 'release' && github.event.action == 'published' && github.repository == 'renard162/tyrannis_optimizer' && github.event.release.draft == false && github.event.release.prerelease == false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -235,21 +235,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 .github/scripts/release_official.py guard
-      - name: Select proven TestPyPI promotion or a single new build
-        id: select
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 .github/scripts/release_official.py select
-      - name: Retrieve the immutable original CD-1 artifact
-        if: ${{ steps.select.outputs.mode == 'promote' }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          artifact-ids: ${{ steps.select.outputs.artifact_id }}
-          run-id: ${{ steps.select.outputs.run_id }}
-          github-token: ${{ github.token }}
-          repository: renard162/tyrannis_optimizer
-          merge-multiple: true
-          path: release
+      - name: Require version absence on PyPI
+        run: python3 .github/scripts/release_official.py absent
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: ${{ env.UV_VERSION }}
@@ -261,9 +248,10 @@ jobs:
         run: |
           uv lock --check
           uv sync --locked --no-dev
-      - name: Build once only when TestPyPI has no such version
-        if: ${{ steps.select.outputs.mode == 'build' }}
-        run: uv build --out-dir release/dist
+      - name: Build wheel and sdist once in a fresh directory
+        run: |
+          test ! -e release
+          uv build --out-dir release/dist
       - name: Validate metadata strictly
         run: |
           shopt -s nullglob
@@ -273,23 +261,17 @@ jobs:
           test "${#sdists[@]}" -eq 1
           uvx --from twine==6.2.0 twine check --strict "${wheels[0]}" "${sdists[0]}"
       - name: Inspect contents and record source identity and SHA-256
-        if: ${{ steps.select.outputs.mode == 'build' }}
         id: record
         env:
           CI_RUN_ID: ${{ steps.guard.outputs.ci_run_id }}
           CI_RUN_ATTEMPT: ${{ steps.guard.outputs.ci_run_attempt }}
           CI_RUN_URL: ${{ steps.guard.outputs.ci_run_url }}
         run: python3 .github/scripts/release.py record
-      - name: Validate original provenance and bind evidence to this release
+      - name: Validate build provenance and bind evidence to this release
         id: seal
         env:
-          GH_TOKEN: ${{ github.token }}
-          MODE: ${{ steps.select.outputs.mode }}
-          SOURCE_ARTIFACT_ID: ${{ steps.select.outputs.artifact_id }}
           MANIFEST_SHA256: ${{ steps.record.outputs.manifest_sha256 }}
-        run: >-
-          python3 .github/scripts/release_official.py seal
-          --mode "$MODE" --artifact-id "$SOURCE_ARTIFACT_ID"
+        run: python3 .github/scripts/release_official.py seal
       - name: Install and smoke test both distributions independently
         run: |
           smoke_dir="$(mktemp -d "$RUNNER_TEMP/tyrannis-release.XXXXXX")"
@@ -307,10 +289,9 @@ jobs:
           done
       - name: Verify approved bytes after isolated installations
         env:
-          GH_TOKEN: ${{ github.token }}
           EVIDENCE_SHA256: ${{ steps.seal.outputs.evidence_sha256 }}
         run: python3 .github/scripts/release_official.py verify --evidence-sha256 "$EVIDENCE_SHA256"
-      - name: Upload exact approved distributions and original evidence
+      - name: Upload exact approved distributions and release evidence
         id: upload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -375,7 +356,6 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -388,7 +368,6 @@ jobs:
           path: release
       - name: Verify approved evidence and download only official PyPI files
         env:
-          GH_TOKEN: ${{ github.token }}
           EVIDENCE_SHA256: ${{ needs.release-validate.outputs.evidence_sha256 }}
         run: |
           python3 .github/scripts/release_official.py verify --evidence-sha256 "$EVIDENCE_SHA256"
