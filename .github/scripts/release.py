@@ -15,7 +15,7 @@ from http.client import HTTPException
 from pathlib import Path, PurePosixPath
 from typing import cast
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 REPOSITORY = "renard162/tyrannis_optimizer"
@@ -93,50 +93,9 @@ def guard() -> None:
     try:
         if mapping(api("git/ref/heads/master")["object"])["sha"] != sha:
             raise ValueError("Dispatched SHA is no longer the current master HEAD")
-        require_ci(sha)
     except Exception as error:
-        raise RuntimeError(f"Cannot verify master/CI approval: {error}") from error
-
-
-def approved_ci(run: dict[str, object], workflow_id: object, sha: str) -> bool:
-    return (
-        run.get("workflow_id") == workflow_id
-        and run.get("path") == ".github/workflows/ci.yml"
-        and run.get("head_sha") == sha
-        and run.get("head_branch") == "master"
-        and run.get("event") == "push"
-        and run.get("status") == "completed"
-        and run.get("conclusion") == "success"
-        and mapping(run.get("head_repository")).get("full_name") == REPOSITORY
-    )
-
-
-def require_ci(sha: str) -> None:
-    """Shared fail-closed push/master gate for dispatch and official releases."""
-    workflow = api("actions/workflows/ci.yml")
-    query = urlencode(
-        {
-            "branch": "master",
-            "event": "push",
-            "head_sha": sha,
-            "status": "success",
-            "per_page": 100,
-        }
-    )
-    for page in range(1, 11):
-        runs = objects(
-            api(f"actions/workflows/ci.yml/runs?{query}&page={page}")["workflow_runs"]
-        )
-        for run in runs:
-            if approved_ci(run, workflow["id"], sha):
-                output("ci_run_id", run["id"])
-                output("ci_run_attempt", run["run_attempt"])
-                output("ci_run_url", run["html_url"])
-                output("version", version())
-                return
-        if len(runs) < 100:
-            break
-    raise RuntimeError("No completed successful ci.yml push run on master for this SHA")
+        raise RuntimeError(f"Cannot verify current master: {error}") from error
+    output("version", version())
 
 
 def digest(path: Path) -> str:
@@ -307,9 +266,6 @@ def record(directory: Path, evidence: Path) -> None:
         "name": "tyrannis",
         "version": version(),
         "files": hashes,
-        "ci_run_id": os.environ.get("CI_RUN_ID"),
-        "ci_run_attempt": os.environ.get("CI_RUN_ATTEMPT"),
-        "ci_run_url": os.environ.get("CI_RUN_URL"),
     }
     path = evidence / "release.json"
     _ = path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")

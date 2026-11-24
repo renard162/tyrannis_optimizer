@@ -36,7 +36,7 @@ def tag() -> str:
 
 
 def guard() -> None:
-    """Recheck the live release, tag, ancestry and CI after environment approval."""
+    """Recheck the live release, tag, ancestry after environment approval."""
     expected = {
         "GITHUB_REPOSITORY": release.REPOSITORY,
         "GITHUB_EVENT_NAME": "release",
@@ -101,7 +101,7 @@ def guard() -> None:
         raise ValueError(
             "Release commit is not contained in the current master history"
         )
-    release.require_ci(sha)
+    release.output("version", release.version())
 
 
 def index_release(index: str) -> dict[str, object] | None:

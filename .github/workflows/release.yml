@@ -32,14 +32,46 @@ defaults:
     shell: bash
 
 jobs:
+  authorize:
+    name: Authorize source before CI
+    if: ${{ (github.event_name == 'workflow_dispatch' && github.repository == 'renard162/tyrannis_optimizer' && github.ref == 'refs/heads/master') || (github.event_name == 'release' && github.event.action == 'published' && github.repository == 'renard162/tyrannis_optimizer' && github.event.release.draft == false && github.event.release.prerelease == false) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Authorize manual master validation or TestPyPI publication
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH_TESTPYPI: ${{ inputs.publish_testpypi }}
+          CONFIRM_VERSION: ${{ inputs.confirm_version }}
+        run: python3 .github/scripts/release.py guard
+      - name: Authorize official release, tag and master ancestry
+        if: ${{ github.event_name == 'release' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/release_official.py guard
+
+  ci:
+    name: Validate authorized source with full CI
+    needs: [authorize]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
   package-build:
     name: Validate source and distributions
+    needs: [ci]
     if: ${{ github.event_name == 'workflow_dispatch' && github.repository == 'renard162/tyrannis_optimizer' && github.ref == 'refs/heads/master' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
-      actions: read
     outputs:
       version: ${{ steps.guard.outputs.version }}
       artifact_id: ${{ steps.upload.outputs.artifact-id }}
@@ -49,7 +81,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Require current master, exact version and successful push CI
+      - name: Require current master and exact version
         id: guard
         env:
           GH_TOKEN: ${{ github.token }}
@@ -81,10 +113,6 @@ jobs:
           uvx --from twine==6.2.0 twine check --strict "${wheels[0]}" "${sdists[0]}"
       - name: Inspect contents and record source identity and SHA-256
         id: record
-        env:
-          CI_RUN_ID: ${{ steps.guard.outputs.ci_run_id }}
-          CI_RUN_ATTEMPT: ${{ steps.guard.outputs.ci_run_attempt }}
-          CI_RUN_URL: ${{ steps.guard.outputs.ci_run_url }}
         run: python3 .github/scripts/release.py record
       - name: Install and smoke test both distributions independently
         run: |
@@ -117,13 +145,13 @@ jobs:
         env:
           ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
           ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
-          CI_RUN_URL: ${{ steps.guard.outputs.ci_run_url }}
+          CD_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
           MANIFEST_SHA256: ${{ steps.record.outputs.manifest_sha256 }}
           PUBLISH_TESTPYPI: ${{ inputs.publish_testpypi }}
         run: |
           {
             printf 'TestPyPI publication requested: %s\n\n' "$PUBLISH_TESTPYPI"
-            printf 'Validated artifacts: %s\n\nCI approval: %s\n\n' "$ARTIFACT_URL" "$CI_RUN_URL"
+            printf 'Validated artifacts: %s\n\nCD run (includes CI): %s\n\n' "$ARTIFACT_URL" "$CD_RUN_URL"
             printf 'Artifact archive SHA-256: `%s`\n\nManifest SHA-256: `%s`\n\n' "$ARTIFACT_DIGEST" "$MANIFEST_SHA256"
             cat release/evidence/SHA256SUMS
           } >> "$GITHUB_STEP_SUMMARY"
@@ -139,7 +167,6 @@ jobs:
       url: https://test.pypi.org/p/tyrannis
     permissions:
       contents: read
-      actions: read
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -156,7 +183,7 @@ jobs:
           MANIFEST_SHA256: ${{ needs.package-build.outputs.manifest_sha256 }}
         run: python3 .github/scripts/release.py verify --manifest-sha256 "$MANIFEST_SHA256"
       # Recheck after waiting for environment approval and immediately before upload.
-      - name: Recheck current master, CI approval and explicit version authorization
+      - name: Recheck current master and explicit version authorization
         env:
           GH_TOKEN: ${{ github.token }}
           PUBLISH_TESTPYPI: ${{ inputs.publish_testpypi }}
@@ -216,12 +243,12 @@ jobs:
 
   release-validate:
     name: Build and validate official release distributions
+    needs: [ci]
     if: ${{ github.event_name == 'release' && github.event.action == 'published' && github.repository == 'renard162/tyrannis_optimizer' && github.event.release.draft == false && github.event.release.prerelease == false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
       contents: read
-      actions: read
     outputs:
       artifact_id: ${{ steps.upload.outputs.artifact-id }}
       evidence_sha256: ${{ steps.seal.outputs.evidence_sha256 }}
@@ -230,7 +257,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Require official event, exact tag, master ancestry and push CI
+      - name: Require official event, exact tag and master ancestry
         id: guard
         env:
           GH_TOKEN: ${{ github.token }}
@@ -262,10 +289,6 @@ jobs:
           uvx --from twine==6.2.0 twine check --strict "${wheels[0]}" "${sdists[0]}"
       - name: Inspect contents and record source identity and SHA-256
         id: record
-        env:
-          CI_RUN_ID: ${{ steps.guard.outputs.ci_run_id }}
-          CI_RUN_ATTEMPT: ${{ steps.guard.outputs.ci_run_attempt }}
-          CI_RUN_URL: ${{ steps.guard.outputs.ci_run_url }}
         run: python3 .github/scripts/release.py record
       - name: Validate build provenance and bind evidence to this release
         id: seal
@@ -303,10 +326,10 @@ jobs:
         env:
           ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
           EVIDENCE_SHA256: ${{ steps.seal.outputs.evidence_sha256 }}
-          CI_RUN_URL: ${{ steps.guard.outputs.ci_run_url }}
+          CD_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}
         run: |
           {
-            printf 'Approved artifacts: %s\n\nCI: %s\n\nEvidence SHA-256: `%s`\n\n' "$ARTIFACT_URL" "$CI_RUN_URL" "$EVIDENCE_SHA256"
+            printf 'Approved artifacts: %s\n\nCD run (includes CI): %s\n\nEvidence SHA-256: `%s`\n\n' "$ARTIFACT_URL" "$CD_RUN_URL" "$EVIDENCE_SHA256"
             cat release/evidence/official.json
             cat release/evidence/SHA256SUMS
           } >> "$GITHUB_STEP_SUMMARY"
@@ -322,7 +345,6 @@ jobs:
       url: https://pypi.org/p/tyrannis
     permissions:
       contents: read
-      actions: read
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
