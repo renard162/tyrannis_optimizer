@@ -1,4 +1,4 @@
-"""Official-release gates and artifact integrity; shared checks live in release.py."""
+"""Official-release authorization; shared artifact checks live in release.py."""
 
 import argparse
 import json
@@ -7,10 +7,6 @@ import re
 from pathlib import Path
 
 import release
-
-ROOT = Path("release")
-EVIDENCE = ROOT / "evidence"
-DIST = ROOT / "dist"
 
 
 def read(path: Path) -> dict[str, object]:
@@ -101,63 +97,21 @@ def guard() -> None:
         raise ValueError(
             "Release commit is not contained in the current master history"
         )
-    release.output("version", release.version())
-
-
-def index_release(index: str) -> dict[str, object] | None:
-    return release.index_release(index)
 
 
 def absent() -> None:
-    if index_release("pypi") is not None:
+    if release.index_release("pypi") is not None:
         raise ValueError(
             "Version already exists on PyPI; no overwrite or skip-existing allowed"
         )
 
 
-def seal() -> None:
-    release.verify(DIST, EVIDENCE, os.environ["MANIFEST_SHA256"])
-    envelope = {
-        **release.identity(),
-        "tag": tag(),
-        "release_id": release.mapping(
-            read(Path(os.environ["GITHUB_EVENT_PATH"]))["release"]
-        )["id"],
-        "manifest_sha256": release.digest(EVIDENCE / "release.json"),
-    }
-    path = EVIDENCE / "official.json"
-    _ = path.write_text(json.dumps(envelope, indent=2) + "\n", encoding="utf-8")
-    release.output("evidence_sha256", release.digest(path))
-    print(json.dumps(envelope, indent=2))
-
-
-def verify(expected: str) -> None:
-    path = EVIDENCE / "official.json"
-    if not expected or release.digest(path) != expected:
-        raise ValueError("Official evidence differs from the validation job output")
-    envelope = read(path)
-    if any(envelope.get(key) != value for key, value in release.identity().items()):
-        raise ValueError("Official artifacts belong to another checkout/run/attempt")
-    received = release.mapping(read(Path(os.environ["GITHUB_EVENT_PATH"]))["release"])
-    if envelope.get("tag") != tag() or envelope.get("release_id") != received["id"]:
-        raise ValueError("Official artifact tag/release identity differs")
-    manifest_digest = str(envelope["manifest_sha256"])
-    if release.digest(EVIDENCE / "release.json") != manifest_digest:
-        raise ValueError("Original manifest was modified")
-    release.verify(DIST, EVIDENCE, manifest_digest)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    _ = parser.add_argument("command", choices=("guard", "seal", "verify", "absent"))
-    _ = parser.add_argument("--evidence-sha256", default="")
+    _ = parser.add_argument("command", choices=("guard", "absent"))
     args = parser.parse_args()
     if args.command == "guard":
         guard()
-    elif args.command == "seal":
-        seal()
-    elif args.command == "verify":
-        verify(args.evidence_sha256)
     else:
         absent()
 

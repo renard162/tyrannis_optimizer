@@ -1,4 +1,4 @@
-"""Fail closed on release provenance and audit the exact distribution bytes."""
+"""Validate package contents once, then verify release identity and exact bytes."""
 
 import argparse
 import hashlib
@@ -85,17 +85,17 @@ def guard() -> None:
     sha = os.environ["GITHUB_SHA"]
     if git("rev-parse", "HEAD") != sha:
         raise ValueError("Checkout does not match the dispatched SHA")
+    current = version()
     enabled = os.environ.get("PUBLISH_TESTPYPI")
     if enabled not in {"true", "false"}:
         raise ValueError("Publication input must be an explicit boolean")
-    if enabled == "true" and os.environ.get("CONFIRM_VERSION") != version():
+    if enabled == "true" and os.environ.get("CONFIRM_VERSION") != current:
         raise ValueError("Confirmed version must exactly match pyproject.toml")
     try:
         if mapping(api("git/ref/heads/master")["object"])["sha"] != sha:
             raise ValueError("Dispatched SHA is no longer the current master HEAD")
     except Exception as error:
         raise RuntimeError(f"Cannot verify current master: {error}") from error
-    output("version", version())
 
 
 def digest(path: Path) -> str:
@@ -108,9 +108,10 @@ def distributions(directory: Path) -> list[Path]:
     if len(wheels) != 1 or len(sdists) != 1:
         raise ValueError("Expected exactly one wheel and one sdist")
     files = wheels + sdists
-    # uv writes this ignore file in its output directory; nothing else is allowed.
-    if {p.name for p in directory.iterdir()} - {p.name for p in files} - {".gitignore"}:
+    if set(directory.iterdir()) != set(files):
         raise ValueError("Unexpected files in distribution directory")
+    if any(path.is_symlink() or not path.is_file() for path in files):
+        raise ValueError("Distributions must be regular files")
     return files
 
 
@@ -269,25 +270,37 @@ def record(directory: Path, evidence: Path) -> None:
     }
     path = evidence / "release.json"
     _ = path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    _ = (evidence / "SHA256SUMS").write_text(
-        "".join(f"{value}  {name}\n" for name, value in hashes.items()),
-        encoding="utf-8",
-    )
     output("manifest_sha256", digest(path))
+    output("producer_attempt", manifest["run_attempt"])
     for name, value in hashes.items():
         print(f"{value}  {name}")
 
 
-def verify(directory: Path, evidence: Path, expected: str) -> None:
+def verify(
+    directory: Path, evidence: Path, expected: str, producer_attempt: str
+) -> None:
     path = evidence / "release.json"
     if not expected or digest(path) != expected:
         raise ValueError("Manifest digest differs from the build job output")
     manifest = mapping(json.loads(path.read_text("utf-8")))
-    if any(manifest.get(key) != value for key, value in identity().items()):
+    # A failed-jobs rerun can consume a successful build from an earlier attempt.
+    # Trust the producer's output, never the consumer's current run_attempt.
+    if re.fullmatch(r"[1-9][0-9]*", producer_attempt) is None:
+        raise ValueError("Missing or invalid producer attempt")
+    expected_identity = {**identity(), "run_attempt": producer_attempt}
+    if expected_identity["sha"] != os.environ.get(
+        "GITHUB_SHA", expected_identity["sha"]
+    ) or any(manifest.get(key) != value for key, value in expected_identity.items()):
         raise ValueError("Artifacts belong to another checkout/run/attempt")
     if manifest.get("name") != "tyrannis" or manifest.get("version") != version():
         raise ValueError("Artifact version differs from checkout")
-    if manifest.get("files") != inspect(directory):
+    files = distributions(directory)
+    if {path.name for path in files} != {
+        f"tyrannis-{version()}-py3-none-any.whl",
+        f"tyrannis-{version()}.tar.gz",
+    }:
+        raise ValueError("Distribution filenames differ from project identity")
+    if manifest.get("files") != {path.name: digest(path) for path in files}:
         raise ValueError("Artifact SHA-256 differs from the validated build")
 
 
@@ -419,6 +432,7 @@ def main() -> None:
     _ = parser.add_argument("--dist", type=Path, default=Path("release/dist"))
     _ = parser.add_argument("--evidence", type=Path, default=Path("release/evidence"))
     _ = parser.add_argument("--manifest-sha256", default="")
+    _ = parser.add_argument("--producer-attempt", default="")
     _ = parser.add_argument("--index", choices=("testpypi", "pypi"), default="testpypi")
     args = parser.parse_args()
     if args.command == "guard":
@@ -426,7 +440,7 @@ def main() -> None:
     elif args.command == "record":
         record(args.dist, args.evidence)
     elif args.command == "verify":
-        verify(args.dist, args.evidence, args.manifest_sha256)
+        verify(args.dist, args.evidence, args.manifest_sha256, args.producer_attempt)
     else:
         fetch(args.evidence, args.dist, args.index)
 

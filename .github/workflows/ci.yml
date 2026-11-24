@@ -16,6 +16,21 @@ on:
       - '.github/workflows/pages.yml'
   workflow_dispatch:
   workflow_call:
+    inputs:
+      upload_distributions:
+        description: Persist validated distributions for the calling CD workflow
+        type: boolean
+        default: false
+    outputs:
+      artifact_id:
+        description: Immutable artifact produced by Package Build
+        value: ${{ jobs.package-build.outputs.artifact_id }}
+      manifest_sha256:
+        description: SHA-256 of the manifest containing individual distribution hashes
+        value: ${{ jobs.package-build.outputs.manifest_sha256 }}
+      producer_attempt:
+        description: Attempt that actually built the distributions (may precede a rerun)
+        value: ${{ jobs.package-build.outputs.producer_attempt }}
 
 permissions:
   contents: read
@@ -238,6 +253,10 @@ jobs:
     name: Package Build
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      manifest_sha256: ${{ steps.record.outputs.manifest_sha256 }}
+      producer_attempt: ${{ steps.record.outputs.producer_attempt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -250,33 +269,70 @@ jobs:
           cache-dependency-glob: uv.lock
           cache-suffix: package-build
       - name: Validate locked base dependencies
-        run: uv sync --locked --no-dev
+        run: |
+          uv lock --check
+          uv sync --locked --no-dev
       - name: Build wheel and sdist
-        run: uv build
+        run: |
+          test ! -e release
+          uv build --out-dir release/dist
+          rm release/dist/.gitignore
       - name: Verify artifacts and metadata
         shell: bash
         run: |
           shopt -s nullglob
-          wheels=(dist/*.whl)
-          sdists=(dist/*.tar.gz)
+          wheels=(release/dist/*.whl)
+          sdists=(release/dist/*.tar.gz)
           test "${#wheels[@]}" -eq 1
           test "${#sdists[@]}" -eq 1
           uvx --from twine==6.2.0 twine check --strict "${wheels[0]}" "${sdists[0]}"
+      - name: Inspect contents and record source identity and SHA-256
+        id: record
+        run: python3 .github/scripts/release.py record
       - name: Install and smoke test both distributions independently
         shell: bash
         run: |
           smoke_dir="$(mktemp -d "$RUNNER_TEMP/tyrannis-package.XXXXXX")"
           cp .github/scripts/smoke_package.py "$smoke_dir/smoke_package.py"
-          wheels=("$GITHUB_WORKSPACE"/dist/*.whl)
-          sdists=("$GITHUB_WORKSPACE"/dist/*.tar.gz)
+          wheels=("$GITHUB_WORKSPACE"/release/dist/*.whl)
+          sdists=("$GITHUB_WORKSPACE"/release/dist/*.tar.gz)
           cd "$smoke_dir"
           unset PYTHONPATH
           for artifact in "${wheels[0]}" "${sdists[0]}"; do
             environment="$smoke_dir/$(basename "$artifact").venv"
             uv venv --python 3.12 "$environment"
             uv pip install --python "$environment/bin/python" "$artifact"
+            uv pip check --python "$environment/bin/python"
             "$environment/bin/python" -I "$smoke_dir/smoke_package.py"
           done
+      - name: Confirm approved bytes survived installation checks
+        env:
+          MANIFEST_SHA256: ${{ steps.record.outputs.manifest_sha256 }}
+          PRODUCER_ATTEMPT: ${{ steps.record.outputs.producer_attempt }}
+        run: >-
+          python3 .github/scripts/release.py verify
+          --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
+      - name: Persist validated distributions for CD
+        if: ${{ inputs.upload_distributions == true }}
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tyrannis-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release/
+          if-no-files-found: error
+          # Keep original approved bytes for interrupted-publication recovery (CD-06).
+          retention-days: 90
+      - name: Report artifact identity for publication approval
+        if: ${{ inputs.upload_distributions == true }}
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          MANIFEST_SHA256: ${{ steps.record.outputs.manifest_sha256 }}
+        run: |
+          {
+            printf 'Validated artifacts: %s (ID %s)\n\nManifest SHA-256: `%s`\n\n' "$ARTIFACT_URL" "$ARTIFACT_ID" "$MANIFEST_SHA256"
+            cat release/evidence/release.json
+          } >> "$GITHUB_STEP_SUMMARY"
 
   ci-gate:
     name: CI Gate
