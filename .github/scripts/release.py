@@ -7,11 +7,14 @@ import os
 import re
 import subprocess
 import tarfile
+import time
 import tomllib
 import zipfile
 from email.parser import BytesParser
+from http.client import HTTPException
 from pathlib import Path, PurePosixPath
 from typing import cast
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
@@ -332,9 +335,86 @@ def verify(directory: Path, evidence: Path, expected: str) -> None:
         raise ValueError("Artifact SHA-256 differs from the validated build")
 
 
+def index_release(
+    index: str, *, wait_for_publication: bool = False
+) -> dict[str, object] | None:
+    """Return version-scoped info/urls, confirmed absence, or fail closed.
+
+    A project response describes the latest version in info; only its releases
+    key identifies the requested version. Even an empty file list is existence
+    evidence and must never authorize a new build/upload.
+    """
+    hosts = {"testpypi": "test.pypi.org", "pypi": "pypi.org"}
+    if index not in hosts:
+        raise ValueError("Unknown package index")
+    current = version()
+    base = f"https://{hosts[index]}/pypi/tyrannis"
+    deadline = time.monotonic() + 180
+    reason = "metadata unavailable"
+    for attempt, delay in enumerate((0, 2, 4, 8, 16, 30), start=1):
+        if time.monotonic() + delay >= deadline:
+            break
+        if delay:
+            print(f"{index} {current}: {reason}; retry {attempt}/6 in {delay}s")
+            time.sleep(delay)
+        missing = 0
+        for project_endpoint, url in (
+            (False, f"{base}/{current}/json"),
+            (True, f"{base}/json"),
+        ):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                with urlopen(url, timeout=min(30, remaining)) as response:
+                    result = mapping(json.load(response))
+            except HTTPError as error:
+                reason = f"{url}: HTTP {error.code}"
+                if error.code == 404:
+                    missing += 1
+                elif error.code not in {408, 429} and not 500 <= error.code <= 599:
+                    raise
+                continue
+            except (URLError, TimeoutError, ConnectionError, HTTPException) as error:
+                reason = f"{url}: {error}"
+                continue
+            # Invalid JSON, identity or schema is not a transient absence.
+            info = mapping(result["info"])
+            if info.get("name") != "tyrannis" or not isinstance(
+                info.get("version"), str
+            ):
+                raise ValueError(f"{index} returned inconsistent project identity")
+            if project_endpoint:
+                releases = mapping(result["releases"])
+                if current not in releases:
+                    if info["version"] == current:
+                        raise ValueError(
+                            f"{index} returned inconsistent release listing"
+                        )
+                    missing += 1
+                    reason = f"{url}: version {current} not listed"
+                    continue
+                files = objects(releases[current])
+            else:
+                if info["version"] != current:
+                    raise ValueError(f"{index} returned inconsistent release identity")
+                files = objects(result["urls"])
+            if time.monotonic() >= deadline:
+                break
+            # Do not carry latest-version metadata into a version-scoped result.
+            return {"info": {"name": "tyrannis", "version": current}, "urls": files}
+        if time.monotonic() >= deadline:
+            break
+        if missing == 2 and not wait_for_publication:
+            return None
+    raise RuntimeError(
+        f"Cannot obtain {index} metadata for tyrannis {current} "
+        f"within 6 attempts / 180s: {reason}"
+    )
+
+
 def fetch(evidence: Path, destination: Path, index: str = "testpypi") -> None:
     """Download exact files from one fixed index; never resolve across indexes."""
-    host = "test.pypi.org" if index == "testpypi" else "pypi.org"
     file_host = (
         "test-files.pythonhosted.org"
         if index == "testpypi"
@@ -345,18 +425,18 @@ def fetch(evidence: Path, destination: Path, index: str = "testpypi") -> None:
     manifest = mapping(json.loads((evidence / "release.json").read_text("utf-8")))
     if manifest.get("version") != version() or manifest.get("name") != "tyrannis":
         raise ValueError(f"{index} verification requires the original checkout")
-    with urlopen(
-        f"https://{host}/pypi/tyrannis/{version()}/json", timeout=30
-    ) as response:
-        release = mapping(json.load(response))
-    info = mapping(release["info"])
-    if info.get("name") != "tyrannis" or info.get("version") != version():
-        raise ValueError(f"{index} project identity differs")
+    release = index_release(index, wait_for_publication=True)
+    if release is None:
+        raise RuntimeError(f"{index} published version is unavailable")
     expected = mapping(manifest["files"])
     published = objects(release["urls"])
-    if {item["filename"] for item in published} != set(expected):
+    if (
+        len(published) != 2
+        or {item["filename"] for item in published} != set(expected)
+        or set(expected)
+        != {f"tyrannis-{version()}-py3-none-any.whl", f"tyrannis-{version()}.tar.gz"}
+    ):
         raise ValueError(f"{index} file set differs from the validated build")
-    destination.mkdir(parents=True, exist_ok=False)
     for item in published:
         name, url = str(item["filename"]), str(item["url"])
         parsed = urlparse(url)
@@ -368,6 +448,9 @@ def fetch(evidence: Path, destination: Path, index: str = "testpypi") -> None:
             raise ValueError(f"Unexpected {index} download location")
         if mapping(item["digests"])["sha256"] != expected[name]:
             raise ValueError(f"{index} reports a different hash for {name}")
+    destination.mkdir(parents=True, exist_ok=False)
+    for item in published:
+        name, url = str(item["filename"]), str(item["url"])
         with urlopen(url, timeout=60) as response:
             _ = (destination / name).write_bytes(response.read())
     if inspect(destination) != expected:

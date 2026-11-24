@@ -5,8 +5,6 @@ import json
 import os
 import re
 from pathlib import Path
-from urllib.error import HTTPError
-from urllib.request import urlopen
 
 import release
 
@@ -112,20 +110,7 @@ def guard() -> None:
 
 
 def index_release(index: str) -> dict[str, object] | None:
-    host = {"testpypi": "test.pypi.org", "pypi": "pypi.org"}[index]
-    try:
-        with urlopen(
-            f"https://{host}/pypi/tyrannis/{release.version()}/json", timeout=30
-        ) as response:
-            result = release.mapping(json.load(response))
-    except HTTPError as error:
-        if error.code == 404:
-            return None
-        raise
-    info = release.mapping(result["info"])
-    if info.get("name") != "tyrannis" or info.get("version") != release.version():
-        raise ValueError(f"{index} returned inconsistent project identity")
-    return result
+    return release.index_release(index)
 
 
 def absent() -> None:
@@ -192,7 +177,7 @@ def source(artifact: dict[str, object]) -> dict[str, str] | None:
 
 
 def select() -> None:
-    """Only a genuine 404 permits a new build; ambiguous promotion fails closed."""
+    """Only confirmed absence permits a new build; ambiguous promotion fails closed."""
     if ROOT.exists():
         raise ValueError("Release directory must be fresh")
     absent()
