@@ -90,43 +90,49 @@ def guard() -> None:
     try:
         if mapping(api("git/ref/heads/master")["object"])["sha"] != sha:
             raise ValueError("Dispatched SHA is no longer the current master HEAD")
-        workflow = api("actions/workflows/ci.yml")
-        query = urlencode(
-            {
-                "branch": "master",
-                "event": "push",
-                "head_sha": sha,
-                "status": "success",
-                "per_page": 100,
-            }
-        )
-        for page in range(1, 11):
-            runs = objects(
-                api(f"actions/workflows/ci.yml/runs?{query}&page={page}")[
-                    "workflow_runs"
-                ]
-            )
-            for run in runs:
-                if (
-                    run.get("workflow_id") == workflow["id"]
-                    and run.get("path") == ".github/workflows/ci.yml"
-                    and run.get("head_sha") == sha
-                    and run.get("head_branch") == "master"
-                    and run.get("event") == "push"
-                    and run.get("status") == "completed"
-                    and run.get("conclusion") == "success"
-                    and mapping(run.get("head_repository")).get("full_name")
-                    == REPOSITORY
-                ):
-                    output("ci_run_id", run["id"])
-                    output("ci_run_attempt", run["run_attempt"])
-                    output("ci_run_url", run["html_url"])
-                    output("version", version())
-                    return
-            if len(runs) < 100:
-                break
+        require_ci(sha)
     except Exception as error:
         raise RuntimeError(f"Cannot verify master/CI approval: {error}") from error
+
+
+def approved_ci(run: dict[str, object], workflow_id: object, sha: str) -> bool:
+    return (
+        run.get("workflow_id") == workflow_id
+        and run.get("path") == ".github/workflows/ci.yml"
+        and run.get("head_sha") == sha
+        and run.get("head_branch") == "master"
+        and run.get("event") == "push"
+        and run.get("status") == "completed"
+        and run.get("conclusion") == "success"
+        and mapping(run.get("head_repository")).get("full_name") == REPOSITORY
+    )
+
+
+def require_ci(sha: str) -> None:
+    """Shared fail-closed push/master gate for dispatch and official releases."""
+    workflow = api("actions/workflows/ci.yml")
+    query = urlencode(
+        {
+            "branch": "master",
+            "event": "push",
+            "head_sha": sha,
+            "status": "success",
+            "per_page": 100,
+        }
+    )
+    for page in range(1, 11):
+        runs = objects(
+            api(f"actions/workflows/ci.yml/runs?{query}&page={page}")["workflow_runs"]
+        )
+        for run in runs:
+            if approved_ci(run, workflow["id"], sha):
+                output("ci_run_id", run["id"])
+                output("ci_run_attempt", run["run_attempt"])
+                output("ci_run_url", run["html_url"])
+                output("version", version())
+                return
+        if len(runs) < 100:
+            break
     raise RuntimeError("No completed successful ci.yml push run on master for this SHA")
 
 
@@ -326,38 +332,46 @@ def verify(directory: Path, evidence: Path, expected: str) -> None:
         raise ValueError("Artifact SHA-256 differs from the validated build")
 
 
-def fetch(evidence: Path, destination: Path) -> None:
-    """Download exact files from TestPyPI; never resolve Tyrannis across indexes."""
+def fetch(evidence: Path, destination: Path, index: str = "testpypi") -> None:
+    """Download exact files from one fixed index; never resolve across indexes."""
+    host = "test.pypi.org" if index == "testpypi" else "pypi.org"
+    file_host = (
+        "test-files.pythonhosted.org"
+        if index == "testpypi"
+        else "files.pythonhosted.org"
+    )
+    if index not in {"testpypi", "pypi"}:
+        raise ValueError("Unknown package index")
     manifest = mapping(json.loads((evidence / "release.json").read_text("utf-8")))
     if manifest.get("version") != version() or manifest.get("name") != "tyrannis":
-        raise ValueError("TestPyPI verification requires the original checkout")
+        raise ValueError(f"{index} verification requires the original checkout")
     with urlopen(
-        f"https://test.pypi.org/pypi/tyrannis/{version()}/json", timeout=30
+        f"https://{host}/pypi/tyrannis/{version()}/json", timeout=30
     ) as response:
         release = mapping(json.load(response))
     info = mapping(release["info"])
     if info.get("name") != "tyrannis" or info.get("version") != version():
-        raise ValueError("TestPyPI project identity differs")
+        raise ValueError(f"{index} project identity differs")
     expected = mapping(manifest["files"])
     published = objects(release["urls"])
     if {item["filename"] for item in published} != set(expected):
-        raise ValueError("TestPyPI file set differs from the validated build")
+        raise ValueError(f"{index} file set differs from the validated build")
     destination.mkdir(parents=True, exist_ok=False)
     for item in published:
         name, url = str(item["filename"]), str(item["url"])
         parsed = urlparse(url)
         if (
             parsed.scheme != "https"
-            or parsed.hostname != "test-files.pythonhosted.org"
+            or parsed.hostname != file_host
             or PurePosixPath(name).name != name
         ):
-            raise ValueError("Unexpected TestPyPI download location")
+            raise ValueError(f"Unexpected {index} download location")
         if mapping(item["digests"])["sha256"] != expected[name]:
-            raise ValueError(f"TestPyPI reports a different hash for {name}")
+            raise ValueError(f"{index} reports a different hash for {name}")
         with urlopen(url, timeout=60) as response:
             _ = (destination / name).write_bytes(response.read())
     if inspect(destination) != expected:
-        raise ValueError("Downloaded TestPyPI bytes differ from validated artifacts")
+        raise ValueError(f"Downloaded {index} bytes differ from validated artifacts")
 
 
 def main() -> None:
@@ -366,6 +380,7 @@ def main() -> None:
     _ = parser.add_argument("--dist", type=Path, default=Path("release/dist"))
     _ = parser.add_argument("--evidence", type=Path, default=Path("release/evidence"))
     _ = parser.add_argument("--manifest-sha256", default="")
+    _ = parser.add_argument("--index", choices=("testpypi", "pypi"), default="testpypi")
     args = parser.parse_args()
     if args.command == "guard":
         guard()
@@ -374,7 +389,7 @@ def main() -> None:
     elif args.command == "verify":
         verify(args.dist, args.evidence, args.manifest_sha256)
     else:
-        fetch(args.evidence, args.dist)
+        fetch(args.evidence, args.dist, args.index)
 
 
 if __name__ == "__main__":

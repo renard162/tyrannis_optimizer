@@ -1,6 +1,8 @@
-name: Controlled TestPyPI release
+name: Controlled package release
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       publish_testpypi:
@@ -19,7 +21,7 @@ permissions:
 
 # Independent of CI/Pages concurrency; never interrupt an in-flight upload.
 concurrency:
-  group: cd-testpypi-${{ github.repository }}
+  group: ${{ github.event_name == 'release' && format('cd-pypi-{0}-{1}', github.repository, github.ref) || format('cd-testpypi-{0}', github.repository) }}
   cancel-in-progress: false
 
 env:
@@ -170,7 +172,7 @@ jobs:
   verify-testpypi:
     name: Verify published TestPyPI files and installation
     needs: [package-build, publish-testpypi]
-    if: ${{ inputs.publish_testpypi == true && needs.publish-testpypi.result == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_testpypi == true && needs.publish-testpypi.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -211,3 +213,210 @@ jobs:
             uv pip check --python "$environment/bin/python"
             "$environment/bin/python" -I "$smoke_dir/smoke_package.py"
           done
+
+  release-validate:
+    name: Validate official release and select exact artifacts
+    if: ${{ github.event_name == 'release' && github.event.action == 'published' && github.repository == 'renard162/tyrannis_optimizer' && github.event.release.draft == false && github.event.release.prerelease == false }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      evidence_sha256: ${{ steps.seal.outputs.evidence_sha256 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Require official event, exact tag, master ancestry and push CI
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/release_official.py guard
+      - name: Select proven TestPyPI promotion or a single new build
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/release_official.py select
+      - name: Retrieve the immutable original CD-1 artifact
+        if: ${{ steps.select.outputs.mode == 'promote' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ steps.select.outputs.artifact_id }}
+          run-id: ${{ steps.select.outputs.run_id }}
+          github-token: ${{ github.token }}
+          repository: renard162/tyrannis_optimizer
+          merge-multiple: true
+          path: release
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: release-official
+      - name: Check lock and install locked base dependencies
+        run: |
+          uv lock --check
+          uv sync --locked --no-dev
+      - name: Build once only when TestPyPI has no such version
+        if: ${{ steps.select.outputs.mode == 'build' }}
+        run: uv build --out-dir release/dist
+      - name: Validate metadata strictly
+        run: |
+          shopt -s nullglob
+          wheels=(release/dist/*.whl)
+          sdists=(release/dist/*.tar.gz)
+          test "${#wheels[@]}" -eq 1
+          test "${#sdists[@]}" -eq 1
+          uvx --from twine==6.2.0 twine check --strict "${wheels[0]}" "${sdists[0]}"
+      - name: Inspect contents and record source identity and SHA-256
+        if: ${{ steps.select.outputs.mode == 'build' }}
+        id: record
+        env:
+          CI_RUN_ID: ${{ steps.guard.outputs.ci_run_id }}
+          CI_RUN_ATTEMPT: ${{ steps.guard.outputs.ci_run_attempt }}
+          CI_RUN_URL: ${{ steps.guard.outputs.ci_run_url }}
+        run: python3 .github/scripts/release.py record
+      - name: Validate original provenance and bind evidence to this release
+        id: seal
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ steps.select.outputs.mode }}
+          SOURCE_ARTIFACT_ID: ${{ steps.select.outputs.artifact_id }}
+          MANIFEST_SHA256: ${{ steps.record.outputs.manifest_sha256 }}
+        run: >-
+          python3 .github/scripts/release_official.py seal
+          --mode "$MODE" --artifact-id "$SOURCE_ARTIFACT_ID"
+      - name: Install and smoke test both distributions independently
+        run: |
+          smoke_dir="$(mktemp -d "$RUNNER_TEMP/tyrannis-release.XXXXXX")"
+          cp .github/scripts/smoke_package.py "$smoke_dir/smoke_package.py"
+          wheels=("$GITHUB_WORKSPACE"/release/dist/*.whl)
+          sdists=("$GITHUB_WORKSPACE"/release/dist/*.tar.gz)
+          cd "$smoke_dir"
+          unset PYTHONPATH
+          for artifact in "${wheels[0]}" "${sdists[0]}"; do
+            environment="$smoke_dir/$(basename "$artifact").venv"
+            uv venv --python 3.12 "$environment"
+            uv pip install --python "$environment/bin/python" "$artifact"
+            uv pip check --python "$environment/bin/python"
+            "$environment/bin/python" -I "$smoke_dir/smoke_package.py"
+          done
+      - name: Verify approved bytes after isolated installations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVIDENCE_SHA256: ${{ steps.seal.outputs.evidence_sha256 }}
+        run: python3 .github/scripts/release_official.py verify --evidence-sha256 "$EVIDENCE_SHA256"
+      - name: Upload exact approved distributions and original evidence
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pypi-${{ steps.guard.outputs.version }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: release/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Report official release evidence for environment approval
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+          EVIDENCE_SHA256: ${{ steps.seal.outputs.evidence_sha256 }}
+          CI_RUN_URL: ${{ steps.guard.outputs.ci_run_url }}
+        run: |
+          {
+            printf 'Approved artifacts: %s\n\nCI: %s\n\nEvidence SHA-256: `%s`\n\n' "$ARTIFACT_URL" "$CI_RUN_URL" "$EVIDENCE_SHA256"
+            cat release/evidence/official.json
+            cat release/evidence/SHA256SUMS
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish-pypi:
+    name: Publish exact validated bytes to PyPI
+    needs: [release-validate]
+    if: ${{ github.event_name == 'release' && github.event.action == 'published' && github.repository == 'renard162/tyrannis_optimizer' && github.event.release.draft == false && github.event.release.prerelease == false && needs.release-validate.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: pypi
+      url: https://pypi.org/p/tyrannis
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.release-validate.outputs.artifact_id }}
+          merge-multiple: true
+          path: release
+      - name: Recheck provenance, hashes, version absence and live tag after approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVIDENCE_SHA256: ${{ needs.release-validate.outputs.evidence_sha256 }}
+        run: |
+          python3 .github/scripts/release_official.py verify --evidence-sha256 "$EVIDENCE_SHA256"
+          python3 .github/scripts/release_official.py absent
+          python3 .github/scripts/release_official.py guard
+      - name: Publish using official PyPI Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: release/dist/
+          skip-existing: false
+
+  verify-pypi:
+    name: Verify irreversible PyPI publication
+    needs: [release-validate, publish-pypi]
+    if: ${{ github.event_name == 'release' && needs.publish-pypi.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.release-validate.outputs.artifact_id }}
+          merge-multiple: true
+          path: release
+      - name: Verify approved evidence and download only official PyPI files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVIDENCE_SHA256: ${{ needs.release-validate.outputs.evidence_sha256 }}
+        run: |
+          python3 .github/scripts/release_official.py verify --evidence-sha256 "$EVIDENCE_SHA256"
+          python3 .github/scripts/release.py fetch --index pypi --dist published
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: "3.12"
+          enable-cache: false
+      - name: Install locked dependencies separately and smoke test published files
+        run: |
+          smoke_dir="$(mktemp -d "$RUNNER_TEMP/tyrannis-pypi.XXXXXX")"
+          cp .github/scripts/smoke_package.py "$smoke_dir/smoke_package.py"
+          uv export --locked --no-dev --no-emit-project --no-hashes --format requirements-txt > "$smoke_dir/dependencies.txt"
+          wheels=("$GITHUB_WORKSPACE"/published/*.whl)
+          sdists=("$GITHUB_WORKSPACE"/published/*.tar.gz)
+          cd "$smoke_dir"
+          unset PYTHONPATH
+          for artifact in "${wheels[0]}" "${sdists[0]}"; do
+            environment="$smoke_dir/$(basename "$artifact").venv"
+            uv venv --python 3.12 "$environment"
+            uv pip install --python "$environment/bin/python" --default-index https://pypi.org/simple -r dependencies.txt
+            uv pip install --python "$environment/bin/python" --default-index https://pypi.org/simple --no-deps "$artifact"
+            uv pip check --python "$environment/bin/python"
+            "$environment/bin/python" -I "$smoke_dir/smoke_package.py"
+          done
+      - name: Record failed verification of a potentially irreversible publication
+        if: ${{ failure() }}
+        run: |
+          echo '::error::PyPI upload succeeded, but post-publication verification failed. Do not republish automatically.'
+          echo 'PyPI publication may be irreversible. Investigate the original artifact and published files; no automatic retry of upload.' >> "$GITHUB_STEP_SUMMARY"
