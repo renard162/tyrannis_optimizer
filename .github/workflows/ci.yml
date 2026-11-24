@@ -184,13 +184,13 @@ jobs:
             '.[spark]' 'pytest==9.1.1' 'pytest-timeout==2.4.0' \
             --requirements "$RUNNER_TEMP/databricks-requirements.txt"
       # The helper validates versions/import provenance and uv pip check first,
-      # then runs the existing tests and check_junit.py before recording success.
-      - name: Validate dependencies, run Spark tests and write evidence
+      # then runs the existing tests and validates their temporary JUnit report.
+      - name: Validate dependencies and run Spark tests
         env:
           RUNTIME: ${{ matrix.runtime }}
         run: >-
           "$DATABRICKS_ENV/bin/python" .github/scripts/databricks_compat.py
-          test "$RUNTIME" "reports/databricks-$RUNTIME"
+          test "$RUNTIME"
 
   mpi-tests:
     name: MPI Tests
