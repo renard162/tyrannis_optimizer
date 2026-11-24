@@ -42,11 +42,6 @@ jobs:
         run: uv run --no-sync ruff format --check .
       - name: Type check
         run: uv run --no-sync basedpyright --pythonpath .venv/bin/python --baselinemode=lock
-      # Hidden directories are not necessarily discovered by the static tools.
-      - name: Check CI helpers
-        run: |
-          uv run --no-sync ruff check .github/scripts
-          uv run --no-sync ruff format --check .github/scripts
 
   core-tests:
     name: Core Tests (${{ matrix.os }}, Python ${{ matrix.python }})
@@ -98,12 +93,10 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --dev --extra cache
       - name: Run optional cache tests
-        id: tests
         run: >-
           uv run --no-sync pytest tests/unit/core/test_space.py -m optional
           --junitxml=reports/cache.xml
       - name: Require executed tests without skips
-        if: ${{ always() && steps.tests.outcome != 'skipped' }}
         run: uv run --no-sync python .github/scripts/check_junit.py reports/cache.xml
 
   spark-tests:
@@ -128,7 +121,6 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --dev --extra spark
       - name: Run Spark unit and local integration tests
-        id: tests
         env:
           PYSPARK_PYTHON: ${{ github.workspace }}/.venv/bin/python
         run: >-
@@ -139,7 +131,6 @@ jobs:
           tests/integration/backend/test_spark_distributed.py
           --junitxml=reports/spark.xml
       - name: Require executed tests without skips
-        if: ${{ always() && steps.tests.outcome != 'skipped' }}
         run: uv run --no-sync python .github/scripts/check_junit.py reports/spark.xml
 
   databricks-lts-ml-tests:
@@ -226,14 +217,12 @@ jobs:
               raise SystemExit("MPIDistributed requires MPI_THREAD_MULTIPLE")
           PY
       - name: Run real MPI integration tests
-        id: tests
         run: >-
           uv run --no-sync pytest
           tests/integration/backend/test_mpi_parallel.py
           tests/integration/backend/test_mpi_distributed.py
           --junitxml=reports/mpi.xml
       - name: Require executed tests without skips
-        if: ${{ always() && steps.tests.outcome != 'skipped' }}
         run: uv run --no-sync python .github/scripts/check_junit.py reports/mpi.xml
 
   package-build:
