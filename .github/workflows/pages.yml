@@ -3,6 +3,9 @@ name: Documentation
 on:
   push:
     branches: [master]
+    paths:
+      - '.github/pages/**'
+      - '.github/workflows/pages.yml'
   workflow_dispatch:
 
 permissions:
@@ -38,15 +41,15 @@ jobs:
         with:
           path: .github/pages
       # Runs after environment approval and queueing, immediately before deployment.
-      - name: Skip obsolete commits
+      - name: Skip obsolete documentation
         id: freshness
         shell: bash
         run: |
-          head_sha="$(git ls-remote --exit-code origin refs/heads/master | cut -f1)"
-          if [ "$head_sha" = "$GITHUB_SHA" ]; then
+          git fetch --no-tags --depth=1 origin refs/heads/master
+          if git diff --quiet "$GITHUB_SHA" FETCH_HEAD -- .github/pages .github/workflows/pages.yml; then
             echo "allowed=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::notice::Obsolete commit: deployment skipped"
+            echo "::notice::Obsolete documentation: deployment skipped"
           fi
       - uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
         if: ${{ steps.freshness.outputs.allowed == 'true' }}
