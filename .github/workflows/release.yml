@@ -52,16 +52,12 @@ jobs:
           CONFIRM_VERSION: ${{ inputs.confirm_version }}
         run: |
           python3 .github/scripts/release.py guard
-          if [ "$PUBLISH_TESTPYPI" = true ]; then
-            python3 .github/scripts/release.py absent --index testpypi
-          fi
       - name: Authorize official release, tag and master ancestry
         if: ${{ github.event_name == 'release' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 .github/scripts/release_official.py
-          python3 .github/scripts/release.py absent --index pypi
 
   ci:
     name: Validate authorized source with full CI
@@ -105,64 +101,140 @@ jobs:
           python3 .github/scripts/release.py verify
           --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
 
-  publish-testpypi:
-    name: Publish exact validated bytes to TestPyPI
+  bind-publication:
+    name: Pin original CI artifact identity before publication
     needs: [ci]
+    if: ${{ needs.ci.result == 'success' && (github.event_name == 'release' || inputs.publish_testpypi == true) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      artifact_id: ${{ steps.bind.outputs.artifact_id }}
+      manifest_sha256: ${{ steps.bind.outputs.manifest_sha256 }}
+      producer_attempt: ${{ steps.bind.outputs.producer_attempt }}
+    env:
+      INDEX: ${{ github.event_name == 'release' && 'pypi' || 'testpypi' }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Locate immutable binding in this authorized run only
+        id: locate
+        run: python3 .github/scripts/release.py locate --index "$INDEX"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        if: ${{ steps.locate.outputs.binding_id != '' }}
+        with:
+          artifact-ids: ${{ steps.locate.outputs.binding_id || '0' }}
+          merge-multiple: true
+          path: binding
+      - name: Select original artifact; never replace with rebuilt distributions
+        id: bind
+        env:
+          CI_ARTIFACT_ID: ${{ needs.ci.outputs.artifact_id }}
+          CI_MANIFEST_SHA256: ${{ needs.ci.outputs.manifest_sha256 }}
+          CI_PRODUCER_ATTEMPT: ${{ needs.ci.outputs.producer_attempt }}
+        run: python3 .github/scripts/release.py bind --index "$INDEX"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: ${{ steps.locate.outputs.binding_id == '' }}
+        with:
+          name: publication-${{ env.INDEX }}-${{ github.run_id }}
+          path: binding/publication.json
+          if-no-files-found: error
+          retention-days: 90
+
+  publish-testpypi:
+    name: Reconcile and publish approved bytes to testpypi
+    needs: [ci, bind-publication]
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_testpypi == true && needs.ci.result == 'success' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # Two bounded preparations (2 x 180s each) plus at most two upload actions.
+    timeout-minutes: 20
     environment:
       name: testpypi
       url: https://test.pypi.org/p/tyrannis
     permissions:
       contents: read
       id-token: write
+    outputs:
+      upload_kind: ${{ steps.prepare.outputs.kind }}
+      upload_outcome: ${{ steps.upload.outcome }}
+      recovery_outcome: ${{ steps.complement.outcome }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MANIFEST_SHA256: ${{ needs.bind-publication.outputs.manifest_sha256 }}
+      PRODUCER_ATTEMPT: ${{ needs.bind-publication.outputs.producer_attempt }}
+      PUBLISH_TESTPYPI: ${{ inputs.publish_testpypi }}
+      CONFIRM_VERSION: ${{ inputs.confirm_version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - name: Recover original CI artifact (expiration or deletion blocks recovery)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          artifact-ids: ${{ needs.ci.outputs.artifact_id || '0' }}
+          artifact-ids: ${{ needs.bind-publication.outputs.artifact_id || '0' }}
           merge-multiple: true
           path: release
-      # Recheck after waiting for concurrency/environment approval, before upload.
-      - name: Recheck identity, hashes, version absence and manual authorization
-        env:
-          MANIFEST_SHA256: ${{ needs.ci.outputs.manifest_sha256 }}
-          PRODUCER_ATTEMPT: ${{ needs.ci.outputs.producer_attempt }}
-          GH_TOKEN: ${{ github.token }}
-          PUBLISH_TESTPYPI: ${{ inputs.publish_testpypi }}
-          CONFIRM_VERSION: ${{ inputs.confirm_version }}
-        run: |
-          python3 .github/scripts/release.py verify --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
-          python3 .github/scripts/release.py absent --index testpypi
-          python3 .github/scripts/release.py guard
-      - name: Publish using TestPyPI Trusted Publishing
+      # Reconcile after concurrency/environment approval; reauthorize before staging.
+      - name: Reconcile and prepare only missing original distributions
+        id: prepare
+        run: >-
+          python3 .github/scripts/publication.py --index testpypi --mode prepare
+          --destination upload-initial
+          --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
+      - name: Publish selected distributions with Trusted Publishing
+        id: upload
+        if: ${{ steps.prepare.outputs.upload == 'true' }}
+        # Only upload outcomes are recoverable; all authorization/integrity gates remain fatal.
+        continue-on-error: true
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           repository-url: https://test.pypi.org/legacy/
-          packages-dir: release/dist/
-          # Strict Twine validation ran in CI; individual hashes were rechecked above.
+          packages-dir: upload-initial/
+          verify-metadata: false
+          skip-existing: false
+      - name: Reconcile original outcome and authorize one complementary attempt
+        id: recover
+        if: ${{ !cancelled() && steps.prepare.outputs.kind == 'initial' && (steps.upload.outcome == 'success' || steps.upload.outcome == 'failure') }}
+        env:
+          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
+        run: >-
+          python3 .github/scripts/publication.py --index testpypi --mode recover
+          --destination upload-complement --upload-outcome "$UPLOAD_OUTCOME"
+          --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
+      - name: Publish only remaining distributions once
+        id: complement
+        if: ${{ steps.recover.outputs.upload == 'true' }}
+        continue-on-error: true
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: upload-complement/
           verify-metadata: false
           skip-existing: false
 
   verify-testpypi:
-    name: Verify published TestPyPI files and installation
-    needs: [ci, publish-testpypi]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_testpypi == true && needs.publish-testpypi.result == 'success' }}
+    name: Verify complete testpypi publication and both installations
+    needs: [ci, bind-publication, publish-testpypi]
+    if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && inputs.publish_testpypi == true && needs.ci.result == 'success' && needs.publish-testpypi.result == 'success' }}
     runs-on: ubuntu-24.04
-    # 600s verification window plus checkout, artifact/setup and cleanup time.
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - name: Recover original CI artifact (expiration or deletion blocks recovery)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          artifact-ids: ${{ needs.ci.outputs.artifact_id || '0' }}
+          artifact-ids: ${{ needs.bind-publication.outputs.artifact_id || '0' }}
           merge-multiple: true
           path: release
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
@@ -170,63 +242,100 @@ jobs:
           version: ${{ env.UV_VERSION }}
           python-version: "3.12"
           enable-cache: false
-      - name: Verify published identity, integrity and both installations
+      - name: Require full post-publication verification regardless of upload outcome
         env:
-          MANIFEST_SHA256: ${{ needs.ci.outputs.manifest_sha256 }}
-          PRODUCER_ATTEMPT: ${{ needs.ci.outputs.producer_attempt }}
-        run: >-
-          python3 .github/scripts/publication.py --index testpypi
-          --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
-      - name: Report verification failure without inferring upload failure
+          MANIFEST_SHA256: ${{ needs.bind-publication.outputs.manifest_sha256 }}
+          PRODUCER_ATTEMPT: ${{ needs.bind-publication.outputs.producer_attempt }}
+          UPLOAD_KIND: ${{ needs.publish-testpypi.outputs.upload_kind }}
+          UPLOAD_OUTCOME: ${{ needs.publish-testpypi.outputs.upload_outcome }}
+          RECOVERY_OUTCOME: ${{ needs.publish-testpypi.outputs.recovery_outcome }}
+        run: |
+          printf 'Complementary action outcome: %s\n' "$RECOVERY_OUTCOME"
+          python3 .github/scripts/publication.py --index testpypi --upload-outcome "$UPLOAD_OUTCOME" \
+            --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
+          if [ "$UPLOAD_KIND" = complementary ] || [ "$RECOVERY_OUTCOME" = success ] || [ "$RECOVERY_OUTCOME" = failure ]; then
+            echo 'Publication recovered with only missing original distributions; full verification passed.'
+          elif [ "$UPLOAD_OUTCOME" = skipped ]; then
+            echo 'No additional upload needed; full verification passed.'
+          fi
+      - name: Explain safe native recovery
         if: ${{ failure() }}
         run: |
-          echo '::error::Post-publication verification did not succeed. Publication may exist; do not repeat uploads automatically.'
+          echo '::error::Only Published and verified is success. Rerun this job for verification only; for a confirmed partial publication rerun the publish job in this same run. Preserve original artifacts; never substitute rebuilt files.'
 
   publish-pypi:
-    name: Publish exact validated bytes to PyPI
-    needs: [ci]
+    name: Reconcile and publish approved bytes to pypi
+    needs: [ci, bind-publication]
     if: ${{ github.event_name == 'release' && needs.ci.result == 'success' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # Two bounded preparations (2 x 180s each) plus at most two upload actions.
+    timeout-minutes: 20
     environment:
       name: pypi
       url: https://pypi.org/p/tyrannis
     permissions:
       contents: read
       id-token: write
+    outputs:
+      upload_kind: ${{ steps.prepare.outputs.kind }}
+      upload_outcome: ${{ steps.upload.outcome }}
+      recovery_outcome: ${{ steps.complement.outcome }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MANIFEST_SHA256: ${{ needs.bind-publication.outputs.manifest_sha256 }}
+      PRODUCER_ATTEMPT: ${{ needs.bind-publication.outputs.producer_attempt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - name: Recover original CI artifact (expiration or deletion blocks recovery)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          artifact-ids: ${{ needs.ci.outputs.artifact_id || '0' }}
+          artifact-ids: ${{ needs.bind-publication.outputs.artifact_id || '0' }}
           merge-multiple: true
           path: release
-      - name: Recheck identity, hashes, version absence and live tag after approval
-        env:
-          GH_TOKEN: ${{ github.token }}
-          MANIFEST_SHA256: ${{ needs.ci.outputs.manifest_sha256 }}
-          PRODUCER_ATTEMPT: ${{ needs.ci.outputs.producer_attempt }}
-        run: |
-          python3 .github/scripts/release.py verify --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
-          python3 .github/scripts/release.py absent --index pypi
-          python3 .github/scripts/release_official.py
-      - name: Publish using official PyPI Trusted Publishing
+      # Reconcile after concurrency/environment approval; reauthorize before staging.
+      - name: Reconcile and prepare only missing original distributions
+        id: prepare
+        run: >-
+          python3 .github/scripts/publication.py --index pypi --mode prepare
+          --destination upload-initial
+          --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
+      - name: Publish selected distributions with Trusted Publishing
+        id: upload
+        if: ${{ steps.prepare.outputs.upload == 'true' }}
+        # Only upload outcomes are recoverable; all authorization/integrity gates remain fatal.
+        continue-on-error: true
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
-          packages-dir: release/dist/
-          # Strict Twine validation ran in CI; individual hashes were rechecked above.
+          packages-dir: upload-initial/
+          verify-metadata: false
+          skip-existing: false
+      - name: Reconcile original outcome and authorize one complementary attempt
+        id: recover
+        if: ${{ !cancelled() && steps.prepare.outputs.kind == 'initial' && (steps.upload.outcome == 'success' || steps.upload.outcome == 'failure') }}
+        env:
+          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
+        run: >-
+          python3 .github/scripts/publication.py --index pypi --mode recover
+          --destination upload-complement --upload-outcome "$UPLOAD_OUTCOME"
+          --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
+      - name: Publish only remaining distributions once
+        id: complement
+        if: ${{ steps.recover.outputs.upload == 'true' }}
+        continue-on-error: true
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: upload-complement/
           verify-metadata: false
           skip-existing: false
 
   verify-pypi:
-    name: Verify irreversible PyPI publication
-    needs: [ci, publish-pypi]
-    if: ${{ github.event_name == 'release' && needs.publish-pypi.result == 'success' }}
+    name: Verify complete pypi publication and both installations
+    needs: [ci, bind-publication, publish-pypi]
+    if: ${{ !cancelled() && github.event_name == 'release' && needs.ci.result == 'success' && needs.publish-pypi.result == 'success' }}
     runs-on: ubuntu-24.04
-    # 600s verification window plus checkout, artifact/setup and cleanup time.
     timeout-minutes: 15
     permissions:
       contents: read
@@ -235,9 +344,10 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - name: Recover original CI artifact (expiration or deletion blocks recovery)
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          artifact-ids: ${{ needs.ci.outputs.artifact_id || '0' }}
+          artifact-ids: ${{ needs.bind-publication.outputs.artifact_id || '0' }}
           merge-multiple: true
           path: release
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
@@ -245,14 +355,23 @@ jobs:
           version: ${{ env.UV_VERSION }}
           python-version: "3.12"
           enable-cache: false
-      - name: Verify published identity, integrity and both installations
+      - name: Require full post-publication verification regardless of upload outcome
         env:
-          MANIFEST_SHA256: ${{ needs.ci.outputs.manifest_sha256 }}
-          PRODUCER_ATTEMPT: ${{ needs.ci.outputs.producer_attempt }}
-        run: >-
-          python3 .github/scripts/publication.py --index pypi
-          --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
-      - name: Report verification failure without inferring upload failure
+          MANIFEST_SHA256: ${{ needs.bind-publication.outputs.manifest_sha256 }}
+          PRODUCER_ATTEMPT: ${{ needs.bind-publication.outputs.producer_attempt }}
+          UPLOAD_KIND: ${{ needs.publish-pypi.outputs.upload_kind }}
+          UPLOAD_OUTCOME: ${{ needs.publish-pypi.outputs.upload_outcome }}
+          RECOVERY_OUTCOME: ${{ needs.publish-pypi.outputs.recovery_outcome }}
+        run: |
+          printf 'Complementary action outcome: %s\n' "$RECOVERY_OUTCOME"
+          python3 .github/scripts/publication.py --index pypi --upload-outcome "$UPLOAD_OUTCOME" \
+            --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
+          if [ "$UPLOAD_KIND" = complementary ] || [ "$RECOVERY_OUTCOME" = success ] || [ "$RECOVERY_OUTCOME" = failure ]; then
+            echo 'Publication recovered with only missing original distributions; full verification passed.'
+          elif [ "$UPLOAD_OUTCOME" = skipped ]; then
+            echo 'No additional upload needed; full verification passed.'
+          fi
+      - name: Explain safe native recovery
         if: ${{ failure() }}
         run: |
-          echo '::error::Post-publication verification did not succeed. Publication may exist; do not repeat uploads automatically.'
+          echo '::error::Only Published and verified is success. Rerun this job for verification only; for a confirmed partial publication rerun the publish job in this same run. Preserve original artifacts; never substitute rebuilt files.'

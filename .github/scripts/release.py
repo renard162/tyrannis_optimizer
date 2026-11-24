@@ -296,18 +296,109 @@ def verify(
         raise ValueError("Artifact SHA-256 differs from the validated build")
 
 
-def absent(index: str) -> None:
-    from publication import index_release
+def publication_identity(index: str) -> dict[str, str]:
+    event = mapping(
+        json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text("utf-8"))
+    )
+    return {
+        **{key: value for key, value in identity().items() if key != "run_attempt"},
+        "index": index,
+        "version": version(),
+        "ref": os.environ["GITHUB_REF"],
+        "release_id": str(mapping(event["release"])["id"])
+        if os.environ["GITHUB_EVENT_NAME"] == "release"
+        else "manual",
+    }
 
-    if index_release(index) is not None:
+
+def artifact(identifier: str, name: str) -> None:
+    if re.fullmatch(r"[1-9][0-9]*", identifier) is None:
+        raise ValueError("Missing original artifact ID; recovery blocked")
+    try:
+        item = api(f"actions/artifacts/{identifier}")
+    except Exception as error:
+        raise RuntimeError(
+            "Original artifact unavailable; restore access and rerun the same job. "
+            "Expired/deleted artifacts cannot be rebuilt for recovery."
+        ) from error
+    run = mapping(item["workflow_run"])
+    if (
+        str(item.get("id")) != identifier
+        or item.get("name") != name
+        or item.get("expired") is not False
+        or str(run.get("id")) != os.environ["GITHUB_RUN_ID"]
+        or run.get("head_sha") != os.environ["GITHUB_SHA"]
+    ):
+        raise ValueError("Original artifact expired or belongs to another source/run")
+
+
+def locate(index: str) -> None:
+    """Look only in this authorized run, never search by package version."""
+    name = f"publication-{index}-{os.environ['GITHUB_RUN_ID']}"
+    result = api(f"actions/runs/{os.environ['GITHUB_RUN_ID']}/artifacts?per_page=100")
+    items = objects(result["artifacts"])
+    if result.get("total_count") != len(items):
+        raise ValueError("Artifact listing incomplete; recovery blocked")
+    matches = [item for item in items if item.get("name") == name]
+    if len(matches) > 1:
+        raise ValueError("Ambiguous publication binding; recovery blocked")
+    if matches:
+        identifier = str(matches[0]["id"])
+        artifact(identifier, name)
+        output("binding_id", identifier)
+    elif os.environ["GITHUB_RUN_ATTEMPT"] != "1":
         raise ValueError(
-            f"Version already exists on {index}; no overwrite or skip-existing allowed"
+            "Original publication binding unavailable on rerun; upload blocked. "
+            "Investigate the original run/artifact retention; do not substitute a rebuild."
         )
+    else:
+        output("binding_id", "")
+
+
+def bind(index: str, path: Path) -> None:
+    """Pin CI outputs once, before any upload, in a native immutable artifact."""
+    expected = publication_identity(index)
+    if path.exists():
+        data = mapping(json.loads(path.read_text("utf-8")))
+        if any(data.get(key) != value for key, value in expected.items()):
+            raise ValueError("Publication binding belongs to another release/run/index")
+    else:
+        if os.environ["GITHUB_RUN_ATTEMPT"] != "1":
+            raise ValueError(
+                "Missing original publication binding; no rebuild fallback"
+            )
+        data = {
+            **expected,
+            "artifact_id": os.environ["CI_ARTIFACT_ID"],
+            "manifest_sha256": os.environ["CI_MANIFEST_SHA256"],
+            "producer_attempt": os.environ["CI_PRODUCER_ATTEMPT"],
+        }
+    attempt = str(data["producer_attempt"])
+    if (
+        re.fullmatch(r"[1-9][0-9]*", attempt) is None
+        or int(attempt) > int(os.environ["GITHUB_RUN_ATTEMPT"])
+        or re.fullmatch(r"[0-9a-f]{64}", str(data["manifest_sha256"])) is None
+    ):
+        raise ValueError("Invalid original CI evidence")
+    artifact(
+        str(data["artifact_id"]),
+        f"tyrannis-{expected['sha']}-{expected['run_id']}-{attempt}",
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        _ = path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    for key in ("artifact_id", "manifest_sha256", "producer_attempt"):
+        output(key, data[key])
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    _ = parser.add_argument("command", choices=("guard", "record", "verify", "absent"))
+    _ = parser.add_argument(
+        "command", choices=("guard", "record", "verify", "locate", "bind")
+    )
+    _ = parser.add_argument(
+        "--binding", type=Path, default=Path("binding/publication.json")
+    )
     _ = parser.add_argument("--dist", type=Path, default=Path("release/dist"))
     _ = parser.add_argument("--evidence", type=Path, default=Path("release/evidence"))
     _ = parser.add_argument("--manifest-sha256", default="")
@@ -320,8 +411,10 @@ def main() -> None:
         record(args.dist, args.evidence)
     elif args.command == "verify":
         verify(args.dist, args.evidence, args.manifest_sha256, args.producer_attempt)
+    elif args.command == "locate":
+        locate(args.index)
     else:
-        absent(args.index)
+        bind(args.index, args.binding)
 
 
 if __name__ == "__main__":
