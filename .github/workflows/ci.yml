@@ -3,9 +3,17 @@ name: CI
 on:
   push:
     branches: [master]
+    paths-ignore:
+      - 'doc/**'
+      - '.github/pages/**'
+      - '.github/workflows/pages.yml'
   pull_request:
     branches: [master]
     types: [opened, synchronize, reopened]
+    paths-ignore:
+      - 'doc/**'
+      - '.github/pages/**'
+      - '.github/workflows/pages.yml'
   workflow_dispatch:
 
 permissions:
