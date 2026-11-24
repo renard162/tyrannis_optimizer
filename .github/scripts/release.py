@@ -7,15 +7,11 @@ import os
 import re
 import subprocess
 import tarfile
-import time
 import tomllib
 import zipfile
 from email.parser import BytesParser
-from http.client import HTTPException
 from pathlib import Path, PurePosixPath
 from typing import cast
-from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 REPOSITORY = "renard162/tyrannis_optimizer"
@@ -300,140 +296,18 @@ def verify(
         raise ValueError("Artifact SHA-256 differs from the validated build")
 
 
-def index_release(
-    index: str, *, wait_for_publication: bool = False
-) -> dict[str, object] | None:
-    """Return version-scoped info/urls, confirmed absence, or fail closed.
-
-    A project response describes the latest version in info; only its releases
-    key identifies the requested version. Even an empty file list is existence
-    evidence and must never authorize a new build/upload.
-    """
-    hosts = {"testpypi": "test.pypi.org", "pypi": "pypi.org"}
-    if index not in hosts:
-        raise ValueError("Unknown package index")
-    current = version()
-    base = f"https://{hosts[index]}/pypi/tyrannis"
-    deadline = time.monotonic() + 180
-    reason = "metadata unavailable"
-    for attempt, delay in enumerate((0, 2, 4, 8, 16, 30), start=1):
-        if time.monotonic() + delay >= deadline:
-            break
-        if delay:
-            print(f"{index} {current}: {reason}; retry {attempt}/6 in {delay}s")
-            time.sleep(delay)
-        missing = 0
-        for project_endpoint, url in (
-            (False, f"{base}/{current}/json"),
-            (True, f"{base}/json"),
-        ):
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
-            try:
-                with urlopen(url, timeout=min(30, remaining)) as response:
-                    result = mapping(json.load(response))
-            except HTTPError as error:
-                reason = f"{url}: HTTP {error.code}"
-                if error.code == 404:
-                    missing += 1
-                elif error.code not in {408, 429} and not 500 <= error.code <= 599:
-                    raise
-                continue
-            except (URLError, TimeoutError, ConnectionError, HTTPException) as error:
-                reason = f"{url}: {error}"
-                continue
-            # Invalid JSON, identity or schema is not a transient absence.
-            info = mapping(result["info"])
-            if info.get("name") != "tyrannis" or not isinstance(
-                info.get("version"), str
-            ):
-                raise ValueError(f"{index} returned inconsistent project identity")
-            if project_endpoint:
-                releases = mapping(result["releases"])
-                if current not in releases:
-                    if info["version"] == current:
-                        raise ValueError(
-                            f"{index} returned inconsistent release listing"
-                        )
-                    missing += 1
-                    reason = f"{url}: version {current} not listed"
-                    continue
-                files = objects(releases[current])
-            else:
-                if info["version"] != current:
-                    raise ValueError(f"{index} returned inconsistent release identity")
-                files = objects(result["urls"])
-            if time.monotonic() >= deadline:
-                break
-            # Do not carry latest-version metadata into a version-scoped result.
-            return {"info": {"name": "tyrannis", "version": current}, "urls": files}
-        if time.monotonic() >= deadline:
-            break
-        if missing == 2 and not wait_for_publication:
-            return None
-    raise RuntimeError(
-        f"Cannot obtain {index} metadata for tyrannis {current} "
-        f"within 6 attempts / 180s: {reason}"
-    )
-
-
 def absent(index: str) -> None:
+    from publication import index_release
+
     if index_release(index) is not None:
         raise ValueError(
             f"Version already exists on {index}; no overwrite or skip-existing allowed"
         )
 
 
-def fetch(evidence: Path, destination: Path, index: str = "testpypi") -> None:
-    """Download exact files from one fixed index; never resolve across indexes."""
-    file_host = (
-        "test-files.pythonhosted.org"
-        if index == "testpypi"
-        else "files.pythonhosted.org"
-    )
-    if index not in {"testpypi", "pypi"}:
-        raise ValueError("Unknown package index")
-    manifest = mapping(json.loads((evidence / "release.json").read_text("utf-8")))
-    if manifest.get("version") != version() or manifest.get("name") != "tyrannis":
-        raise ValueError(f"{index} verification requires the original checkout")
-    release = index_release(index, wait_for_publication=True)
-    if release is None:
-        raise RuntimeError(f"{index} published version is unavailable")
-    expected = mapping(manifest["files"])
-    published = objects(release["urls"])
-    if (
-        len(published) != 2
-        or {item["filename"] for item in published} != set(expected)
-        or set(expected)
-        != {f"tyrannis-{version()}-py3-none-any.whl", f"tyrannis-{version()}.tar.gz"}
-    ):
-        raise ValueError(f"{index} file set differs from the validated build")
-    for item in published:
-        name, url = str(item["filename"]), str(item["url"])
-        parsed = urlparse(url)
-        if (
-            parsed.scheme != "https"
-            or parsed.hostname != file_host
-            or PurePosixPath(name).name != name
-        ):
-            raise ValueError(f"Unexpected {index} download location")
-        if mapping(item["digests"])["sha256"] != expected[name]:
-            raise ValueError(f"{index} reports a different hash for {name}")
-    destination.mkdir(parents=True, exist_ok=False)
-    for item in published:
-        name, url = str(item["filename"]), str(item["url"])
-        with urlopen(url, timeout=60) as response:
-            _ = (destination / name).write_bytes(response.read())
-    if inspect(destination) != expected:
-        raise ValueError(f"Downloaded {index} bytes differ from validated artifacts")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    _ = parser.add_argument(
-        "command", choices=("guard", "record", "verify", "absent", "fetch")
-    )
+    _ = parser.add_argument("command", choices=("guard", "record", "verify", "absent"))
     _ = parser.add_argument("--dist", type=Path, default=Path("release/dist"))
     _ = parser.add_argument("--evidence", type=Path, default=Path("release/evidence"))
     _ = parser.add_argument("--manifest-sha256", default="")
@@ -446,10 +320,8 @@ def main() -> None:
         record(args.dist, args.evidence)
     elif args.command == "verify":
         verify(args.dist, args.evidence, args.manifest_sha256, args.producer_attempt)
-    elif args.command == "absent":
-        absent(args.index)
     else:
-        fetch(args.evidence, args.dist, args.index)
+        absent(args.index)
 
 
 if __name__ == "__main__":

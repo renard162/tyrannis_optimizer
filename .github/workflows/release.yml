@@ -153,6 +153,7 @@ jobs:
     needs: [ci, publish-testpypi]
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_testpypi == true && needs.publish-testpypi.result == 'success' }}
     runs-on: ubuntu-24.04
+    # 600s verification window plus checkout, artifact/setup and cleanup time.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -164,35 +165,22 @@ jobs:
           artifact-ids: ${{ needs.ci.outputs.artifact_id || '0' }}
           merge-multiple: true
           path: release
-      - name: Verify audit evidence before retrieving published files
-        env:
-          MANIFEST_SHA256: ${{ needs.ci.outputs.manifest_sha256 }}
-          PRODUCER_ATTEMPT: ${{ needs.ci.outputs.producer_attempt }}
-        run: python3 .github/scripts/release.py verify --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
-      - name: Download exact published files and compare metadata and SHA-256
-        run: python3 .github/scripts/release.py fetch --dist published
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: ${{ env.UV_VERSION }}
           python-version: "3.12"
           enable-cache: false
-      - name: Install locked dependencies separately and smoke test published files
+      - name: Verify published identity, integrity and both installations
+        env:
+          MANIFEST_SHA256: ${{ needs.ci.outputs.manifest_sha256 }}
+          PRODUCER_ATTEMPT: ${{ needs.ci.outputs.producer_attempt }}
+        run: >-
+          python3 .github/scripts/publication.py --index testpypi
+          --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
+      - name: Report verification failure without inferring upload failure
+        if: ${{ failure() }}
         run: |
-          smoke_dir="$(mktemp -d "$RUNNER_TEMP/tyrannis-testpypi.XXXXXX")"
-          cp .github/scripts/smoke_package.py "$smoke_dir/smoke_package.py"
-          uv export --locked --no-dev --no-emit-project --no-hashes --format requirements-txt > "$smoke_dir/dependencies.txt"
-          wheels=("$GITHUB_WORKSPACE"/published/*.whl)
-          sdists=("$GITHUB_WORKSPACE"/published/*.tar.gz)
-          cd "$smoke_dir"
-          unset PYTHONPATH
-          for artifact in "${wheels[0]}" "${sdists[0]}"; do
-            environment="$smoke_dir/$(basename "$artifact").venv"
-            uv venv --python 3.12 "$environment"
-            uv pip install --python "$environment/bin/python" --default-index https://pypi.org/simple -r dependencies.txt
-            uv pip install --python "$environment/bin/python" --default-index https://pypi.org/simple --no-deps "$artifact"
-            uv pip check --python "$environment/bin/python"
-            "$environment/bin/python" -I "$smoke_dir/smoke_package.py"
-          done
+          echo '::error::Post-publication verification did not succeed. Publication may exist; do not repeat uploads automatically.'
 
   publish-pypi:
     name: Publish exact validated bytes to PyPI
@@ -238,6 +226,7 @@ jobs:
     needs: [ci, publish-pypi]
     if: ${{ github.event_name == 'release' && needs.publish-pypi.result == 'success' }}
     runs-on: ubuntu-24.04
+    # 600s verification window plus checkout, artifact/setup and cleanup time.
     timeout-minutes: 15
     permissions:
       contents: read
@@ -251,37 +240,19 @@ jobs:
           artifact-ids: ${{ needs.ci.outputs.artifact_id || '0' }}
           merge-multiple: true
           path: release
-      - name: Verify approved evidence and download only official PyPI files
-        env:
-          MANIFEST_SHA256: ${{ needs.ci.outputs.manifest_sha256 }}
-          PRODUCER_ATTEMPT: ${{ needs.ci.outputs.producer_attempt }}
-        run: |
-          python3 .github/scripts/release.py verify --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
-          python3 .github/scripts/release.py fetch --index pypi --dist published
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: ${{ env.UV_VERSION }}
           python-version: "3.12"
           enable-cache: false
-      - name: Install locked dependencies separately and smoke test published files
-        run: |
-          smoke_dir="$(mktemp -d "$RUNNER_TEMP/tyrannis-pypi.XXXXXX")"
-          cp .github/scripts/smoke_package.py "$smoke_dir/smoke_package.py"
-          uv export --locked --no-dev --no-emit-project --no-hashes --format requirements-txt > "$smoke_dir/dependencies.txt"
-          wheels=("$GITHUB_WORKSPACE"/published/*.whl)
-          sdists=("$GITHUB_WORKSPACE"/published/*.tar.gz)
-          cd "$smoke_dir"
-          unset PYTHONPATH
-          for artifact in "${wheels[0]}" "${sdists[0]}"; do
-            environment="$smoke_dir/$(basename "$artifact").venv"
-            uv venv --python 3.12 "$environment"
-            uv pip install --python "$environment/bin/python" --default-index https://pypi.org/simple -r dependencies.txt
-            uv pip install --python "$environment/bin/python" --default-index https://pypi.org/simple --no-deps "$artifact"
-            uv pip check --python "$environment/bin/python"
-            "$environment/bin/python" -I "$smoke_dir/smoke_package.py"
-          done
-      - name: Record failed verification of a potentially irreversible publication
+      - name: Verify published identity, integrity and both installations
+        env:
+          MANIFEST_SHA256: ${{ needs.ci.outputs.manifest_sha256 }}
+          PRODUCER_ATTEMPT: ${{ needs.ci.outputs.producer_attempt }}
+        run: >-
+          python3 .github/scripts/publication.py --index pypi
+          --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
+      - name: Report verification failure without inferring upload failure
         if: ${{ failure() }}
         run: |
-          echo '::error::PyPI upload succeeded, but post-publication verification failed. Do not republish automatically.'
-          echo 'PyPI publication may be irreversible. Investigate the original artifact and published files; no automatic retry of upload.' >> "$GITHUB_STEP_SUMMARY"
+          echo '::error::Post-publication verification did not succeed. Publication may exist; do not repeat uploads automatically.'
