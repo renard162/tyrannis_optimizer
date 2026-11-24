@@ -4,6 +4,7 @@ on:
   push:
     branches: [master]
     paths-ignore:
+      - 'README.md'
       - 'doc/**'
       - '.github/pages/**'
       - '.github/workflows/pages.yml'
@@ -11,6 +12,7 @@ on:
     branches: [master]
     types: [opened, synchronize, reopened]
     paths-ignore:
+      - 'README.md'
       - 'doc/**'
       - '.github/pages/**'
       - '.github/workflows/pages.yml'

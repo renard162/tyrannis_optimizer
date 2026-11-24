@@ -36,7 +36,8 @@ jobs:
     name: Authorize source before CI
     if: ${{ (github.event_name == 'workflow_dispatch' && github.repository == 'renard162/tyrannis_optimizer' && github.ref == 'refs/heads/master') || (github.event_name == 'release' && github.event.action == 'published' && github.repository == 'renard162/tyrannis_optimizer' && github.event.release.draft == false && github.event.release.prerelease == false) }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    # The bounded annotated-tag traversal can make up to fourteen 30s API calls.
+    timeout-minutes: 10
     permissions:
       contents: read
     steps:
@@ -151,7 +152,7 @@ jobs:
     needs: [ci, bind-publication]
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_testpypi == true && needs.ci.result == 'success' }}
     runs-on: ubuntu-24.04
-    # Two bounded preparations (2 x 180s each) plus at most two upload actions.
+    # One bounded preparation (180s) and at most one upload action.
     timeout-minutes: 20
     environment:
       name: testpypi
@@ -160,9 +161,7 @@ jobs:
       contents: read
       id-token: write
     outputs:
-      upload_kind: ${{ steps.prepare.outputs.kind }}
       upload_outcome: ${{ steps.upload.outcome }}
-      recovery_outcome: ${{ steps.complement.outcome }}
     env:
       GH_TOKEN: ${{ github.token }}
       MANIFEST_SHA256: ${{ needs.bind-publication.outputs.manifest_sha256 }}
@@ -181,7 +180,7 @@ jobs:
           merge-multiple: true
           path: release
       # Reconcile after concurrency/environment approval; reauthorize before staging.
-      - name: Reconcile and prepare only missing original distributions
+      - name: Authorize initial upload or resume verification only
         id: prepare
         run: >-
           python3 .github/scripts/publication.py --index testpypi --mode prepare
@@ -196,25 +195,6 @@ jobs:
         with:
           repository-url: https://test.pypi.org/legacy/
           packages-dir: upload-initial/
-          verify-metadata: false
-          skip-existing: false
-      - name: Reconcile original outcome and authorize one complementary attempt
-        id: recover
-        if: ${{ !cancelled() && steps.prepare.outputs.kind == 'initial' && (steps.upload.outcome == 'success' || steps.upload.outcome == 'failure') }}
-        env:
-          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
-        run: >-
-          python3 .github/scripts/publication.py --index testpypi --mode recover
-          --destination upload-complement --upload-outcome "$UPLOAD_OUTCOME"
-          --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
-      - name: Publish only remaining distributions once
-        id: complement
-        if: ${{ steps.recover.outputs.upload == 'true' }}
-        continue-on-error: true
-        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
-        with:
-          repository-url: https://test.pypi.org/legacy/
-          packages-dir: upload-complement/
           verify-metadata: false
           skip-existing: false
 
@@ -246,29 +226,24 @@ jobs:
         env:
           MANIFEST_SHA256: ${{ needs.bind-publication.outputs.manifest_sha256 }}
           PRODUCER_ATTEMPT: ${{ needs.bind-publication.outputs.producer_attempt }}
-          UPLOAD_KIND: ${{ needs.publish-testpypi.outputs.upload_kind }}
           UPLOAD_OUTCOME: ${{ needs.publish-testpypi.outputs.upload_outcome }}
-          RECOVERY_OUTCOME: ${{ needs.publish-testpypi.outputs.recovery_outcome }}
         run: |
-          printf 'Complementary action outcome: %s\n' "$RECOVERY_OUTCOME"
           python3 .github/scripts/publication.py --index testpypi --upload-outcome "$UPLOAD_OUTCOME" \
             --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
-          if [ "$UPLOAD_KIND" = complementary ] || [ "$RECOVERY_OUTCOME" = success ] || [ "$RECOVERY_OUTCOME" = failure ]; then
-            echo 'Publication recovered with only missing original distributions; full verification passed.'
-          elif [ "$UPLOAD_OUTCOME" = skipped ]; then
+          if [ "$UPLOAD_OUTCOME" = skipped ]; then
             echo 'No additional upload needed; full verification passed.'
           fi
       - name: Explain safe native recovery
         if: ${{ failure() }}
         run: |
-          echo '::error::Only Published and verified is success. Rerun this job for verification only; for a confirmed partial publication rerun the publish job in this same run. Preserve original artifacts; never substitute rebuilt files.'
+          echo '::error::Only Published and verified is success. Rerun this job for verification only; partial or unknown uploads must not be resent based on index absence. Preserve original artifacts; never substitute rebuilt files.'
 
   publish-pypi:
     name: Reconcile and publish approved bytes to pypi
     needs: [ci, bind-publication]
     if: ${{ github.event_name == 'release' && needs.ci.result == 'success' }}
     runs-on: ubuntu-24.04
-    # Two bounded preparations (2 x 180s each) plus at most two upload actions.
+    # One bounded preparation (180s) and at most one upload action.
     timeout-minutes: 20
     environment:
       name: pypi
@@ -277,9 +252,7 @@ jobs:
       contents: read
       id-token: write
     outputs:
-      upload_kind: ${{ steps.prepare.outputs.kind }}
       upload_outcome: ${{ steps.upload.outcome }}
-      recovery_outcome: ${{ steps.complement.outcome }}
     env:
       GH_TOKEN: ${{ github.token }}
       MANIFEST_SHA256: ${{ needs.bind-publication.outputs.manifest_sha256 }}
@@ -296,7 +269,7 @@ jobs:
           merge-multiple: true
           path: release
       # Reconcile after concurrency/environment approval; reauthorize before staging.
-      - name: Reconcile and prepare only missing original distributions
+      - name: Authorize initial upload or resume verification only
         id: prepare
         run: >-
           python3 .github/scripts/publication.py --index pypi --mode prepare
@@ -310,24 +283,6 @@ jobs:
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: upload-initial/
-          verify-metadata: false
-          skip-existing: false
-      - name: Reconcile original outcome and authorize one complementary attempt
-        id: recover
-        if: ${{ !cancelled() && steps.prepare.outputs.kind == 'initial' && (steps.upload.outcome == 'success' || steps.upload.outcome == 'failure') }}
-        env:
-          UPLOAD_OUTCOME: ${{ steps.upload.outcome }}
-        run: >-
-          python3 .github/scripts/publication.py --index pypi --mode recover
-          --destination upload-complement --upload-outcome "$UPLOAD_OUTCOME"
-          --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
-      - name: Publish only remaining distributions once
-        id: complement
-        if: ${{ steps.recover.outputs.upload == 'true' }}
-        continue-on-error: true
-        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
-        with:
-          packages-dir: upload-complement/
           verify-metadata: false
           skip-existing: false
 
@@ -359,19 +314,14 @@ jobs:
         env:
           MANIFEST_SHA256: ${{ needs.bind-publication.outputs.manifest_sha256 }}
           PRODUCER_ATTEMPT: ${{ needs.bind-publication.outputs.producer_attempt }}
-          UPLOAD_KIND: ${{ needs.publish-pypi.outputs.upload_kind }}
           UPLOAD_OUTCOME: ${{ needs.publish-pypi.outputs.upload_outcome }}
-          RECOVERY_OUTCOME: ${{ needs.publish-pypi.outputs.recovery_outcome }}
         run: |
-          printf 'Complementary action outcome: %s\n' "$RECOVERY_OUTCOME"
           python3 .github/scripts/publication.py --index pypi --upload-outcome "$UPLOAD_OUTCOME" \
             --manifest-sha256 "$MANIFEST_SHA256" --producer-attempt "$PRODUCER_ATTEMPT"
-          if [ "$UPLOAD_KIND" = complementary ] || [ "$RECOVERY_OUTCOME" = success ] || [ "$RECOVERY_OUTCOME" = failure ]; then
-            echo 'Publication recovered with only missing original distributions; full verification passed.'
-          elif [ "$UPLOAD_OUTCOME" = skipped ]; then
+          if [ "$UPLOAD_OUTCOME" = skipped ]; then
             echo 'No additional upload needed; full verification passed.'
           fi
       - name: Explain safe native recovery
         if: ${{ failure() }}
         run: |
-          echo '::error::Only Published and verified is success. Rerun this job for verification only; for a confirmed partial publication rerun the publish job in this same run. Preserve original artifacts; never substitute rebuilt files.'
+          echo '::error::Only Published and verified is success. Rerun this job for verification only; partial or unknown uploads must not be resent based on index absence. Preserve original artifacts; never substitute rebuilt files.'

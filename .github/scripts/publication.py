@@ -1,4 +1,4 @@
-"""Bounded, read-only publication verification on the Linux release runners."""
+"""Bounded publication preparation and verification on the Linux release runners."""
 
 import argparse
 import errno
@@ -298,9 +298,7 @@ def published_files(
     return urls
 
 
-def reconcile(
-    index: str, expected: dict[str, object], retry: Retry, *, prior_upload: bool
-) -> tuple[str, dict[str, str]]:
+def reconcile(index: str, expected: dict[str, object], retry: Retry) -> dict[str, str]:
     """Wait for propagation; never turn a failed query into evidence of absence."""
     latest: dict[str, str] | None = None
     seen: set[str] = set()
@@ -313,29 +311,23 @@ def reconcile(
             latest = None
             raise Unconfirmed("Previously observed files disappeared; upload blocked")
         seen.update(latest)
-        if set(latest) == set(expected) or (not latest and not prior_upload):
+        if set(latest) == set(expected):
             return latest
         raise Transient("Waiting for distribution propagation")
 
     try:
         urls = retry.run(f"{index} reconciliation", observe)
     except Unconfirmed:
+        _ = retry.remaining()
         if not latest:
             raise
         urls = latest
-    state = (
-        "Publication unconfirmed"
-        if len(urls) == len(expected)
-        else "Partially published"
-        if urls
-        else "Not published"
-    )
-    print(
-        f"{state}; available: {', '.join(sorted(urls)) or 'none'}; "
-        f"missing: {', '.join(sorted(set(expected) - set(urls))) or 'none'}",
-        flush=True,
-    )
-    return state, urls
+    if set(urls) != set(expected):
+        raise PartiallyPublished(
+            f"Missing: {', '.join(sorted(set(expected) - set(urls)))}. "
+            "Only verification may be retried; index absence cannot authorize resending"
+        )
+    return urls
 
 
 def prepare(
@@ -345,44 +337,29 @@ def prepare(
     index: str,
     *,
     prior_upload: bool,
-    recovery: bool,
 ) -> None:
-    """Authorize at most one complementary upload, exclusively of missing bytes."""
+    """Authorize an initial upload only; absence cannot prove a safe resend."""
     expected = release.mapping(
         release.mapping(json.loads((evidence / "release.json").read_text("utf-8")))[
             "files"
         ]
     )
-    try:
-        with budget(ABSENCE_WINDOW, ABSENCE_ATTEMPTS) as retry:
-            state, urls = reconcile(index, expected, retry, prior_upload=prior_upload)
-    except (Unconfirmed, RuntimeError) as error:
-        if not recovery:
-            raise Unconfirmed(str(error)) from error
-        print(f"Publication unconfirmed: {error}; no complementary upload authorized")
+    # A rerun may follow a killed uploader, even when no outcome was recorded.
+    # A partial index snapshot likewise does not prove the other file was rejected.
+    # In either case only the verifier may proceed, using the original artifact.
+    if prior_upload:
+        print("Previous attempt may have uploaded; verification only")
         release.output("upload", "false")
-        return  # Read-only full verification still gets its own CD-05 window.
-    # Fresh query after propagation; authorize after any network wait.
-    try:
-        with budget(ABSENCE_WINDOW, ABSENCE_ATTEMPTS) as retry:
-            fresh = retry.run(
-                "Final pre-upload reconciliation",
-                lambda: published_files(index, release.version(), expected, retry),
-            )
-    except RuntimeError as error:
-        raise Unconfirmed(str(error)) from error
-    if not set(urls).issubset(fresh):
-        raise Unconfirmed("Previously observed files disappeared; upload blocked")
-    missing = sorted(set(expected) - set(fresh))
-    if fresh and missing and not urls:
-        raise Unconfirmed(
-            "Files appeared during the final query; propagation must be reconciled "
-            "on the next attempt before any complementary upload"
+        return
+    with budget(ABSENCE_WINDOW, ABSENCE_ATTEMPTS) as retry:
+        fresh = retry.run(
+            "Pre-upload reconciliation",
+            lambda: published_files(index, release.version(), expected, retry),
         )
-    if missing and not fresh and prior_upload:
-        raise Unconfirmed(
-            "Previous upload outcome unknown; absent files cannot authorize resend"
-        )
+    if fresh:
+        print("Distributions already visible; verification only, no resend")
+        release.output("upload", "false")
+        return
     if index == "pypi":
         import release_official
 
@@ -392,17 +369,12 @@ def prepare(
         if os.environ.get("PUBLISH_TESTPYPI") != "true":
             raise ValueError("Validation-only dispatch cannot authorize uploads")
     destination.mkdir(parents=True, exist_ok=False)
-    for name in missing:
+    for name in sorted(expected):
         _ = shutil.copyfile(directory / name, destination / name)
         if release.digest(destination / name) != expected[name]:
             raise Inconsistent(f"Staged SHA-256 differs for {name}")
-    release.output("upload", str(bool(missing)).lower())
-    release.output("kind", "complementary" if fresh and missing else "initial")
-    release.output("publication_status", state)
-    print(
-        "Prepared missing distributions: "
-        + (", ".join(missing) or "none; verification only")
-    )
+    release.output("upload", "true")
+    print("Prepared original distributions: " + ", ".join(sorted(expected)))
 
 
 def download(url: str, host: str, path: Path, expected: object, retry: Retry) -> None:
@@ -458,9 +430,7 @@ def command(args: list[str], cwd: Path, retry: Retry, *, install: bool = False) 
             transport = re.search(
                 r"connection reset|connection refused|connection timed out|"
                 r"operation timed out|network timeout|temporary failure in name resolution|"
-                r"incomplete message|unexpected eof|"
-                r"\b(?:408|429|5\d\d)\s+(?:request timeout|too many requests|"
-                r"internal server error|bad gateway|service unavailable|gateway timeout)",
+                r"incomplete message|unexpected eof",
                 log,
                 re.IGNORECASE,
             )
@@ -469,6 +439,19 @@ def command(args: list[str], cwd: Path, retry: Retry, *, install: bool = False) 
                 log,
                 re.IGNORECASE,
             )
+            server = re.search(
+                r"\b(?:408|429|5\d\d)\s+(?:request timeout|too many requests|"
+                r"internal server error|bad gateway|service unavailable|gateway timeout)",
+                log,
+                re.IGNORECASE,
+            )
+            if install and fetch and server and not deterministic:
+                # uv's failure log does not expose response headers. Retrying here
+                # could violate Retry-After; leave this verification unconfirmed.
+                raise Unconfirmed(
+                    f"Installer HTTP {server.group(0)}; Retry-After unavailable. "
+                    "Retry verification later; no automatic installer retry."
+                )
             if install and fetch and transport and not deterministic:
                 raise Transient(f"Installer transport failure: {transport.group(0)}")
             raise RuntimeError(
@@ -541,14 +524,7 @@ def verify_published(
         raise Inconsistent(
             "Approved manifest identity, filenames or hashes are invalid"
         )
-    try:
-        state, urls = reconcile(index, expected, retry, prior_upload=True)
-    except RuntimeError as error:
-        raise Unconfirmed(str(error)) from error
-    if state == "Partially published":
-        raise PartiallyPublished(
-            "Rerun the publish job in this same authorized run to recover missing files"
-        )
+    urls = reconcile(index, expected, retry)
     destination.mkdir(parents=True, exist_ok=False)
     paths: list[Path] = []
     for name, url in urls.items():
@@ -570,9 +546,7 @@ def main() -> None:
     _ = parser.add_argument("--destination", type=Path, default=Path("published"))
     _ = parser.add_argument("--manifest-sha256", required=True)
     _ = parser.add_argument("--producer-attempt", required=True)
-    _ = parser.add_argument(
-        "--mode", choices=("prepare", "recover", "verify"), default="verify"
-    )
+    _ = parser.add_argument("--mode", choices=("prepare", "verify"), default="verify")
     _ = parser.add_argument(
         "--upload-outcome", choices=("success", "failure", "skipped", ""), default=""
     )
@@ -602,9 +576,7 @@ def main() -> None:
                 args.evidence,
                 args.destination,
                 args.index,
-                prior_upload=args.mode == "recover"
-                or os.environ["GITHUB_RUN_ATTEMPT"] != "1",
-                recovery=args.mode == "recover",
+                prior_upload=os.environ["GITHUB_RUN_ATTEMPT"] != "1",
             )
             return
         with budget() as retry:
@@ -612,12 +584,6 @@ def main() -> None:
     except PartiallyPublished as error:
         status, code = f"Partially published: {error}", 4
     except Unconfirmed as error:
-        if args.mode == "recover":
-            print(
-                f"Publication unconfirmed: {error}; no complementary upload authorized"
-            )
-            release.output("upload", "false")
-            return
         status, code = f"Publication unconfirmed: {error}", 2
     except Inconsistent as error:
         status, code = f"Publication inconsistent: {error}", 3
@@ -638,7 +604,6 @@ def main() -> None:
         )
         status, code = f"Verification failed: {reason}", 1
     print(status, flush=True)
-    release.output("publication_status", status.split(":", 1)[0])
     if "GITHUB_STEP_SUMMARY" in os.environ:
         with Path(os.environ["GITHUB_STEP_SUMMARY"]).open(
             "a", encoding="utf-8"
