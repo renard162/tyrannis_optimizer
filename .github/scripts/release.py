@@ -58,7 +58,7 @@ def output(name: str, value: object) -> None:
 
 def api(path: str) -> dict[str, object]:
     request = Request(
-        f"https://api.github.com/repos/{REPOSITORY}/{path}",
+        f"https://api.github.com/repos/{REPOSITORY}" + (f"/{path}" if path else ""),
         headers={
             "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
             "Accept": "application/vnd.github+json",
