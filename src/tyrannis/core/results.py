@@ -1,10 +1,11 @@
 import json
+import pickle
 from collections.abc import Generator, Iterable, Iterator
 from contextlib import contextmanager
 from csv import writer
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar, TypedDict, cast, override
+from typing import Any, ClassVar, Literal, Self, TypedDict, cast, override
 
 import numpy as np
 
@@ -94,7 +95,7 @@ class OptimizationHistory:
     Store optimization records and interpret them independently of execution.
 
     This object owns the interpretation of serialized history, including event
-    filtering, variable metadata, decoding, and CSV export. It retains no orchestrator,
+    filtering, variable metadata, decoding, and export. It retains no orchestrator,
     algorithm, processor, backend, migration driver, particle population, or
     complete execution-result container. It remains usable after those objects
     and the original search space have been released.
@@ -153,11 +154,14 @@ class OptimizationHistory:
 
     CSV export
     ----------
-    Use ``history.save_csv("history.csv")`` to write decoded rows, or
-    ``history.save_csv("internal_history.csv", internal_state=True)`` to write
+    Use ``history.export("history.csv")`` to write decoded rows, or
+    ``history.export("internal_history.csv", internal_state=True)`` to write
     encoded variables and internal particle state. Export writes the selected
     header and consumes the existing generator one row at a time, formatting
     special fitness values without materializing the complete history.
+    CSV is the default format and requires a case-insensitive ``.csv`` extension.
+    The ``encoding``, ``sep``, and ``internal_state`` arguments apply only to CSV.
+    This tabular output cannot be loaded to reconstruct the history object.
 
     Decoding isolation
     ------------------
@@ -180,10 +184,20 @@ class OptimizationHistory:
     The stored records, configuration, metadata, decoding snapshot, and its current
     random state can be preserved by standard ``pickle``. No objective callable,
     bound execution method, closure, or generator is stored as a dependency.
+    Use ``history.export("history.pkl", format="pickle")`` to serialize the
+    complete object and ``OptimizationHistory.load("history.pkl")`` to recover it.
+    Pickle accepts case-insensitive ``.pkl`` and ``.pickle`` extensions; the format
+    is selected explicitly, never inferred from the extension. Export writes
+    directly to a binary file using the highest available Pickle protocol, without
+    consuming records, decoding variables, or advancing random state. Loading
+    restores the current decoding state without constructing a new snapshot or
+    reinitializing spaces, and requires no producing orchestrator.
     Concrete space classes must be importable when unpickling, and user-defined
     choices and decoding parameters must support independent deep copying and
     pickle serialization with unchanged decoding semantics. Local classes, closures,
     or intrinsically non-pickleable user objects are not made serializable here.
+    Compatibility across Tyrannis versions is not guaranteed. Load only Pickle
+    files from trusted sources: deserialization can execute arbitrary code.
     """
 
     __slots__: tuple[str, ...] = (
@@ -317,7 +331,141 @@ class OptimizationHistory:
                 json.dumps(internal_state) if internal_state else None,
             ]
 
-    def save_csv(
+    def export(
+        self,
+        file_location: str | Path,
+        format: Literal["csv", "pickle"] = "csv",
+        *,
+        encoding: str = "utf-8",
+        sep: str = ",",
+        internal_state: bool = False
+    ) -> None:
+        """Export tabular records or serialize the complete history object.
+
+        Parameters
+        ----------
+        file_location:
+            Destination converted to ``Path``. The parent directory must exist
+            and an existing destination must be a file. Files are overwritten.
+        format:
+            Explicit format: ``"csv"`` (default) requires ``.csv``; ``"pickle"``
+            requires ``.pkl`` or ``.pickle``. Extensions are case-insensitive
+            and never determine the format automatically.
+        encoding:
+            CSV text encoding, defaulting to ``"utf-8"``. Ignored for Pickle.
+        sep:
+            Single-character CSV delimiter, defaulting to ``","``. Ignored
+            for Pickle.
+        internal_state:
+            For CSV, export decoded variables by default, or encoded variables
+            and internal particle state when ``True``. Ignored for Pickle.
+
+        Raises
+        ------
+        ValueError
+            Unsupported format, invalid extension, an existing destination that
+            is not a file, or a CSV separator that is not one character long.
+        FileNotFoundError
+            The destination's parent directory does not exist.
+
+        Notes
+        -----
+        CSV writes the header and generates rows on demand. Infinite fitness is
+        written as ``"Raise"`` for error events and ``"Infinity"`` otherwise;
+        NaN becomes ``"NaN"`` and other fitness values use their string form.
+        Decoded CSV export advances only this history's stochastic decoding state.
+
+        Pickle preserves records, configuration, metadata, and current independent
+        decoding state without consuming generators or advancing random state.
+        It uses ``pickle.HIGHEST_PROTOCOL`` directly on the binary file. Recover
+        the complete object with ``load``; CSV cannot reconstruct the history.
+        User-defined objects must support standard Pickle, and their classes must
+        be importable when loading. Local classes and closures are not supported.
+        Compatibility across Tyrannis versions is not guaranteed. Load only
+        trusted Pickle files, since deserialization can execute arbitrary code.
+        File, CSV, parsing, decoding, and serialization errors propagate; failures
+        can leave a partially written file.
+        """
+        if format not in {"csv", "pickle"}:
+            raise ValueError(f"Unsupported history export format: {format!r}")
+        if format == "csv":
+            self._export_csv(file_location, encoding, sep, internal_state)
+        elif format == "pickle":
+            self._export_pickle(file_location)
+
+    @classmethod
+    def load(cls, file_location: str | Path) -> Self:
+        """Recover a complete history from a trusted Pickle file.
+
+        Parameters
+        ----------
+        file_location:
+            Source converted to ``Path``, with a case-insensitive ``.pkl`` or
+            ``.pickle`` extension. CSV import is not supported.
+
+        Returns
+        -------
+        Self
+            The deserialized object, with its records, configuration, metadata,
+            and current independent decoding state, ready for public access and
+            export without the producing orchestrator. Neither the history
+            constructor nor space copying or initialization is performed.
+
+        Raises
+        ------
+        ValueError
+            The extension is not ``.pkl`` or ``.pickle``.
+        TypeError
+            The recovered object is not an instance of ``cls``.
+
+        Notes
+        -----
+        Only load files from trusted sources. ``pickle.load`` can execute
+        arbitrary code before the type check; that check is not a security
+        mechanism. File and deserialization errors propagate. User-defined
+        classes must be importable and their objects must support standard
+        Pickle. Compatibility across Tyrannis versions is not guaranteed.
+        Random states are restored as saved, without resetting them or decoding
+        records; original stochastic objective inputs are not reconstructed.
+        """
+        file_location = Path(file_location)
+        if file_location.suffix.lower() not in {".pkl", ".pickle"}:
+            raise ValueError(
+                f"History file must have a '.pkl' or '.pickle' extension: {file_location}"
+            )
+
+        with file_location.open("rb") as file:
+            # Pickle has no static schema; validate the recovered object below.
+            history = cast(object, pickle.load(file))
+        if not isinstance(history, cls):
+            raise TypeError(f"History file must contain an instance of {cls.__name__}.")
+        return history
+
+    def _export_pickle(self, file_location: str | Path) -> None:
+        """Serialize this instance directly, preserving its current decoding state.
+
+        Require a case-insensitive ``.pkl`` or ``.pickle`` extension and the same
+        destination policy as CSV. Standard Pickle uses the components' existing
+        serialization mechanisms without copying records or materializing rows.
+        """
+        file_location = Path(file_location)
+        if file_location.suffix.lower() not in {".pkl", ".pickle"}:
+            raise ValueError(
+                f"History file must have a '.pkl' or '.pickle' extension: {file_location}"
+            )
+
+        if file_location.exists() and not file_location.is_file():
+            raise ValueError(f"History file location is not a file: {file_location}")
+
+        if not file_location.parent.exists():
+            raise FileNotFoundError(
+                f"Parent directory does not exist: {file_location.parent}"
+            )
+
+        with file_location.open("wb") as file:
+            pickle.dump(self, file, protocol=pickle.HIGHEST_PROTOCOL)
+
+    def _export_csv(
         self,
         file_location: str | Path,
         encoding: str = "utf-8",
