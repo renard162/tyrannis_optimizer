@@ -157,8 +157,8 @@ class Optimizer(OrchestratorBase):
             ``history.internal_columns_`` and ``history.internal_generator_``
             expose encoded variables and internal particle state. The object
             remains available before fitting and when recording is disabled,
-            with configuration and columns but no rows. CSV export is provided
-            by the history object through ``history.save_csv()``.
+            with configuration and columns but no rows. The history object
+            provides CSV export and Pickle serialization through ``history.export()``.
 
         Notes
         -----

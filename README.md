@@ -62,6 +62,8 @@ Official Databricks support targets Databricks Runtime LTS ML environments.
 
 The core optimization requires three components: an **optimizer**, a **search space**, and an **optimization algorithm**. The processor, backend, and migration components are optional and can be added to control how the optimization is executed, parallelized, distributed, and coordinated.
 
+`Optimizer` is the main interface for configuring and running optimizations. It uses `OrchestratorBase` for shared component setup and exposes an `OptimizationHistory` object through `optimizer.history` for reading, working with, and exporting recorded events.
+
 ### Algorithms
 
 `tyrannis.algorithm`
@@ -301,6 +303,59 @@ optimizer = Optimizer(
 
 optimizer.fit()
 ```
+
+---
+
+### Optimization history
+
+History recording is disabled by default. Use the `history` argument to select which events to record. This example records the best particle found so far at the end of each iteration.
+
+```python
+space = Continuous(
+    boundaries={"x": (-10, 10), "y": (-10, 10)},
+    cost_function=cost_function
+)
+
+optimizer = Optimizer(
+    space=space,
+    algorithm=PSO(),
+    n_iterations=100,
+    n_particles=50,
+    history="best"
+)
+optimizer.fit()
+
+history = optimizer.history
+
+print(history.columns)
+
+for row in history.generator:
+    print(row)
+```
+
+`history.columns` gives the column names for rows from `history.generator`, which contain variable values decoded according to the search space. With stochastic decoders, reading rows advances the history's own random state independently of the optimizer. Reconstructed values can therefore differ from the inputs originally passed to the cost function.
+
+`history.internal_columns_` and `history.internal_generator_` expose the continuous variables used by the algorithm and additional internal particle state. Both generators produce rows on demand. Storing the underlying records can still use substantial memory, depending on the selected events, population size, and number of iterations.
+
+Before the first fit or when recording is disabled, `optimizer.history` returns an empty history with its column names available. On local and parallel backends, consecutive calls to `fit()` accumulate records in the same history object. Distributed backends support a single successful fit.
+
+CSV is the default export format. It stores a table of decoded or internal rows.
+
+```python
+history.export("history.csv")
+history.export("internal_history.csv", internal_state=True)
+```
+
+A CSV file cannot reconstruct the complete history. To preserve the records, metadata, configuration, and current independent decoding state, save the object with Pickle.
+
+```python
+from tyrannis.core.results import OptimizationHistory
+
+history.export("history.pkl", format="pickle")
+restored_history = OptimizationHistory.load("history.pkl")
+```
+
+The restored history can be used independently of the optimizer that produced it. Load Pickle files only from trusted sources. Compatibility across Tyrannis versions is not guaranteed.
 
 ---
 
