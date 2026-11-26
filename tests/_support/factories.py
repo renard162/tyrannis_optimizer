@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from functools import partial
 from typing import Any
+
+import numpy as np
 
 from tyrannis import Optimizer
 from tyrannis.core.algorithm import AlgorithmBase, CostFunctionWrapperBase
@@ -11,6 +14,12 @@ from tyrannis.core.space import SpaceBase
 
 from .numerics import BASE_SEED
 from .objectives import encoded_sphere
+
+
+def _evaluate_float64(
+    fitness_function: Callable[[dict[str, float]], float], variables: dict[str, float]
+) -> np.float64:
+    return np.float64(fitness_function(variables))
 
 
 def configure_algorithm(
@@ -25,7 +34,7 @@ def configure_algorithm(
 ) -> AlgorithmBase:
     """Initialize a concrete algorithm for direct unit or mathematical tests."""
     algorithm.initialize_context(
-        fitness_function=fitness_function,
+        fitness_function=partial(_evaluate_float64, fitness_function),
         boundaries=dict(boundaries),
         n_iter=n_iterations,
         n_particles=n_particles,

@@ -28,7 +28,7 @@ class _ObservableIslandMigration(IslandMigration):
     def process_pending(self) -> None:
         self._process_incoming()
 
-    def choose_receiver(self, donor: str, candidates: list[str]) -> str:
+    def choose_receiver(self, donor: str, candidates: list[str]) -> str | None:
         return self._choose_receiver(donor, candidates)
 
     def choose_donor(self, candidates: list[str]) -> str:

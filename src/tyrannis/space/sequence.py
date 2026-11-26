@@ -588,7 +588,7 @@ class Sequence(SpaceBase):
         )
 
         boundaries: list[list[Any]] = []
-        position_boundaries: PositionBoundaries = []
+        position_boundaries = []
 
         for index in range(self._max_choices):
             if index < self._min_choices:
