@@ -1,10 +1,11 @@
 import json
 import pickle
-from collections.abc import Generator, Iterable, Iterator, Sequence
+from collections.abc import Generator, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from csv import writer
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, ClassVar, Literal, Self, TypedDict, cast, overload, override
 
 import numpy as np
@@ -22,16 +23,18 @@ class HistoryConfig:
     status: bool = False
     best: bool = False
 
-    EVENT: ClassVar[dict[str, str]] = {
-        "migration": "0 - migration",
-        "pre_iteration": "1 - pre_iteration",
-        "new_particle": "2 - new_particle",
-        "error": "3 - error",
-        "iteration": "4 - iteration",
-        "iter_best": "5 - iter_best",
-        "iter_worst": "5 - iter_worst",
-        "local_best": "6 - local_best",
-    }
+    EVENT: ClassVar[Mapping[str, str]] = MappingProxyType(
+        {
+            "migration": "0 - migration",
+            "pre_iteration": "1 - pre_iteration",
+            "new_particle": "2 - new_particle",
+            "error": "3 - error",
+            "iteration": "4 - iteration",
+            "iter_best": "5 - iter_best",
+            "iter_worst": "5 - iter_worst",
+            "local_best": "6 - local_best",
+        }
+    )
 
     @classmethod
     def get_event(cls, event_type: str) -> str:
