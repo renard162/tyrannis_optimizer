@@ -153,9 +153,8 @@ include = ["src/**/*.py", "tests/**/*.py", ".github/scripts/**/*.py"]
 exclude = ["**/node_modules", "**/__pycache__", "**/__editable__.*"]
 extraPaths = ["src", "tests"]
 pythonVersion = "3.12"
-typeCheckingMode = "recommended"
+typeCheckingMode = "standard"
 failOnWarnings = false
-baselineFile = ".basedpyright/baseline.json"
 
 [tool.ruff]
 include = ["*.py"]

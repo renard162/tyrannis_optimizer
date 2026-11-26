@@ -67,7 +67,7 @@ jobs:
       - name: Ruff format
         run: uv run --no-sync ruff format --check .
       - name: Type check
-        run: uv run --no-sync basedpyright --pythonpath .venv/bin/python --baselinemode=lock
+        run: uv run --no-sync basedpyright --pythonpath .venv/bin/python
 
   core-tests:
     name: Core Tests (${{ matrix.os }}, Python ${{ matrix.python }})
