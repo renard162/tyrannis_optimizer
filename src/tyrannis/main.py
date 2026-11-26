@@ -8,19 +8,16 @@ from typing import Any, Literal
 
 import numpy as np
 
-from .backend.local import Local
 from .core.algorithm import AlgorithmBase
 from .core.backend import BackendBase
 from .core.backend_distributed import DistributedBackendBase
 from .core.backend_migration import MigrationDriverBase
+from .core.orchestrator import OrchestratorBase
 from .core.processor import ProcessorBase
-from .core.results import HistoryConfig
 from .core.space import SpaceBase
-from .migration.island_isolation import IslandIsolation
-from .processor.serial import Serial
 
 
-class Optimizer:
+class Optimizer(OrchestratorBase):
     """Orchestrate the optimization execution."""
 
     def __init__(
@@ -286,107 +283,22 @@ class Optimizer:
             "fitness": 0.0
         }
         """
-        if not isinstance(n_iterations, int) or n_iterations < 1:
-            raise ValueError(
-                "n_iterations must be an integer greater than or equal to 1."
-            )
-
-        if not isinstance(n_particles, int) or n_particles < 1:
-            raise ValueError(
-                "n_particles must be an integer greater than or equal to 1."
-            )
-
-        self._space = space
-        self._algorithm = algorithm
-        self._n_iterations = n_iterations
-        self._n_particles = n_particles
-        self._backend = backend if backend is not None else Local()
-        self._processor = processor if processor is not None else Serial()
-        if not isinstance(self._backend, Local):
-            self._migration = migration if migration is not None else IslandIsolation()
-        else:
-            self._migration = IslandIsolation()
-        self._seed = seed
-        self._fitness_failure_strategy = fitness_failure_strategy
+        self._validate_common_arguments(n_iterations, n_particles)
         self._result = None
         self._fit_state: Literal["new", "unfinished", "completed"] = "new"
-        self._history_config = self._configure_particle_history(history)
-
-        self._space.initialize_context(
-            seed=self._seed,
+        self._configure_components(
+            space=space,
+            algorithm=algorithm,
+            n_iterations=n_iterations,
+            n_particles=n_particles,
+            backend=backend,
+            processor=processor,
+            migration=migration,
+            seed=seed,
+            fitness_failure_strategy=fitness_failure_strategy,
+            history=history
         )
-
-        self._algorithm.initialize_context(
-            fitness_function=self._space,
-            boundaries=self._space.encoded_boundaries,
-            n_iter=self._n_iterations,
-            n_particles=self._n_particles,
-        )
-
-        self._processor.initialize_context(
-            algorithm=self._algorithm,
-            n_iter=self._n_iterations,
-            n_particles=self._n_particles,
-            migration_driver=self._migration,
-            seed=self._seed,
-            fitness_failure_strategy=self._fitness_failure_strategy,
-            history_config=self._history_config,
-        )
-
-        self._backend.initialize_context(
-            algorithm=self._algorithm,
-            n_iter=self._n_iterations,
-            n_particles=self._n_particles,
-            migration=self._migration,
-            processor=self._processor,
-            seed=self._seed,
-            fitness_failure_strategy=self._fitness_failure_strategy,
-            history_config=self._history_config,
-        )
-
-    @staticmethod
-    def _configure_particle_history(history: str | list[str] | None) -> HistoryConfig:
-        history_config = {
-            "migration": False,
-            "pre_iteration": False,
-            "new_particle": False,
-            "error": False,
-            "iteration": False,
-            "status": False,
-            "best": False,
-        }
-
-        if history is None:
-            return HistoryConfig(**history_config)
-
-        if isinstance(history, str):
-            if history == "all":
-                history_config = dict.fromkeys(history_config, True)
-
-            elif history in history_config:
-                history_config[history] = True
-
-            else:
-                raise ValueError(f"Invalid history event: {history!r}.")
-
-            return HistoryConfig(**history_config)
-
-        if isinstance(history, list):
-            if "all" in history:
-                raise ValueError(
-                    "'all' cannot be used inside a history list. "
-                    "Use history='all' instead."
-                )
-
-            for event in history:
-                if event not in history_config:
-                    raise ValueError(f"Invalid history event: {event!r}.")
-
-                history_config[event] = True
-
-            return HistoryConfig(**history_config)
-
-        raise TypeError("history must be None, a string, or a list of strings.")
+        self._initialize_context()
 
     @property
     def best_solution(self) -> Any:
