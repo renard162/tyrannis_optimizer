@@ -1,6 +1,6 @@
 import json
 from collections.abc import Callable
-from typing import Any, override
+from typing import Any, ClassVar, Self, override
 
 from ..core.algorithm import particle_identifier_context
 from ..core.space import SpaceBase
@@ -9,6 +9,8 @@ from . import get_space_class
 
 class Mixed(SpaceBase):
     """Mixed optimization search space."""
+
+    _DECODING_ATTRIBUTES: ClassVar[tuple[str, ...]] = ("_space_encoded_variables",)
 
     _boundaries: list
     _spaces: list[SpaceBase]
@@ -210,6 +212,18 @@ class Mixed(SpaceBase):
 
         for variables in self._space_variables:
             self._variable_names.extend(variables)
+
+    @override
+    def copy_for_decoding(self) -> Self:
+        """Snapshot the initialized grouping and each component's decoder.
+
+        Components are copied through their decoding contracts so their cost
+        functions and caches are excluded at every level. Existing grouping,
+        encoded-variable order, and component random states are preserved.
+        """
+        snapshot = super().copy_for_decoding()
+        snapshot._spaces = [space.copy_for_decoding() for space in self._spaces]
+        return snapshot
 
     def decode(self, float_inputs: dict[str, float]) -> dict[str, Any]:
         self._check_input_bounds(float_inputs)

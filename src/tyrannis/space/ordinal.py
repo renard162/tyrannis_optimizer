@@ -2,7 +2,7 @@ import json
 import warnings
 from collections.abc import Callable, Iterable
 from itertools import pairwise
-from typing import Any, TypeAlias, cast
+from typing import Any, ClassVar, TypeAlias, cast
 
 import numpy as np
 from scipy.special import expit, ndtr, softmax
@@ -25,6 +25,14 @@ CacheKey: TypeAlias = str
 
 class Ordinal(SpaceBase):
     """Ordinal optimization search space."""
+
+    _DECODING_ATTRIBUTES: ClassVar[tuple[str, ...]] = (
+        "_boundaries",
+        "_positions",
+        "_decoder",
+        "_params",
+        "_rng",
+    )
 
     _boundaries: MaterializedBoundaries
     _positions: MaterializedPositions

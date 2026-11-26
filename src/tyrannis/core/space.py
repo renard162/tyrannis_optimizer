@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from copy import deepcopy
 from importlib.util import find_spec
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Self
 
 import numpy as np
 
@@ -81,6 +82,8 @@ class SpaceBase(ABC):
     _cache_type: str
     _cache_size: int
     _cached_cost_function: Callable[[Any], float] | None
+
+    _DECODING_ATTRIBUTES: ClassVar[tuple[str, ...]] = ()
 
     _CACHE_DEPENDENCIES: ClassVar[dict[str, str | None]] = {
         "lru": None,
@@ -279,6 +282,72 @@ class SpaceBase(ABC):
     @property
     def encoded_boundaries(self) -> dict[str, tuple[float, float]]:
         return self._encoded_boundaries.copy()
+
+    def copy_for_decoding(self) -> Self:
+        """
+        Create an independent decoding snapshot of an initialized space.
+
+        Only encoded boundaries, variable names, the calling convention, and
+        attributes explicitly listed in the concrete class's
+        ``_DECODING_ATTRIBUTES`` are copied. Mutable decoding data and random
+        generators are deep-copied without copying the original space itself.
+        Constructors and ``initialize_context`` are not called, so effective
+        boundaries, decoder settings, and random states are preserved.
+
+        The snapshot supports ``decode`` and variable metadata access. It is
+        not an evaluation or initialization context: the objective and runtime
+        cache are absent, and caching is disabled. Constructor configuration
+        used only for initialization is intentionally omitted.
+
+        Each concrete class must declare its complete decoding dependencies
+        explicitly, including subclasses that inherit a decoder unchanged.
+        Composite spaces must override this method to snapshot their component
+        spaces recursively instead of including them in the attribute list.
+        Custom implementations must preserve this isolation contract and must
+        not retain evaluation resources, bound execution methods, or shared
+        random generators. User-defined values must support independent deep
+        copying without changing their decoding semantics.
+
+        Returns
+        -------
+        Self
+            A separate instance of the same class, restricted to decoding.
+
+        Raises
+        ------
+        NotImplementedError
+            The concrete class has not declared its decoding dependencies.
+        AttributeError
+            Required decoding state has not been initialized.
+
+        Notes
+        -----
+        Reading stochastic decoders advances only the snapshot's random state.
+        Standard pickle can preserve the snapshot when its concrete class and
+        retained user-defined values are pickle-compatible. Copying errors from
+        user-defined values propagate to the caller.
+        """
+        if "_DECODING_ATTRIBUTES" not in type(self).__dict__:
+            raise NotImplementedError(
+                f"{type(self).__name__} must declare its decoding dependencies."
+            )
+
+        attributes = (
+            "_encoded_boundaries",
+            "_variable_names",
+            "_is_kwargs",
+            *self._DECODING_ATTRIBUTES,
+        )
+        state: dict[str, object] = deepcopy(
+            {name: getattr(self, name) for name in attributes}
+        )
+        snapshot = object.__new__(type(self))
+        for name, value in state.items():
+            setattr(snapshot, name, value)
+        snapshot._cost_function = None
+        snapshot._cached_cost_function = None
+        snapshot._use_cache = False
+        return snapshot
 
     @property
     def input_arguments(self) -> Any:

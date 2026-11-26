@@ -1,6 +1,6 @@
 import warnings
 from collections.abc import Callable, Iterable
-from typing import Any, TypeAlias, cast
+from typing import Any, ClassVar, TypeAlias, cast
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
@@ -19,6 +19,13 @@ CacheKey: TypeAlias = tuple[Any, ...] | tuple[tuple[str, Any], ...]
 
 class Permutation(SpaceBase):
     """Permutation optimization search space."""
+
+    _DECODING_ATTRIBUTES: ClassVar[tuple[str, ...]] = (
+        "_boundaries",
+        "_decoder",
+        "_params",
+        "_rng",
+    )
 
     _boundaries: Boundaries
     _bounds: tuple[float, float] | None

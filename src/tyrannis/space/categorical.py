@@ -1,6 +1,6 @@
 import warnings
 from collections.abc import Callable, Iterable
-from typing import Any, TypeAlias, cast
+from typing import Any, ClassVar, TypeAlias, cast
 
 import numpy as np
 from scipy.special import softmax
@@ -18,6 +18,14 @@ CacheKey: TypeAlias = tuple[Any, ...] | tuple[tuple[str, Any], ...]
 
 class Categorical(SpaceBase):
     """Categorical optimization search space."""
+
+    _DECODING_ATTRIBUTES: ClassVar[tuple[str, ...]] = (
+        "_boundaries",
+        "_bounds",
+        "_decoder",
+        "_params",
+        "_rng",
+    )
 
     _boundaries: Boundaries
     _bounds: tuple[float, float] | None

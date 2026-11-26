@@ -1,6 +1,6 @@
 from collections.abc import Callable, Collection, Iterable, Mapping
 from enum import Enum
-from typing import Any, ClassVar, TypeAlias
+from typing import Any, ClassVar, Self, TypeAlias, override
 
 import numpy as np
 
@@ -28,6 +28,12 @@ class _SequenceToken(Enum):
 
 class Sequence(SpaceBase):
     """Variable-length ordered sequence optimization search space."""
+
+    _DECODING_ATTRIBUTES: ClassVar[tuple[str, ...]] = (
+        "_input_name",
+        "_min_choices",
+        "_max_choices",
+    )
 
     _CATEGORICAL_DECODERS: ClassVar[set[str]] = {
         "one-hot",
@@ -385,6 +391,18 @@ class Sequence(SpaceBase):
             self._variable_names = ["0"]
         else:
             self._variable_names = [self._input_name]
+
+    @override
+    def copy_for_decoding(self) -> Self:
+        """Snapshot sequence limits and the initialized categorical or ordinal space.
+
+        The base decoder retains its effective choices, positions, STOP tokens,
+        and independent random state without retaining evaluation resources or
+        reconstructing the sequence configuration.
+        """
+        snapshot = super().copy_for_decoding()
+        snapshot._base_space = self._base_space.copy_for_decoding()
+        return snapshot
 
     def decode(self, float_inputs: dict[str, float]) -> SequenceInput:
         self._check_input_bounds(float_inputs)

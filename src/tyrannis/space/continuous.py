@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import TypeAlias, cast
+from typing import ClassVar, TypeAlias, cast
 
 from ..core.space import SpaceBase
 from . import register_space
@@ -10,6 +10,8 @@ Boundaries: TypeAlias = list[Boundary] | dict[str, Boundary]
 
 class Continuous(SpaceBase):
     """Continuous optimization search space."""
+
+    _DECODING_ATTRIBUTES: ClassVar[tuple[str, ...]] = ("_boundaries",)
 
     _boundaries: Boundaries
 

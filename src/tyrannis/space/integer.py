@@ -1,6 +1,6 @@
 import warnings
 from collections.abc import Callable
-from typing import Any, TypeAlias, cast
+from typing import Any, ClassVar, TypeAlias, cast
 
 import numpy as np
 from scipy.special import expit
@@ -16,6 +16,14 @@ IntegerInput: TypeAlias = list[int] | dict[str, int]
 
 class Integer(SpaceBase):
     """Integer optimization search space."""
+
+    _DECODING_ATTRIBUTES: ClassVar[tuple[str, ...]] = (
+        "_boundaries",
+        "_decoded_boundaries",
+        "_decoder",
+        "_params",
+        "_rng",
+    )
 
     _boundaries: Boundaries
     _decoded_boundaries: dict[str, tuple[float, float]]

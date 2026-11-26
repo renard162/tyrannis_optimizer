@@ -1,6 +1,6 @@
 import warnings
 from collections.abc import Callable
-from typing import Any, TypeAlias, cast
+from typing import Any, ClassVar, TypeAlias, cast
 
 import numpy as np
 from scipy.special import expit
@@ -15,6 +15,13 @@ Limits: TypeAlias = tuple[float, float]
 
 class Binary(SpaceBase):
     """Binary optimization search space."""
+
+    _DECODING_ATTRIBUTES: ClassVar[tuple[str, ...]] = (
+        "_boundaries",
+        "_decoder",
+        "_params",
+        "_rng",
+    )
 
     _boundaries: int | list[str]
     _limits: Limits | None
