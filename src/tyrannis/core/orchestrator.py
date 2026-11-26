@@ -327,7 +327,7 @@ class OrchestratorBase(ABC):
         migration: MigrationDriverBase | None = None,
         seed: int | None = None,
         fitness_failure_strategy: str = "raise",
-        history: str | list[str] | None = None
+        history: str | list[str] | None = None,
     ) -> None:
         """
         Assign the shared configuration without initializing component contexts.
@@ -515,7 +515,7 @@ class OrchestratorBase(ABC):
             fitness_function=self._space,
             boundaries=self._space.encoded_boundaries,
             n_iter=self._n_iterations,
-            n_particles=self._n_particles
+            n_particles=self._n_particles,
         )
 
         self._processor.initialize_context(
@@ -525,7 +525,7 @@ class OrchestratorBase(ABC):
             migration_driver=self._migration,
             seed=self._seed,
             fitness_failure_strategy=self._fitness_failure_strategy,
-            history_config=self._history_config
+            history_config=self._history_config,
         )
 
         self._backend.initialize_context(
@@ -536,5 +536,5 @@ class OrchestratorBase(ABC):
             processor=self._processor,
             seed=self._seed,
             fitness_failure_strategy=self._fitness_failure_strategy,
-            history_config=self._history_config
+            history_config=self._history_config,
         )

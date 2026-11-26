@@ -287,7 +287,7 @@ class Optimizer(OrchestratorBase):
             migration=migration,
             seed=seed,
             fitness_failure_strategy=fitness_failure_strategy,
-            history=history
+            history=history,
         )
         self._initialize_context()
         self._configure_history()

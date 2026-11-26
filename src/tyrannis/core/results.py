@@ -338,7 +338,7 @@ class OptimizationHistory:
         *,
         encoding: str = "utf-8",
         sep: str = ",",
-        internal_state: bool = False
+        internal_state: bool = False,
     ) -> None:
         """Export tabular records or serialize the complete history object.
 
@@ -470,7 +470,7 @@ class OptimizationHistory:
         file_location: str | Path,
         encoding: str = "utf-8",
         sep: str = ",",
-        internal_state: bool = False
+        internal_state: bool = False,
     ) -> None:
         """Save registered history rows to CSV, generating each row on demand.
 
