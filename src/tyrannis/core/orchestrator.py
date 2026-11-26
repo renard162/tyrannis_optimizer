@@ -133,13 +133,11 @@ class OrchestratorBase(ABC):
     execution or with recording disabled, ``history`` exposes the configuration
     and decoded and internal columns, and its generators yield no records.
 
-    ``_update_history`` replaces the contents of the history's record list with
-    the complete records explicitly supplied by the subclass. It copies only
-    list references to the existing JSON strings, without parsing or decoding
-    them. It does not append an already accumulated history, infer missing
-    iterations, or inspect a backend or result container. The history object,
-    its record-list identity, and its decoding state are preserved across updates,
-    including when the backend publishes a different result container.
+    ``_update_history`` shares the accumulated list supplied by the subclass
+    and publishes its current length. Later appends become visible on the next
+    publication. The history object, its read-only view, and its decoding state
+    are preserved across updates, including when the backend supplies a different
+    result container or record list.
 
     The concrete orchestrator chooses when to configure, update, preserve, or
     replace history. For continuation with the same schema and configuration,
@@ -259,7 +257,7 @@ class OrchestratorBase(ABC):
         Returns
         -------
         None
-            The existing record list contains the supplied entries in order.
+            The existing history view exposes the supplied entries in order.
 
         Notes
         -----
@@ -267,15 +265,13 @@ class OrchestratorBase(ABC):
         chooses when to publish records, including after an interrupted execution,
         and must supply the full current list rather than an incremental batch.
 
-        Slice assignment preserves the history object, its list, and its decoder
-        while replacing earlier contents instead of appending duplicate records.
-        Only references to immutable JSON strings are copied; no source list or
-        result container is retained, and no parsing or decoding occurs. Passing
-        the history's own record list requires no update. This helper performs
-        no recovery and must not run concurrently with history iteration.
+        The list must be controlled by the execution components. They may append
+        or roll back unpublished entries, but must preserve the published prefix
+        while it is shared. Publication retains the list and its current length
+        without copying entries or retaining the result container. This helper
+        performs no recovery and must not run concurrently with history iteration.
         """
-        if records is not self._history.records:
-            self._history.records[:] = records
+        self._history._publish_records(records)
 
     @staticmethod
     def _validate_common_arguments(n_iterations: int, n_particles: int) -> None:

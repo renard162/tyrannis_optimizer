@@ -1,11 +1,11 @@
 import json
 import pickle
-from collections.abc import Generator, Iterable, Iterator
+from collections.abc import Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from csv import writer
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, ClassVar, Literal, Self, TypedDict, cast, override
+from typing import Any, ClassVar, Literal, Self, TypedDict, cast, overload, override
 
 import numpy as np
 
@@ -90,6 +90,56 @@ class _HistoryRecord(TypedDict, total=False):
     particle: _HistoryParticle
 
 
+class _PublishedRecords(Sequence[str]):
+    """Read-only view of the published prefix of a Tyrannis-owned record list."""
+
+    __slots__ = ("_count", "_source")
+
+    def __init__(self, records: list[str]) -> None:
+        self._publish(records)
+
+    def _publish(self, records: list[str]) -> None:
+        self._source = records
+        self._count = len(records)
+
+    @override
+    def __len__(self) -> int:
+        return self._count
+
+    @overload
+    def __getitem__(self, index: int) -> str: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> list[str]: ...
+
+    @override
+    def __getitem__(self, index: int | slice) -> str | list[str]:
+        published = range(self._count)
+        if isinstance(index, slice):
+            return [self._source[i] for i in published[index]]
+        return self._source[published[index]]
+
+    @override
+    def __iter__(self) -> Iterator[str]:
+        index = 0
+        while index < self._count:
+            yield self._source[index]
+            index += 1
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, (list, _PublishedRecords)):
+            return NotImplemented
+        return len(self) == len(other) and all(a == b for a, b in zip(self, other))
+
+    @override
+    def __reduce__(self) -> tuple[type[Self], tuple[list[str]]]:
+        records = self._source
+        if self._count != len(records):
+            records = records[: self._count]
+        return type(self), (records,)
+
+
 class OptimizationHistory:
     """
     Store optimization records and interpret them independently of execution.
@@ -104,12 +154,12 @@ class OptimizationHistory:
     ----------
     records:
         List of JSON strings in the format produced by ``ProcessorResult.history``.
-        The list is retained by reference, without copying or parsing its entries
-        during construction. Pass an empty list for an empty history. The caller
-        may append or extend this same list, including between executions that
-        use the same variable schema and decoding configuration. Clearing or
-        replacing its entries also affects this history. Concurrent mutation
-        during iteration is not supported.
+        Construction takes a shallow copy of the caller's list and publishes
+        all its entries without parsing them. Later changes to the input list
+        do not affect the history. Internally, the orchestrator shares the
+        backend's accumulated list and publishes its current length. The backend
+        may append records while the published prefix remains intact. Concurrent
+        updates during iteration are not supported.
     config:
         Immutable history configuration used when recording the events. The
         configuration and a snapshot of its registered event labels are retained.
@@ -181,7 +231,7 @@ class OptimizationHistory:
 
     Serialization
     -------------
-    The stored records, configuration, metadata, decoding snapshot, and its current
+    The published records, configuration, metadata, decoding snapshot, and its current
     random state can be preserved by standard ``pickle``. No objective callable,
     bound execution method, closure, or generator is stored as a dependency.
     Use ``history.export("history.pkl", format="pickle")`` to serialize the
@@ -209,7 +259,7 @@ class OptimizationHistory:
         "_variable_names",
     )
 
-    _records: list[str]
+    _records: _PublishedRecords
     _config: HistoryConfig
     _registered_events: tuple[str, ...]
     _space: SpaceBase
@@ -219,13 +269,29 @@ class OptimizationHistory:
     def __init__(
         self, records: list[str], config: HistoryConfig, space: SpaceBase
     ) -> None:
-        """Retain the records and capture initialized decoding state and metadata."""
+        """Snapshot the supplied records and capture decoding state and metadata."""
         self._space = space.copy_for_decoding()
         self._variable_names = tuple(self._space.variable_names)
         self._internal_variable_names = tuple(self._space.encoded_variable_names)
         self._config = config
         self._registered_events = tuple(config.registered_events)
-        self._records = records
+        self._records = _PublishedRecords(list(records))
+
+    def _publish_records(self, records: list[str]) -> None:
+        """Share the execution-owned list and publish its current prefix."""
+        self._records._publish(records)
+
+    def __setstate__(
+        self, state: tuple[dict[str, object] | None, dict[str, object]]
+    ) -> None:
+        attributes, slots = state
+        if attributes:
+            self.__dict__.update(attributes)
+        for name, value in slots.items():
+            # Older Pickles stored all published records directly in this slot.
+            if name == "_records" and isinstance(value, list):
+                value = _PublishedRecords(value)
+            setattr(self, name, value)
 
     @override
     def __repr__(self) -> str:
@@ -237,11 +303,12 @@ class OptimizationHistory:
         )
 
     @property
-    def records(self) -> list[str]:
-        """Return the shared JSON record list for accumulation without copying.
+    def records(self) -> Sequence[str]:
+        """Return a live, read-only view of the published JSON records.
 
-        Appended records must use this history's variable schema and decoder
-        configuration. Mutations are visible to subsequent history reads.
+        Holding the view across publications also follows replacement backend
+        lists. Getting the view takes constant time and space. Slicing copies
+        only the selected entries.
         """
         return self._records
 
@@ -375,8 +442,9 @@ class OptimizationHistory:
         NaN becomes ``"NaN"`` and other fitness values use their string form.
         Decoded CSV export advances only this history's stochastic decoding state.
 
-        Pickle preserves records, configuration, metadata, and current independent
-        decoding state without consuming generators or advancing random state.
+        Pickle preserves published records, configuration, metadata, and current
+        independent decoding state without consuming generators or advancing
+        random state.
         It uses ``pickle.HIGHEST_PROTOCOL`` directly on the binary file. Recover
         the complete object with ``load``; CSV cannot reconstruct the history.
         User-defined objects must support standard Pickle, and their classes must
@@ -446,7 +514,8 @@ class OptimizationHistory:
 
         Require a case-insensitive ``.pkl`` or ``.pickle`` extension and the same
         destination policy as CSV. Standard Pickle uses the components' existing
-        serialization mechanisms without copying records or materializing rows.
+        serialization mechanisms without materializing rows. A fully published
+        record list is serialized directly.
         """
         file_location = Path(file_location)
         if file_location.suffix.lower() not in {".pkl", ".pickle"}:
