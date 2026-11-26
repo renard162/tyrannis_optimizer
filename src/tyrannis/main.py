@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
-from csv import writer
-from pathlib import Path
 from typing import Any, Literal
-
-import numpy as np
 
 from .core.algorithm import AlgorithmBase
 from .core.backend import BackendBase
@@ -135,13 +130,6 @@ class Optimizer(OrchestratorBase):
         fit()
             Execute the optimization and return the optimizer instance.
 
-        save_history_csv(file_location, encoding="utf-8", sep=",", internal_state=False)
-            Save the recorded optimization history to a CSV file. When
-            ``internal_state=False``, the history contains the decoded variables
-            in the representation defined by the search space. When
-            ``internal_state=True``, the CSV also contains the internal particle
-            state and the encoded variables used by the optimization algorithm.
-
         Attributes
         ----------
         best_solution:
@@ -169,20 +157,8 @@ class Optimizer(OrchestratorBase):
             ``history.internal_columns_`` and ``history.internal_generator_``
             expose encoded variables and internal particle state. The object
             remains available before fitting and when recording is disabled,
-            with configuration and columns but no rows.
-
-        history_columns:
-            Delegation to ``history.columns``.
-
-        history_generator:
-            Delegation to ``history.generator`` for decoded tabular rows.
-
-        internal_history_columns_:
-            Delegation to ``history.internal_columns_``.
-
-        internal_history_generator_:
-            Delegation to ``history.internal_generator_`` for encoded tabular
-            rows and internal particle state.
+            with configuration and columns but no rows. CSV export is provided
+            by the history object through ``history.save_csv()``.
 
         Notes
         -----
@@ -399,78 +375,3 @@ class Optimizer(OrchestratorBase):
         self._fit_state = "completed"
 
         return self
-
-    @property
-    def history_columns(self) -> list[str]:
-        """Return ``history.columns`` for decoded history rows."""
-        return self.history.columns
-
-    @property
-    def history_generator(self) -> Iterator[list[Any]]:
-        """Return ``history.generator`` for lazily decoded history rows."""
-        return self.history.generator
-
-    @property
-    def internal_history_columns_(self) -> list[str]:
-        """Return ``history.internal_columns_`` for internal history rows."""
-        return self.history.internal_columns_
-
-    @property
-    def internal_history_generator_(self) -> Iterator[list[Any]]:
-        """Return ``history.internal_generator_`` without decoding variables."""
-        return self.history.internal_generator_
-
-    def save_history_csv(
-        self,
-        file_location: str | Path,
-        encoding: str = "utf-8",
-        sep: str = ",",
-        internal_state: bool = False,
-    ) -> None:
-        """Save the registered optimization history to a CSV file."""
-
-        file_location = Path(file_location)
-
-        if file_location.suffix.lower() != ".csv":
-            raise ValueError(
-                f"History file must have a '.csv' extension: {file_location}"
-            )
-
-        if file_location.exists() and not file_location.is_file():
-            raise ValueError(f"History file location is not a file: {file_location}")
-
-        if not file_location.parent.exists():
-            raise FileNotFoundError(
-                f"Parent directory does not exist: {file_location.parent}"
-            )
-
-        if len(sep) != 1:
-            raise ValueError(f"CSV separator must be a single character: {sep!r}")
-        columns = (
-            self.history.internal_columns_ if internal_state else self.history.columns
-        )
-        row_generator = (
-            self.internal_history_generator_
-            if internal_state
-            else self.history_generator
-        )
-        fitness_index = columns.index("fitness")
-        error_event = self._history_config.get_event("error")
-
-        with file_location.open("w", newline="", encoding=encoding) as file:
-            csv_writer = writer(file, delimiter=sep)
-            csv_writer.writerow(columns)
-
-            for row in row_generator:
-                fitness = row[fitness_index]
-
-                if np.isinf(fitness) and (row[0] == error_event):
-                    row[fitness_index] = "Raise"
-                elif np.isinf(fitness):
-                    row[fitness_index] = "Infinity"
-                elif np.isnan(fitness):
-                    row[fitness_index] = "NaN"
-                else:
-                    row[fitness_index] = str(fitness)
-
-                csv_writer.writerow(row)

@@ -1,8 +1,12 @@
 import json
 from collections.abc import Generator, Iterable, Iterator
 from contextlib import contextmanager
+from csv import writer
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, ClassVar, TypedDict, cast, override
+
+import numpy as np
 
 from .space import SpaceBase
 
@@ -90,7 +94,7 @@ class OptimizationHistory:
     Store optimization records and interpret them independently of execution.
 
     This object owns the interpretation of serialized history, including event
-    filtering, variable metadata, and decoding. It retains no orchestrator,
+    filtering, variable metadata, decoding, and CSV export. It retains no orchestrator,
     algorithm, processor, backend, migration driver, particle population, or
     complete execution-result container. It remains usable after those objects
     and the original search space have been released.
@@ -146,6 +150,14 @@ class OptimizationHistory:
     expose their columns. Memory consists of the shared record list, small metadata
     snapshots, independent decoding data, and the current record and row for each
     active iterator. Column properties return new lists.
+
+    CSV export
+    ----------
+    Use ``history.save_csv("history.csv")`` to write decoded rows, or
+    ``history.save_csv("internal_history.csv", internal_state=True)`` to write
+    encoded variables and internal particle state. Export writes the selected
+    header and consumes the existing generator one row at a time, formatting
+    special fitness values without materializing the complete history.
 
     Decoding isolation
     ------------------
@@ -304,6 +316,93 @@ class OptimizationHistory:
                 *(variables.get(name) for name in self._internal_variable_names),
                 json.dumps(internal_state) if internal_state else None,
             ]
+
+    def save_csv(
+        self,
+        file_location: str | Path,
+        encoding: str = "utf-8",
+        sep: str = ",",
+        internal_state: bool = False
+    ) -> None:
+        """Save registered history rows to CSV, generating each row on demand.
+
+        Parameters
+        ----------
+        file_location:
+            Destination converted to ``Path``. Its extension must be ``.csv``
+            (case-insensitive), its parent directory must exist, and an existing
+            destination must be a file. Existing files are overwritten.
+        encoding:
+            Text encoding used to open the file. Defaults to ``"utf-8"``.
+        sep:
+            Single-character CSV delimiter. Defaults to ``","``.
+        internal_state:
+            If ``False`` (default), use ``columns`` and ``generator`` to export
+            decoded variables. If ``True``, use ``internal_columns_`` and
+            ``internal_generator_`` to export encoded variables and internal
+            particle state without decoding.
+
+        Raises
+        ------
+        ValueError
+            The extension is not ``.csv``, an existing destination is not a file,
+            or the separator does not contain exactly one character.
+        FileNotFoundError
+            The destination's parent directory does not exist.
+
+        Notes
+        -----
+        The header is written even when there are no rows. Records are consumed
+        lazily through the selected generator, without materializing the history.
+        Infinite fitness is written as ``"Raise"`` for error events and
+        ``"Infinity"`` otherwise; NaN is written as ``"NaN"``, and other fitness
+        values use their string representation. File, CSV, parsing, and decoding
+        errors propagate; a failure can leave a partially written file.
+        Decoded export uses this history's independent decoding state, including
+        its stochastic behavior, and requires no producing orchestrator.
+        """
+
+        file_location = Path(file_location)
+
+        if file_location.suffix.lower() != ".csv":
+            raise ValueError(
+                f"History file must have a '.csv' extension: {file_location}"
+            )
+
+        if file_location.exists() and not file_location.is_file():
+            raise ValueError(f"History file location is not a file: {file_location}")
+
+        if not file_location.parent.exists():
+            raise FileNotFoundError(
+                f"Parent directory does not exist: {file_location.parent}"
+            )
+
+        if len(sep) != 1:
+            raise ValueError(f"CSV separator must be a single character: {sep!r}")
+        columns = self.internal_columns_ if internal_state else self.columns
+        row_generator = self.internal_generator_ if internal_state else self.generator
+        fitness_index = columns.index("fitness")
+        error_event = self._config.get_event("error")
+
+        with file_location.open("w", newline="", encoding=encoding) as file:
+            csv_writer = writer(file, delimiter=sep)
+            csv_writer.writerow(columns)
+
+            for row in row_generator:
+                # The heterogeneous row loses the per-column type; recorded
+                # particle fitness follows the _HistoryParticle float contract.
+                fitness = cast(float, row[fitness_index])
+
+                if np.isinf(fitness) and (row[0] == error_event):
+                    row[fitness_index] = "Raise"
+                elif np.isinf(fitness):
+                    row[fitness_index] = "Infinity"
+                elif np.isnan(fitness):
+                    row[fitness_index] = "NaN"
+                else:
+                    row[fitness_index] = str(fitness)
+
+                csv_writer.writerow(row)
 
     def _iter_records(self) -> Iterator[_HistoryRecord]:
         """Parse one record at a time and retain only registered event labels."""
