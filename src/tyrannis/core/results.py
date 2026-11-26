@@ -440,8 +440,9 @@ class OptimizationHistory:
 
         Notes
         -----
-        CSV writes the header and generates rows on demand. Infinite fitness is
-        written as ``"Raise"`` for error events and ``"Infinity"`` otherwise;
+        CSV writes the header and generates rows on demand. Positive infinity is
+        written as ``"Raise"`` for error events and ``"Infinity"`` otherwise.
+        Negative infinity is always written as ``"-Infinity"``.
         NaN becomes ``"NaN"`` and other fitness values use their string form.
         Decoded CSV export advances only this history's stochastic decoding state.
 
@@ -574,8 +575,9 @@ class OptimizationHistory:
         -----
         The header is written even when there are no rows. Records are consumed
         lazily through the selected generator, without materializing the history.
-        Infinite fitness is written as ``"Raise"`` for error events and
-        ``"Infinity"`` otherwise; NaN is written as ``"NaN"``, and other fitness
+        Positive infinity is written as ``"Raise"`` for error events and
+        ``"Infinity"`` otherwise. Negative infinity is always written as
+        ``"-Infinity"``. NaN is written as ``"NaN"``, and other fitness
         values use their string representation. File, CSV, parsing, and decoding
         errors propagate; a failure can leave a partially written file.
         Decoded export uses this history's independent decoding state, including
@@ -613,10 +615,12 @@ class OptimizationHistory:
                 # particle fitness follows the _HistoryParticle float contract.
                 fitness = cast(float, row[fitness_index])
 
-                if np.isinf(fitness) and (row[0] == error_event):
-                    row[fitness_index] = "Raise"
-                elif np.isinf(fitness):
-                    row[fitness_index] = "Infinity"
+                if np.isposinf(fitness):
+                    row[fitness_index] = (
+                        "Raise" if row[0] == error_event else "Infinity"
+                    )
+                elif np.isneginf(fitness):
+                    row[fitness_index] = "-Infinity"
                 elif np.isnan(fitness):
                     row[fitness_index] = "NaN"
                 else:
