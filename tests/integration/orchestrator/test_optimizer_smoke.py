@@ -30,11 +30,13 @@ def test_default_execution_exposes_consistent_result_and_requested_history() -> 
     )
 
     history = optimizer.history
+    records = history.records
     previous_rows: list[dict[str, object]] = []
     previous_internal: list[dict[str, object]] = []
     for last_iteration in (1, 2):
         assert optimizer.fit() is optimizer
         assert optimizer.history is history
+        assert history.records is records
         assert_optimizer_result_consistent(optimizer)
 
         rows: list[dict[str, object]] = [
@@ -96,38 +98,45 @@ def test_default_execution_exposes_consistent_result_and_requested_history() -> 
         previous_rows, previous_internal = rows, internal_rows
 
 
-def test_raise_strategy_propagates_real_objective_failure() -> None:
+@pytest.mark.parametrize("failed_iteration", [2, 4], ids=["first-fit", "continued-fit"])
+def test_raise_strategy_propagates_real_objective_failure(
+    failed_iteration: int,
+) -> None:
     evaluations = 0
 
-    def fail_during_second_update(x: float) -> float:
+    def fail_during_update(x: float) -> float:
         nonlocal evaluations
         evaluations += 1
-        if evaluations == 3:
+        if evaluations == failed_iteration + 1:
             raise ValueError("objective interrupted")
         return sphere(x)
 
-    space = Continuous({"x": (1.0, 3.0)}, fail_during_second_update)
+    space = Continuous({"x": (1.0, 3.0)}, fail_during_update)
     events = ["pre_iteration", "iteration"]
     optimizer = Optimizer(
         space, IntegrationProbeAlgorithm(), 2, 1, seed=BASE_SEED, history=events
     )
     history = optimizer.history
+    if failed_iteration == 4:
+        _ = optimizer.fit()
+        assert evaluations == 3
+    previous = list(history.records)
     with pytest.raises(Exception):  # noqa: B017
         _ = optimizer.fit()
-    assert evaluations == 3
+    assert evaluations == failed_iteration + 1
     assert optimizer.history is history
+    assert history.records[: len(previous)] == previous
     iteration = HistoryConfig.get_event("iteration")
     pre_iteration = HistoryConfig.get_event("pre_iteration")
     assert [(row[0], row[1]) for row in history.generator] == [
-        (pre_iteration, 0),
-        (iteration, 0),
-        (pre_iteration, 1),
-        (iteration, 1),
+        (event, step)
+        for step in range(failed_iteration)
+        for event in (pre_iteration, iteration)
     ]
-    published = history.records.copy()
+    published = list(history.records)
     with pytest.raises(Exception):  # noqa: B017
         _ = optimizer.fit()
-    assert evaluations == 3
+    assert evaluations == failed_iteration + 1
     assert history.records == published
 
 

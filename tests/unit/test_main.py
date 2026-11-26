@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import csv
+import gc
 import json
+from pathlib import Path
 from typing import final, override
+from weakref import ref
 
 import pytest
 from _support.assertions import assert_optimizer_result_consistent
@@ -128,6 +132,52 @@ def test_result_and_history_decode_positional_variables() -> None:
         "variables": [2.0],
         "fitness": 4.0,
     }
-    assert list(optimizer.history.generator) == [
-        [event, None, None, None, None, 4.0, 2.0]
-    ]
+    history = optimizer.history
+    optimizer_ref = ref(optimizer)
+    del optimizer, backend
+    _ = gc.collect()
+    assert optimizer_ref() is None
+    assert list(history.generator) == [[event, None, None, None, None, 4.0, 2.0]]
+
+
+def test_readers_only_consume_published_backend_records(
+    setup_optimizer: ConfiguredOptimizer, tmp_path: Path
+) -> None:
+    optimizer, backend = setup_optimizer
+    event = HistoryConfig.get_event("iteration")
+    record = json.dumps(
+        {"event": event, "particle": {"variables": {"x": 2.3}, "fitness": 4.0}}
+    )
+    backend.publish(ProcessorResult(history=[record]))
+    _ = optimizer.fit()
+    history = optimizer.history
+    source = backend.result.history
+    assert history._records._source is source
+    source.append("unpublished invalid JSON")
+
+    assert list(history.records) == [record]
+    assert "records=1," in repr(history)
+    metadata = [event, None, None, None, None, 4.0]
+    assert list(history.generator) == [[*metadata, 2]]
+    assert list(history.internal_generator_) == [[*metadata, 2.3, None]]
+
+    for internal, columns, variables in (
+        (False, history.columns, ["2"]),
+        (True, history.internal_columns_, ["2.3", ""]),
+    ):
+        csv_path = tmp_path / "history.csv"
+        history.export(csv_path, internal_state=internal)
+        with csv_path.open(encoding="utf-8", newline="") as stream:
+            assert list(csv.reader(stream)) == [
+                columns,
+                [event, "", "", "", "", "4.0", *variables],
+            ]
+
+    path = tmp_path / "history.pkl"
+    history.export(path, format="pickle")
+    _ = optimizer.fit()
+    assert list(history.records) == [record, "unpublished invalid JSON"]
+    restored = OptimizationHistory.load(path)
+    assert list(restored.records) == [record]
+    assert restored._records._source is not source
+    assert restored._records._source == [record]

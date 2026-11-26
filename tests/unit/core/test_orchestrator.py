@@ -119,16 +119,48 @@ def test_published_history_lifecycle() -> None:
     assert history.config == HistoryConfig(iteration=True)
     assert "x" in history.columns
     first, second = '{"iteration": 1}', '{"iteration": 2}'
-    orchestrator.publish([first])
+    source = [first]
+    orchestrator.publish(source)
+    source.append(second)
     assert records == [first]
-    orchestrator.publish([first, second])
+    orchestrator.publish(source)
     assert orchestrator.history is history
     assert history.records is records
     assert records == [first, second]
+    replacement = [second, first]
+    orchestrator.publish(replacement)
+    assert history.records is records
+    assert history._records._source is replacement
+    assert records == [second, first]
     orchestrator.reset_history()
     assert orchestrator.history is not history
     assert orchestrator.history.records == []
-    assert history.records == [first, second]
+    assert history.records == [second, first]
+
+
+def test_records_indexing_and_slicing_use_the_published_length() -> None:
+    space = Continuous({"x": (-1.0, 1.0)}, sphere)
+    space.initialize_context(seed=BASE_SEED)
+    orchestrator = _Orchestrator(space, HistoryConfig())
+    source = ["a", "b", "c", "d"]
+    orchestrator.publish(source)
+    source.append("unpublished")
+    records = orchestrator.history.records
+    assert len(records) == 4
+    assert list(records) == ["a", "b", "c", "d"]
+    assert records[1] == "b"
+    assert records[-1] == "d"
+    for index in (4, -5):
+        with pytest.raises(IndexError):
+            _ = records[index]
+    selected = records[1:3]
+    assert isinstance(selected, list)
+    assert selected == ["b", "c"]
+    selected.clear()
+    assert records[1:3] == ["b", "c"]
+    assert records[-2:] == ["c", "d"]
+    assert records[::-1] == ["d", "c", "b", "a"]
+    assert records[::2] == ["a", "c"]
 
 
 def test_explicit_local_components_receive_the_selected_history() -> None:
