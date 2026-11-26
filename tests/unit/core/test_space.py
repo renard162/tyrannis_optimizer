@@ -3,13 +3,22 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Protocol, final, override
+from typing import ClassVar, Protocol, final, override
 
 import numpy as np
 import pytest
+from _support.numerics import BASE_SEED
 from _support.objectives import CountingObjective, sphere
 
 from tyrannis.core.space import SpaceBase
+from tyrannis.space.binary import Binary
+from tyrannis.space.categorical import Categorical
+from tyrannis.space.continuous import Continuous
+from tyrannis.space.integer import Integer
+from tyrannis.space.mixed import Mixed
+from tyrannis.space.ordinal import Ordinal
+from tyrannis.space.permutation import Permutation
+from tyrannis.space.sequence import Sequence
 
 Decoded = tuple[float, ...] | dict[str, float]
 
@@ -235,3 +244,69 @@ def test_serialized_state_excludes_runtime_cache(
 
     assert state == {**vars(space), "_cached_cost_function": None}
     assert vars(space)["_cached_cost_function"] is not None
+
+
+def test_snapshot_requires_explicit_decoder_dependencies() -> None:
+    space = SimpleSpace()
+    space.initialize_context()
+    with pytest.raises(Exception):  # noqa: B017
+        _ = space.copy_for_decoding()
+
+
+class _EffectiveBoundsSpace(Continuous):
+    _DECODING_ATTRIBUTES: ClassVar[tuple[str, ...]] = ("_boundaries",)
+
+    def narrow_domain(self) -> None:
+        self._encoded_boundaries["x"] = (0.0, 1.0)
+
+
+def test_snapshot_excludes_evaluation(counting_objective: CountingObjective) -> None:
+    space = _EffectiveBoundsSpace(
+        {"x": (-5.0, 5.0)}, counting_objective, use_cache=True
+    )
+    space.initialize_context(seed=BASE_SEED)
+    space.narrow_domain()
+    inputs = {"x": 0.5}
+    _ = space(inputs)
+    snapshot = space.copy_for_decoding()
+    assert snapshot.encoded_boundaries == space.encoded_boundaries == {"x": (0.0, 1.0)}
+    assert snapshot.decode(inputs) == inputs
+    assert vars(snapshot)["_cached_cost_function"] is None
+    assert vars(snapshot)["_use_cache"] is False
+    with pytest.raises(Exception):  # noqa: B017
+        _ = snapshot(inputs)
+    _ = space(inputs)
+    assert counting_objective.calls == 1
+
+
+DECODING_SPACES: list[SpaceBase] = [
+    Continuous([(1.0, 3.0)]),
+    Integer({"count": (-3, 5)}),
+    Binary(["flag"], decoder="s-shape"),
+    Categorical({"color": ["red", "blue"]}, decoder="softmax"),
+    Ordinal({"rank": ["low", "high"]}, positions={"rank": [1.0, 4.0]}),
+    Permutation({"route": ["A", "B", "C"]}),
+    Mixed({"flag": Binary(decoder="s-shape"), "count": Integer([(-2, 4)])}, sphere),
+    Sequence(["A", "B"], min_choices=1, max_choices=2, decoder="categorical-softmax"),
+]
+
+
+@pytest.mark.parametrize(
+    "space", DECODING_SPACES, ids=[type(space).__name__ for space in DECODING_SPACES]
+)
+def test_snapshot_reproduces_decoding_from_the_current_state(space: SpaceBase) -> None:
+    space.initialize_context(seed=BASE_SEED)
+    inputs = {
+        key: lower + 0.3 * (upper - lower)
+        for key, (lower, upper) in space.encoded_boundaries.items()
+    }
+    space.decode(inputs)
+    expected: list[object] = [space.decode(inputs) for _ in range(12)]
+    space.initialize_context(seed=BASE_SEED)
+    space.decode(inputs)
+    snapshot = space.copy_for_decoding()
+    assert snapshot.variable_names == space.variable_names
+    assert snapshot.encoded_variable_names == space.encoded_variable_names
+    assert snapshot.encoded_boundaries == space.encoded_boundaries
+    assert [snapshot.decode(inputs) for _ in expected] == expected
+    assert [space.decode(inputs) for _ in expected] == expected

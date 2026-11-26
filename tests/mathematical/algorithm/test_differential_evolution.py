@@ -118,7 +118,7 @@ def run_de(
             assert particle.candidate_variables is None
             assert particle.candidate_fitness is None
     # History exposes exactly the consolidated states used by the oracle.
-    rows: list[list[object]] = list(optimizer.internal_history_generator_)
+    rows: list[list[object]] = list(optimizer.history.internal_generator_)
     assert len(rows) == n_particles * (n_iterations + 1)
     for row in rows:
         iteration, identifier = row[1], row[2]

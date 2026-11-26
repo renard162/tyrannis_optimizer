@@ -77,9 +77,9 @@ def test_optimizer_consolidates_results_from_spark_islands() -> None:
     ]
     candidates: list[tuple[float, str, float]] = []
     source_by_slot: dict[str, str] = {}
-    for values in optimizer.history_generator:
+    for values in optimizer.history.generator:
         row: dict[str, object] = dict(
-            zip(optimizer.history_columns, values, strict=True)
+            zip(optimizer.history.columns, values, strict=True)
         )
         if row["iteration"] == 1:
             origin, identifier, x = row["origin"], row["identifier"], row["x"]
@@ -113,10 +113,10 @@ def test_optimizer_consolidates_results_from_spark_islands() -> None:
     }
     assert_optimizer_result_consistent(optimizer)
     first_result = optimizer.result_
-    first_history = list(optimizer.internal_history_generator_)
+    first_history = list(optimizer.history.internal_generator_)
     with patch.object(backend, "execute") as execute:
         with pytest.raises(RuntimeError, match="local and parallel"):
             _ = optimizer.fit()
         execute.assert_not_called()
     assert optimizer.result_ == first_result
-    assert list(optimizer.internal_history_generator_) == first_history
+    assert list(optimizer.history.internal_generator_) == first_history

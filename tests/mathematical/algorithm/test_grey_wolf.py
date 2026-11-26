@@ -150,7 +150,7 @@ def run_wolves(
             assert particle.candidate_fitness is None
             assert not particle.new_particle
     assert_initial_state(algorithm)
-    rows: list[list[object]] = list(optimizer.internal_history_generator_)
+    rows: list[list[object]] = list(optimizer.history.internal_generator_)
     assert len(rows) == 5 * (n_iterations + 1)
     for row in rows:
         iteration, identifier = row[1], row[2]

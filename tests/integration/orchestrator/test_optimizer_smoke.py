@@ -29,19 +29,21 @@ def test_default_execution_exposes_consistent_result_and_requested_history() -> 
         history=["iteration", "best"],
     )
 
+    history = optimizer.history
     previous_rows: list[dict[str, object]] = []
     previous_internal: list[dict[str, object]] = []
     for last_iteration in (1, 2):
         assert optimizer.fit() is optimizer
+        assert optimizer.history is history
         assert_optimizer_result_consistent(optimizer)
 
         rows: list[dict[str, object]] = [
-            dict(zip(optimizer.history_columns, values, strict=True))
-            for values in optimizer.history_generator
+            dict(zip(optimizer.history.columns, values, strict=True))
+            for values in optimizer.history.generator
         ]
         internal_rows: list[dict[str, object]] = [
-            dict(zip(optimizer.internal_history_columns_, values, strict=True))
-            for values in optimizer.internal_history_generator_
+            dict(zip(optimizer.history.internal_columns_, values, strict=True))
+            for values in optimizer.history.internal_generator_
         ]
         iteration_event = HistoryConfig.get_event("iteration")
         best_event = HistoryConfig.get_event("local_best")
@@ -55,7 +57,7 @@ def test_default_execution_exposes_consistent_result_and_requested_history() -> 
         # Continuous has identical encoded/decoded values. Compare by content,
         # without imposing physical particle ordering on either generator.
         assert Counter(tuple(row.values()) for row in rows) == Counter(
-            tuple(row[column] for column in optimizer.history_columns)
+            tuple(row[column] for column in optimizer.history.columns)
             for row in internal_rows
         )
         identifiers = {
@@ -95,22 +97,38 @@ def test_default_execution_exposes_consistent_result_and_requested_history() -> 
 
 
 def test_raise_strategy_propagates_real_objective_failure() -> None:
-    # Component smokes do not propagate a failing objective through Optimizer.
-    optimizer = Optimizer(
-        space=Continuous(
-            boundaries={"x": (1.0, 3.0)}, cost_function=fails_for_positive
-        ),
-        algorithm=IntegrationProbeAlgorithm(),
-        n_particles=4,
-        n_iterations=1,
-        seed=BASE_SEED,
-        fitness_failure_strategy="raise",
-    )
+    evaluations = 0
 
+    def fail_during_second_update(x: float) -> float:
+        nonlocal evaluations
+        evaluations += 1
+        if evaluations == 3:
+            raise ValueError("objective interrupted")
+        return sphere(x)
+
+    space = Continuous({"x": (1.0, 3.0)}, fail_during_second_update)
+    events = ["pre_iteration", "iteration"]
+    optimizer = Optimizer(
+        space, IntegrationProbeAlgorithm(), 2, 1, seed=BASE_SEED, history=events
+    )
+    history = optimizer.history
     with pytest.raises(Exception):  # noqa: B017
         _ = optimizer.fit()
-    with pytest.raises(RuntimeError, match="interrupted fit"):
+    assert evaluations == 3
+    assert optimizer.history is history
+    iteration = HistoryConfig.get_event("iteration")
+    pre_iteration = HistoryConfig.get_event("pre_iteration")
+    assert [(row[0], row[1]) for row in history.generator] == [
+        (pre_iteration, 0),
+        (iteration, 0),
+        (pre_iteration, 1),
+        (iteration, 1),
+    ]
+    published = history.records.copy()
+    with pytest.raises(Exception):  # noqa: B017
         _ = optimizer.fit()
+    assert evaluations == 3
+    assert history.records == published
 
 
 def test_invalidate_strategy_completes_with_invalid_public_result() -> None:
@@ -132,8 +150,8 @@ def test_invalidate_strategy_completes_with_invalid_public_result() -> None:
     assert_optimizer_result_consistent(optimizer)
     assert optimizer.best_fitness == inf
     rows: list[dict[str, object]] = [
-        dict(zip(optimizer.history_columns, values, strict=True))
-        for values in optimizer.history_generator
+        dict(zip(optimizer.history.columns, values, strict=True))
+        for values in optimizer.history.generator
     ]
     # Errors from both initialization and the real update reach the public API.
     assert {row["iteration"] for row in rows} == {0, 1}

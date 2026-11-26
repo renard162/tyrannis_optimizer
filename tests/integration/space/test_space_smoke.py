@@ -238,9 +238,9 @@ def _run_smoke(space: SpaceBase) -> Optimizer:
     # Local runs a replica: observe the returned population, not the template.
     snapshots: dict[tuple[int, str], dict[str, float]] = {}
     fitnesses: list[float] = []
-    for values in optimizer.internal_history_generator_:
+    for values in optimizer.history.internal_generator_:
         row: dict[str, object] = dict(
-            zip(optimizer.internal_history_columns_, values, strict=True)
+            zip(optimizer.history.internal_columns_, values, strict=True)
         )
         iteration, identifier = row["iteration"], row["identifier"]
         assert isinstance(iteration, int)
@@ -345,9 +345,9 @@ def test_mixed_preserves_particle_identifiers_through_fit() -> None:
     optimizer = _run_smoke(space)
 
     expected: dict[str, list[dict[str, object]]] = {}
-    for values in optimizer.internal_history_generator_:
+    for values in optimizer.history.internal_generator_:
         row: dict[str, object] = dict(
-            zip(optimizer.internal_history_columns_, values, strict=True)
+            zip(optimizer.history.internal_columns_, values, strict=True)
         )
         identifier = row["identifier"]
         assert isinstance(identifier, str)

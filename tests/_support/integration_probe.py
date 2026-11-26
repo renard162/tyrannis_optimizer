@@ -245,9 +245,9 @@ def assert_parallel_probe_continues(
     from .assertions import assert_optimizer_result_consistent
     from .objectives import sphere
 
-    first_history: list[list[object]] = list(optimizer.history_generator)
-    slot = optimizer.history_columns.index("identifier")
-    step = optimizer.history_columns.index("iteration")
+    first_history: list[list[object]] = list(optimizer.history.generator)
+    slot = optimizer.history.columns.index("identifier")
+    step = optimizer.history.columns.index("iteration")
     traces = {
         key: deepcopy(particle.trace) for key, particle in probe.population.items()
     }
@@ -259,7 +259,7 @@ def assert_parallel_probe_continues(
 
     _ = optimizer.fit()
 
-    history: list[list[object]] = list(optimizer.history_generator)
+    history: list[list[object]] = list(optimizer.history.generator)
     assert history[: len(first_history)] == first_history
     assert Counter((row[step], row[slot]) for row in history[len(first_history) :]) == {
         (2, key): 1 for key in traces

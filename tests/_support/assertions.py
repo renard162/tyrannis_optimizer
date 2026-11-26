@@ -62,4 +62,4 @@ def assert_reproducible(
     second = optimizer_factory().fit()
 
     assert first.result_ == second.result_
-    assert list(first.history_generator) == list(second.history_generator)
+    assert list(first.history.generator) == list(second.history.generator)

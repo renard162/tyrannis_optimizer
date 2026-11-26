@@ -152,7 +152,7 @@ def run_whales(
             assert particle.candidate_fitness is None
     assert_initial_state(algorithm, bounds, objective)
     # Minimal history check: it exposes these consolidated positions and fitnesses.
-    rows: list[list[object]] = list(optimizer.internal_history_generator_)
+    rows: list[list[object]] = list(optimizer.history.internal_generator_)
     assert len(rows) == n_particles * (n_iterations + 1)
     for row in rows:
         iteration, identifier = row[1], row[2]

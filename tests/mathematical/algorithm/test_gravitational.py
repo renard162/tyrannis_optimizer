@@ -116,7 +116,7 @@ def run_swarm(
         if iteration > 0
         for key in population
     }
-    rows: list[list[object]] = list(optimizer.internal_history_generator_)
+    rows: list[list[object]] = list(optimizer.history.internal_generator_)
     for row in rows:
         iteration, identifier = row[1], row[2]
         assert isinstance(iteration, int) and isinstance(identifier, str)

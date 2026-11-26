@@ -145,7 +145,7 @@ def run_swarm(
             for key in executed.initial
         }
     )
-    rows: list[list[object]] = list(optimizer.internal_history_generator_)
+    rows: list[list[object]] = list(optimizer.history.internal_generator_)
     assert len(rows) == n_particles * (n_iterations + 1)
     for row in rows:
         iteration, identifier = row[1], row[2]

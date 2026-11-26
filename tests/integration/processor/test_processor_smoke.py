@@ -93,9 +93,9 @@ def _optimizer(
 def _history(optimizer: Optimizer) -> History:
     """Index controller snapshots, rejecting duplicates before normalization."""
     history: History = {}
-    for values in optimizer.internal_history_generator_:
+    for values in optimizer.history.internal_generator_:
         row: dict[str, object] = dict(
-            zip(optimizer.internal_history_columns_, values, strict=True)
+            zip(optimizer.history.internal_columns_, values, strict=True)
         )
         iteration, identifier = row["iteration"], row["identifier"]
         assert isinstance(iteration, int)

@@ -118,13 +118,13 @@ def test_two_islands_and_consolidation(manager: SyncManager) -> None:
     assert all(not result.history for result in backend.local_bests.values())
     assert_optimizer_result_consistent(optimizer)
     first_result = optimizer.result_
-    first_history = list(optimizer.internal_history_generator_)
+    first_history = list(optimizer.history.internal_generator_)
     with patch.object(backend, "execute") as execute:
         with pytest.raises(RuntimeError):
             _ = optimizer.fit()
         execute.assert_not_called()
     assert optimizer.result_ == first_result
-    assert list(optimizer.internal_history_generator_) == first_history
+    assert list(optimizer.history.internal_generator_) == first_history
     assert {child.pid for child in active_children()} == before
 
 
