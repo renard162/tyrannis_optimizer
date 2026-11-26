@@ -8,7 +8,7 @@ from .algorithm import AlgorithmBase
 from .backend import BackendBase
 from .backend_migration import MigrationDriverBase
 from .processor import ProcessorBase
-from .results import HistoryConfig, ProcessorResult
+from .results import HistoryConfig, OptimizationHistory, ProcessorResult
 from .space import SpaceBase
 
 
@@ -61,6 +61,9 @@ class OrchestratorBase(ABC):
         Its validation remains the responsibility of those components.
     _history_config : HistoryConfig
         Event selection shared with the processor and backend.
+    _history : OptimizationHistory
+        Independent history object initialized and updated explicitly by the
+        concrete orchestrator through the shared history helpers.
     _n_particles : int
         Initial population size, per island when the backend uses islands.
     _n_iterations : int
@@ -68,6 +71,9 @@ class OrchestratorBase(ABC):
     _result : ProcessorResult or None
         Result exposed by the concrete orchestrator, or ``None`` before it has
         acquired a result. The subclass initializes and updates this attribute.
+    history : OptimizationHistory
+        Concrete property returning ``_history`` directly, without copying,
+        materializing, filtering, or decoding its records.
 
     Implementing an orchestrator
     ---------------------------
@@ -79,8 +85,9 @@ class OrchestratorBase(ABC):
 
     Use ``_validate_common_arguments`` to validate iteration and particle
     counts before configuring components. ``_configure_components`` assigns
-    all shared configuration attributes except ``_result``, selects default
-    components, and converts the requested history events into `HistoryConfig`.
+    all shared configuration attributes except ``_result`` and ``_history``,
+    selects default components, and converts the requested history events into
+    `HistoryConfig`.
     It retains supplied component instances without copying or resetting them.
     ``_configure_particle_history`` is also available independently when only
     event selection needs to be converted; it does not assign instance state.
@@ -88,9 +95,12 @@ class OrchestratorBase(ABC):
     Initialize ``_result`` to ``None`` before any result accessor or execution
     path can read it, and initialize any subclass-specific lifecycle state
     before that state is used. The shared helpers do not manage these values.
-    All configuration attributes must be assigned before explicitly calling
-    ``_initialize_context``. The constructor and the helpers are independent:
-    the subclass chooses when preparation occurs and when execution begins.
+    Initialize ``_history`` through ``_configure_history`` after the space has
+    been initialized and before exposing ``history`` or updating its records.
+    All component configuration attributes must be assigned before explicitly
+    calling ``_initialize_context``. The constructor and the helpers are
+    independent: the subclass chooses when preparation occurs and when
+    execution begins.
 
     Contexts must be initialized in this order: space, algorithm, processor,
     backend. The space first prepares the encoded boundaries consumed by the
@@ -116,9 +126,41 @@ class OrchestratorBase(ABC):
     result container; the concrete orchestrator decides when to retain that
     container in ``_result`` and how to expose its contents to users.
 
-    Public result access, history iteration and export, execution recovery,
-    and stopping policies are outside this base's responsibilities. The base
-    neither creates a result container nor collects or transforms history.
+    ``_configure_history`` constructs an empty `OptimizationHistory` using the
+    configured event selection and an initialized space. It captures metadata
+    and an independent decoding snapshot through the history object's existing
+    contract; it does not initialize the space or enable recording. Even before
+    execution or with recording disabled, ``history`` exposes the configuration
+    and decoded and internal columns, and its generators yield no records.
+
+    ``_update_history`` replaces the contents of the history's record list with
+    the complete records explicitly supplied by the subclass. It copies only
+    list references to the existing JSON strings, without parsing or decoding
+    them. It does not append an already accumulated history, infer missing
+    iterations, or inspect a backend or result container. The history object,
+    its record-list identity, and its decoding state are preserved across updates,
+    including when the backend publishes a different result container.
+
+    The concrete orchestrator chooses when to configure, update, preserve, or
+    replace history. For continuation with the same schema and configuration,
+    update the existing object with the complete accumulated records. Calling
+    ``_configure_history`` again creates a new empty object and is appropriate
+    only when the concrete lifecycle requires replacing the previous history,
+    for example for a new optimization or a changed variable schema. Previously
+    returned history objects remain usable but no longer receive these updates.
+
+    `OptimizationHistory` retains no reference to the orchestrator, execution
+    components, or complete result containers. Its decoding snapshot excludes
+    evaluation resources and does not advance the optimization's random state.
+    It remains usable independently after the orchestrator is released. The
+    history object owns lazy iteration, event filtering, and decoding; the base
+    only constructs it and synchronizes its records. Concurrent updates during
+    iteration are not supported by the history contract.
+
+    Public best-result access, export, execution recovery, and stopping policies
+    remain outside this base's responsibilities. Components decide which partial
+    results to publish after interruptions; the concrete orchestrator decides
+    when to synchronize those records without duplicating component recovery.
     """
 
     _space: SpaceBase
@@ -129,6 +171,7 @@ class OrchestratorBase(ABC):
     _seed: int | None
     _fitness_failure_strategy: str
     _history_config: HistoryConfig
+    _history: OptimizationHistory
     _n_particles: int
     _n_iterations: int
     _result: ProcessorResult | None
@@ -153,7 +196,7 @@ class OrchestratorBase(ABC):
         Notes
         -----
         The implementation owns argument interpretation and the initialization
-        of its lifecycle state and ``_result``. It may explicitly use the shared
+        of its lifecycle state, ``_result``, and ``_history``. It may use the shared
         validation and configuration helpers, and must establish their
         documented preconditions before initializing component contexts.
         Preparation may occur during construction or at another point chosen
@@ -164,6 +207,75 @@ class OrchestratorBase(ABC):
         constructor does not require implementing any execution method in this
         base, and it does not implicitly invoke the preparation helpers.
         """
+
+    @property
+    def history(self) -> OptimizationHistory:
+        """Return the initialized history object without processing its records.
+
+        The concrete orchestrator must call ``_configure_history`` before this
+        property is used. Empty histories retain their configuration and columns;
+        both generator properties yield no rows and invoke no decoding.
+        """
+        return self._history
+
+    def _configure_history(self) -> None:
+        """
+        Create an empty history with independent decoding state and metadata.
+
+        Returns
+        -------
+        None
+            A new `OptimizationHistory` is assigned to ``_history``.
+
+        Notes
+        -----
+        ``_history_config`` must be assigned and ``_space`` must be initialized
+        before this call. The history constructor obtains its decoding snapshot
+        through ``SpaceBase.copy_for_decoding`` without reinitializing the space
+        or modifying the optimization's decoding state. Snapshot errors propagate.
+
+        This helper does not read ``_result`` or any execution component, change
+        recording flags, or collect records. The subclass must call it before
+        exposing ``history``, even when recording is disabled. Calling it again
+        replaces the history object; use ``_update_history`` for continuation
+        with the existing schema and configuration instead.
+        """
+        self._history = OptimizationHistory(
+            records=[], config=self._history_config, space=self._space
+        )
+
+    def _update_history(self, records: list[str]) -> None:
+        """
+        Synchronize the existing history with a complete published record list.
+
+        Parameters
+        ----------
+        records:
+            All JSON records currently published for this optimization, including
+            earlier executions when continuing. Records must use the schema and
+            decoding configuration captured by ``_configure_history``. An empty
+            list empties the history without changing its metadata.
+
+        Returns
+        -------
+        None
+            The existing record list contains the supplied entries in order.
+
+        Notes
+        -----
+        ``_configure_history`` must have completed before this call. The subclass
+        chooses when to publish records, including after an interrupted execution,
+        and must supply the full current list rather than an incremental batch.
+
+        Slice assignment preserves the history object, its list, and its decoder
+        while replacing earlier contents instead of appending duplicate records.
+        Only references to immutable JSON strings are copied; no source list or
+        result container is retained, and no parsing or decoding occurs. Passing
+        the history's own record list requires no update. This helper performs
+        no recovery and must not run concurrently with history iteration.
+        """
+        if records is not self._history.records:
+            self._history.records[:] = records
 
     @staticmethod
     def _validate_common_arguments(n_iterations: int, n_particles: int) -> None:
@@ -257,10 +369,10 @@ class OrchestratorBase(ABC):
         Supplied components must already have been constructed; their
         optimization contexts need not yet be initialized.
 
-        This method assigns all shared attributes except ``_result``. It does
-        not validate counts again or validate the failure strategy. History
-        validation occurs last and propagates the helper's exceptions; prior
-        assignments are not rolled back if that validation fails.
+        This method assigns all shared attributes except ``_result`` and
+        ``_history``. It does not validate counts again or validate the failure
+        strategy. History validation occurs last and propagates the helper's
+        exceptions; prior assignments are not rolled back if validation fails.
 
         Supplied components are retained by reference, except for a migration
         driver replaced by local isolation. No component is copied, rebuilt,
@@ -371,10 +483,10 @@ class OrchestratorBase(ABC):
         Notes
         -----
         This method takes no configuration arguments. All shared attributes
-        other than ``_result`` must already be assigned, normally by a
-        successful ``_configure_components`` call after count validation.
+        other than ``_result`` and ``_history`` must already be assigned, normally
+        by a successful ``_configure_components`` call after count validation.
         Any subclass-specific state observed during initialization must also
-        be ready. ``_result`` is neither read nor assigned by this method.
+        be ready. Neither ``_result`` nor ``_history`` is read or assigned here.
 
         Call explicitly when preparing an optimization, before executing its
         components. The space receives the seed and prepares the boundaries;
