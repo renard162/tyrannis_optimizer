@@ -311,8 +311,10 @@ class ScipyMinimizer(OrchestratorBase):
         `keep_feasible` flag of a `Bounds` object is silently ignored.
 
         Equal endpoints fix the variable at that value. Only originally free
-        intervals enter the `Continuous` space. A free interval whose endpoints
-        coincide after conversion to float64 is rejected. Objective inputs,
+        intervals enter the `Continuous` space. Their endpoints are converted
+        to float64 and rounded inward when necessary, so the interval can
+        shrink but cannot expand. A free interval whose converted endpoints
+        are no longer strictly increasing is rejected. Objective inputs,
         callback vectors and result positions normally use float64. When needed
         to retain a higher-precision fixed value, reconstruction uses an array
         with ``dtype=object``. Free variables still use the precision of the
@@ -671,7 +673,25 @@ class ScipyMinimizer(OrchestratorBase):
                 fixed_values.append((index, lb))
             else:
                 lower_float, upper_float = float(lb), float(ub)
-                if lower_float == upper_float:
+                # NumPy integers were unboxed in _finite_real_array. Compare
+                # Python floats before nextafter can introduce a NumPy scalar.
+                # Decimal.from_float also respects the FloatOperation trap.
+                lower_cmp = (
+                    Decimal.from_float(lower_float)
+                    if isinstance(lb, Decimal)
+                    else lower_float
+                )
+                upper_cmp = (
+                    Decimal.from_float(upper_float)
+                    if isinstance(ub, Decimal)
+                    else upper_float
+                )
+                with np.errstate(under="ignore", over="ignore"):
+                    if lower_cmp < lb:
+                        lower_float = float(np.nextafter(lower_float, np.inf))
+                    if upper_cmp > ub:
+                        upper_float = float(np.nextafter(upper_float, -np.inf))
+                if lower_float >= upper_float:
                     raise ValueError("A free interval collapses at float64 precision.")
                 free_indices.append(index)
                 free_bounds.append((lower_float, upper_float))
