@@ -365,8 +365,6 @@ class TestDistributedBackend(DistributedBackendBase):
         """Calibration evidence only; never included in optimizer results."""
         return self._worker_pids.copy()
 
-    # Keep the requested signature style without a trailing argument comma.
-    # fmt: off
     @override
     def initialize_context(
         self,
@@ -377,10 +375,8 @@ class TestDistributedBackend(DistributedBackendBase):
         processor: ProcessorBase[SignalT] | None,
         fitness_failure_strategy: str,
         history_config: HistoryConfig,
-        seed: int | None
+        seed: int | None,
     ) -> None:
-        # fmt: on
-        # The production base omits its Algorithm/Processor generic arguments.
         super().initialize_context(  # pyright: ignore[reportUnknownMemberType]
             algorithm=algorithm,
             n_iter=n_iter,
