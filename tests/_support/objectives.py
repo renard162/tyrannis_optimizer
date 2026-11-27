@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from os import getpid
 from typing import Any
+
+import numpy as np
+from numpy.typing import NDArray
 
 
 def encoded_sphere(variables: Mapping[str, float]) -> float:
@@ -43,3 +47,17 @@ class CountingObjective:
         del values, named_values
         self.calls += 1
         return self.return_value
+
+
+def shifted_sphere(x: NDArray[np.float64], offset: float) -> float:
+    """SciPy vector objective with a positional argument."""
+    return sphere(*x) + offset
+
+
+def worker_shifted_sphere(
+    x: NDArray[np.float64], offset: float, driver_pid: int
+) -> float:
+    """Check the reconstructed SciPy input in a separate worker process."""
+    assert getpid() != driver_pid
+    assert x.shape == (2,) and -1 <= x[0] <= 1 and x[1] == 3
+    return shifted_sphere(x, offset)
