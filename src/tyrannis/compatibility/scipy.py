@@ -524,8 +524,6 @@ class ScipyMinimizer(OrchestratorBase):
     99
     """
 
-    # Keep the last parameter and its corresponding argument free of trailing commas.
-    # fmt: off
     def __init__(
         self,
         algorithm: AlgorithmBase,
@@ -542,7 +540,7 @@ class ScipyMinimizer(OrchestratorBase):
         cache_size: int = 100_000,
         maxiter: int | None = None,
         tol: float | None = None,
-        target_fitness: float | None = None
+        target_fitness: float | None = None,
     ) -> None:
         self._base_config = _MinimizerConfig(
             algorithm=algorithm,
@@ -559,11 +557,10 @@ class ScipyMinimizer(OrchestratorBase):
             cache_size=cache_size,
             maxiter=maxiter,
             tol=tol,
-            target_fitness=target_fitness
+            target_fitness=target_fitness,
         )
         self._execution: _ExecutionState | None = None
         self._result = None
-    # fmt: on
 
     def _resolve_options(self, **options: object) -> _MinimizerConfig:
         """Merge expanded SciPy options and validate the resulting configuration."""
@@ -723,8 +720,8 @@ class ScipyMinimizer(OrchestratorBase):
         bounds: Bounds | ArrayLike | None = None,
         constraints: object = (),
         callback: Callable[..., object] | None = None,
-        **options: object
-    ) -> OptimizeResult:  # fmt: skip
+        **options: object,
+    ) -> OptimizeResult:
         """
         Solve the bounded problem supplied by `scipy.optimize.minimize`.
 
@@ -787,8 +784,8 @@ class ScipyMinimizer(OrchestratorBase):
         domain: _Domain,
         config: _MinimizerConfig,
         target: float,
-        callback: Callable[..., object] | None
-    ) -> _ExecutionState:  # fmt: skip
+        callback: Callable[..., object] | None,
+    ) -> _ExecutionState:
         """Initialize a fresh population context and continue it across batches."""
         parameters = signature(callback).parameters if callback is not None else ()
         intermediate = set(parameters) == {"intermediate_result"}
@@ -797,8 +794,8 @@ class ScipyMinimizer(OrchestratorBase):
             objective,
             use_cache=config.use_cache,
             cache_type=config.cache_type,
-            cache_size=config.cache_size
-        )  # fmt: skip
+            cache_size=config.cache_size,
+        )
         self._configure_components(
             space=space,
             algorithm=deepcopy(config.algorithm),
@@ -809,8 +806,8 @@ class ScipyMinimizer(OrchestratorBase):
             migration=config.migration,
             seed=config.seed,
             fitness_failure_strategy=config.fitness_failure_strategy,
-            history=config.history
-        )  # fmt: skip
+            history=config.history,
+        )
         self._initialize_context()
         self._configure_history()
         state = _ExecutionState(domain.layout, self._max_batches(config))
@@ -823,8 +820,8 @@ class ScipyMinimizer(OrchestratorBase):
         fun: Callable[..., float],
         args: tuple[object, ...],
         domain: _Domain,
-        config: _MinimizerConfig
-    ) -> OptimizeResult:  # fmt: skip
+        config: _MinimizerConfig,
+    ) -> OptimizeResult:
         """Prepare empty history, then evaluate the sole feasible point on a copy."""
         if config.fitness_failure_strategy not in ("raise", "invalidate"):
             raise ValueError(
@@ -879,8 +876,8 @@ class ScipyMinimizer(OrchestratorBase):
         x: NDArray[np.float64 | np.object_] | None,
         fitness: float,
         reason: _StopReason | Literal["fixed"],
-        config: _MinimizerConfig
-    ) -> OptimizeResult:  # fmt: skip
+        config: _MinimizerConfig,
+    ) -> OptimizeResult:
         """Translate the recorded outcome and attach this call's published history."""
         if fitness == np.inf or np.isnan(fitness):
             status, message = 3, "No valid solution was found."
@@ -914,8 +911,8 @@ class ScipyMinimizer(OrchestratorBase):
             success=status == 0,
             status=status,
             message=message,
-            history=self.history
-        )  # fmt: skip
+            history=self.history,
+        )
 
     @staticmethod
     def _published_fitness(value: object) -> float:
@@ -930,8 +927,8 @@ class ScipyMinimizer(OrchestratorBase):
         tol: float | None,
         target: float,
         callback: Callable[..., object] | None,
-        intermediate: bool
-    ) -> None:  # fmt: skip
+        intermediate: bool,
+    ) -> None:
         """Continue one initialized context, publishing even on exceptional exits."""
         previous_best: float | None = None
         for _ in range(state.max_batches):
@@ -998,8 +995,8 @@ class ScipyMinimizer(OrchestratorBase):
         callback: Callable[..., object],
         intermediate: bool,
         x: NDArray[np.float64 | np.object_],
-        fitness: float
-    ) -> bool:  # fmt: skip
+        fitness: float,
+    ) -> bool:
         """Invoke the selected callback form and catch only its stop request."""
         result = OptimizeResult(x=x, fun=fitness) if intermediate else None
         try:
