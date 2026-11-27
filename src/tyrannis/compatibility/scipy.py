@@ -90,6 +90,7 @@ class _ExecutionState:
     """Batch progress and variable layout for the current backend result and history.
 
     A batch counts once execute returns normally, even if force stop shortened it.
+    The native stop flag is recorded independently of the final stopping reason.
     The reason remains unset if execution or the callback raises an unhandled error.
     """
 
@@ -97,6 +98,7 @@ class _ExecutionState:
     max_batches: int
     batches_completed: int = 0
     stop_reason: _StopReason | None = None
+    force_stopped: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,10 +132,11 @@ def _finite_real_array(values: ArrayLike, message: str) -> NDArray[np.object_]:
 
 
 class ScipyMinimizer(OrchestratorBase):
-    """Prepare bounded SciPy problems and orchestrate independent Tyrannis runs.
+    """Minimize bounded objectives as a callable method of scipy.optimize.minimize.
 
     Construction stores the component templates and settings for subsequent
-    sequential runs. Execution of problems with free variables is private.
+    sequential calls. Pass the instance as ``method`` to run Tyrannis and
+    receive a SciPy OptimizeResult.
 
     Parameters
     ----------
@@ -168,8 +171,8 @@ class ScipyMinimizer(OrchestratorBase):
     maxiter:
         Optional total iteration limit. When supplied, it must be an integer
         at least as large as ``n_iterations``. Only whole batches fit within
-        this limit. The default is one batch, or ten batches with an
-        ``OptimizeWarning`` if either stopping criterion is explicitly enabled.
+        this limit. For population runs the default is one batch, or ten batches
+        with an ``OptimizeWarning`` if either stopping criterion is enabled.
     tol:
         Finite, nonnegative absolute tolerance between the best fitness values
         of two consecutive completed batches. Zero requires exact stagnation.
@@ -188,9 +191,9 @@ class ScipyMinimizer(OrchestratorBase):
     default. Unknown names are ignored with one ``OptimizeWarning``. Each
     configuration owns its history selection and retains component references.
 
-    Each run creates a positional Continuous space with its own objective and
-    cache configuration. It deep-copies the selected algorithm and any supplied
-    processor from their templates. The backend manages its execution replicas.
+    Each population run creates a positional Continuous space with its own
+    objective and cache configuration. It deep-copies the selected algorithm
+    and any supplied processor. The backend manages its execution replicas.
     Supplied backends and migration drivers retain their external resources
     and receive fresh contexts according to their execution model. Sharing
     mutable drivers or backends is supported only across sequential runs.
@@ -201,6 +204,8 @@ class ScipyMinimizer(OrchestratorBase):
     history object is created for every run, including when recording is
     disabled. After each backend call, even if it raises, the adapter publishes
     the backend's cumulative records on that run's history object.
+    The result exposes that same object. Its variable columns represent only
+    free dimensions. Result and callback vectors include all fixed dimensions.
 
     The domain requires explicit finite bounds for every variable. The finite
     one-dimensional ``x0`` supplies the dimension for validation and broadcasting
@@ -211,6 +216,9 @@ class ScipyMinimizer(OrchestratorBase):
     must retain distinct endpoints at the precision of the continuous space.
     Reconstruction normally yields a float64 array. When a fixed value requires
     higher precision, an object array preserves the original real scalar.
+    When every variable is fixed, the objective is evaluated once at the only
+    feasible position. No batch runs, the callback is never invoked, and the
+    history has the requested event configuration and zero records.
 
     Nonempty general constraints and supplied derivative information are ignored
     with separate runtime warnings. Objective adaptation calls the scalar
@@ -426,7 +434,7 @@ class ScipyMinimizer(OrchestratorBase):
         warnings.warn(message, OptimizeWarning, stacklevel=3)
         return 10
 
-    def _run(
+    def __call__(
         self,
         fun: Callable[..., float],
         x0: ArrayLike,
@@ -439,8 +447,35 @@ class ScipyMinimizer(OrchestratorBase):
         constraints: object = (),
         callback: Callable[..., object] | None = None,
         **options: object
-    ) -> _ExecutionState:  # fmt: skip
-        """Start an independent run for a problem with at least one free variable."""
+    ) -> OptimizeResult:  # fmt: skip
+        """Solve one bounded problem with independent execution state and history.
+
+        SciPy supplies the scalar objective ``fun``, initial vector ``x0``, extra
+        positional objective arguments ``args``, bounds, and an optional callback.
+        It forwards solver options as individual keyword arguments. Supplied
+        derivatives (``jac``, ``hess``, ``hessp``) and nonempty ``constraints``
+        are ignored with warnings.
+
+        Returns
+        -------
+        OptimizeResult
+            ``x`` is the full best position and ``fun`` its scalar fitness. If
+            no solution was published, they are None and positive infinity.
+            Finite values and negative infinity are valid fitness values.
+            ``history`` is this call's OptimizationHistory, also available when
+            recording is disabled. ``message`` describes the stopping condition.
+            ``success`` is true only for status 0, which requires valid fitness
+            and a completed fixed horizon, a reached target, satisfied tolerance,
+            negative infinity, or a fully fixed domain. Status 1 indicates budget
+            exhaustion with unmet criteria, 2 a force stop, 3 a missing or
+            invalid solution, and 99 a callback interruption.
+
+            ``nit`` counts optimization iterations after initialization. It is
+            omitted when a batch may have been shortened or the backend has no
+            global iteration count, including distributed execution. Population
+            runs omit ``nfev`` because their evaluation count is unavailable.
+            Fully fixed problems return ``nit=0`` and ``nfev=1``.
+        """
         self._result = None
         self._execution = None
         if hasattr(self, "_history"):
@@ -451,13 +486,26 @@ class ScipyMinimizer(OrchestratorBase):
         domain = self._prepare_domain(x0, bounds)
         target = self._validate_stopping_criteria(config)
         if not domain.free_bounds:
-            raise NotImplementedError("Backend execution requires a free variable.")
+            return self._fixed_result(fun, args, domain, config)
 
+        objective = _ScipyObjective(fun, args, domain.layout)
+        state = self._run(objective, domain, config, target, callback)
+        return self._population_result(state, config)
+
+    def _run(
+        self,
+        objective: _ScipyObjective,
+        domain: _Domain,
+        config: _MinimizerConfig,
+        target: float,
+        callback: Callable[..., object] | None
+    ) -> _ExecutionState:  # fmt: skip
+        """Initialize and execute batches for a prepared domain with free variables."""
         parameters = signature(callback).parameters if callback is not None else ()
         intermediate = set(parameters) == {"intermediate_result"}
         space = Continuous(
             domain.free_bounds,
-            _ScipyObjective(fun, args, domain.layout),
+            objective,
             use_cache=config.use_cache,
             cache_type=config.cache_type,
             cache_size=config.cache_size
@@ -481,6 +529,112 @@ class ScipyMinimizer(OrchestratorBase):
         self._execute_batches(state, config.tol, target, callback, intermediate)
         return state
 
+    def _fixed_result(
+        self,
+        fun: Callable[..., float],
+        args: tuple[object, ...],
+        domain: _Domain,
+        config: _MinimizerConfig
+    ) -> OptimizeResult:  # fmt: skip
+        """Evaluate the only feasible point and prepare its empty native history."""
+        if config.fitness_failure_strategy not in ("raise", "invalidate"):
+            raise ValueError(
+                "fitness_failure_strategy must be 'raise' or 'invalidate'."
+            )
+        self._history_config = self._configure_particle_history(config.history)
+        self._space = Continuous(domain.free_bounds)
+        self._space.initialize_context(config.seed)
+        self._configure_history()
+
+        x = domain.layout.reconstruct(())
+        evaluation_point = x.copy()
+        try:
+            scalar = np.asarray(fun(evaluation_point, *args)).item()
+            if not isinstance(scalar, (Real, Decimal)):
+                raise TypeError("Objective fitness must be a real scalar.")
+            fitness = float(scalar)
+            if np.isnan(fitness):
+                raise ValueError("Objective fitness cannot be NaN.")
+        except Exception:
+            if config.fitness_failure_strategy == "raise":
+                raise
+            fitness = np.inf
+
+        result = self._build_result(x, fitness, "fixed", config)
+        result["nit"] = 0
+        result["nfev"] = 1
+        return result
+
+    def _population_result(
+        self, state: _ExecutionState, config: _MinimizerConfig
+    ) -> OptimizeResult:
+        """Decode the official best and report iterations only for complete batches."""
+        if self._result is None or state.stop_reason is None:
+            raise RuntimeError("Population execution has not completed.")
+        best = self._result.result
+        x = None
+        fitness = np.inf
+        if best is not None:
+            x = self._decode_solution(best["variables"], state.layout)
+            fitness = self._published_fitness(best["fitness"])
+        result = self._build_result(x, fitness, state.stop_reason, config)
+        if not state.force_stopped and (
+            isinstance(self._backend, ParallelBackendBase)
+            or (isinstance(self._backend, Local) and self._processor.processors_pool)
+        ):
+            result["nit"] = state.batches_completed * config.n_iterations
+        return result
+
+    def _build_result(
+        self,
+        x: NDArray[np.float64 | np.object_] | None,
+        fitness: float,
+        reason: _StopReason | Literal["fixed"],
+        config: _MinimizerConfig
+    ) -> OptimizeResult:  # fmt: skip
+        """Translate the recorded outcome and attach this call's published history."""
+        if fitness == np.inf or np.isnan(fitness):
+            status, message = 3, "No valid solution was found."
+        else:
+            match reason:
+                case "callback":
+                    status, message = 99, "Optimization terminated by the callback."
+                case "saturation":
+                    status, message = 0, "Negative infinity fitness reached."
+                case "target_fitness":
+                    status, message = 0, "Target fitness reached."
+                case "force_stop":
+                    status = 2
+                    message = "Optimization terminated by the algorithm's force stop."
+                case "tol":
+                    status, message = 0, "Fitness tolerance satisfied."
+                case "fixed":
+                    status, message = 0, "All variables are fixed."
+                case "budget" if (
+                    config.tol is not None or config.target_fitness is not None
+                ):
+                    status = 1
+                    message = "Iteration budget exhausted before meeting the criteria."
+                case "budget":
+                    status = 0
+                    message = "Optimization completed within the iteration budget."
+
+        return OptimizeResult(
+            x=x,
+            fun=fitness,
+            success=status == 0,
+            status=status,
+            message=message,
+            history=self.history
+        )  # fmt: skip
+
+    @staticmethod
+    def _published_fitness(value: object) -> float:
+        """Read a scalar fitness according to the backend's best-result contract."""
+        if not isinstance(value, float):
+            raise TypeError("Optimization result fitness must be a float.")
+        return float(value)
+
     def _execute_batches(
         self,
         state: _ExecutionState,
@@ -499,13 +653,11 @@ class ScipyMinimizer(OrchestratorBase):
                 self._update_history(self._result.history)
 
             state.batches_completed += 1
+            state.force_stopped = self._force_stopped()
             best = self._result.result
             current_best: float | None = None
             if best is not None:
-                fitness = best["fitness"]
-                if not isinstance(fitness, float):
-                    raise TypeError("Optimization result fitness must be a float.")
-                current_best = float(fitness)
+                current_best = self._published_fitness(best["fitness"])
                 if callback is not None:
                     x = self._decode_solution(best["variables"], state.layout)
                     if self._callback_stopped(callback, intermediate, x, current_best):
@@ -516,7 +668,7 @@ class ScipyMinimizer(OrchestratorBase):
                 state.stop_reason = "saturation"
             elif current_best is not None and current_best <= target:
                 state.stop_reason = "target_fitness"
-            elif self._force_stopped():
+            elif state.force_stopped:
                 state.stop_reason = "force_stop"
             elif (
                 tol is not None
