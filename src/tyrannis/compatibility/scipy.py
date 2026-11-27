@@ -2,22 +2,27 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable, Sequence, Sized
+from copy import deepcopy
 from dataclasses import dataclass, fields, replace
 from decimal import Decimal
+from inspect import signature
 from math import isfinite
 from numbers import Real
+from typing import Literal
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
-from scipy.optimize import Bounds, OptimizeWarning
+from scipy.optimize import Bounds, OptimizeResult, OptimizeWarning
 
+from ..backend.local import Local
 from ..core.algorithm import AlgorithmBase
 from ..core.backend import BackendBase
 from ..core.backend_distributed import DistributedBackendBase
 from ..core.backend_migration import MigrationDriverBase
+from ..core.backend_parallel import ParallelBackendBase
 from ..core.orchestrator import OrchestratorBase
 from ..core.processor import ProcessorBase
-from ..space.continuous import Boundary
+from ..space.continuous import Boundary, Continuous
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +80,25 @@ class _Domain:
     layout: _VariableLayout
 
 
+type _StopReason = Literal[
+    "callback", "saturation", "target_fitness", "force_stop", "tol", "budget"
+]
+
+
+@dataclass(slots=True)
+class _ExecutionState:
+    """Batch progress and variable layout for the current backend result and history.
+
+    A batch counts once execute returns normally, even if force stop shortened it.
+    The reason remains unset if execution or the callback raises an unhandled error.
+    """
+
+    layout: _VariableLayout
+    max_batches: int
+    batches_completed: int = 0
+    stop_reason: _StopReason | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class _ScipyObjective:
     """Adapt a SciPy scalar objective to the positional inputs of Continuous."""
@@ -106,10 +130,10 @@ def _finite_real_array(values: ArrayLike, message: str) -> NDArray[np.object_]:
 
 
 class ScipyMinimizer(OrchestratorBase):
-    """Configure Tyrannis components and prepare bounded SciPy minimization inputs.
+    """Prepare bounded SciPy problems and orchestrate independent Tyrannis runs.
 
-    Construction stores settings only. Run contexts, history, and an execution
-    method are not provided during input preparation.
+    Construction stores the component templates and settings for subsequent
+    sequential runs. Execution of problems with free variables is private.
 
     Parameters
     ----------
@@ -143,11 +167,17 @@ class ScipyMinimizer(OrchestratorBase):
         The disk cache ignores this setting.
     maxiter:
         Optional total iteration limit. When supplied, it must be an integer
-        at least as large as ``n_iterations``. Defaults to ``None``.
+        at least as large as ``n_iterations``. Only whole batches fit within
+        this limit. The default is one batch, or ten batches with an
+        ``OptimizeWarning`` if either stopping criterion is explicitly enabled.
     tol:
-        Optional stopping tolerance, preserved as supplied. Defaults to ``None``.
+        Finite, nonnegative absolute tolerance between the best fitness values
+        of two consecutive completed batches. Zero requires exact stagnation.
+        The default, ``None``, disables the comparison.
     target_fitness:
-        Optional target objective value, preserved as supplied. Defaults to ``None``.
+        Stop when the published best fitness is at or below this value.
+        Finite values and negative infinity are accepted. The default,
+        ``None``, leaves only saturation at negative infinity active.
 
     Notes
     -----
@@ -157,6 +187,20 @@ class ScipyMinimizer(OrchestratorBase):
     optional parameters. Omitted options retain the constructor value or its
     default. Unknown names are ignored with one ``OptimizeWarning``. Each
     configuration owns its history selection and retains component references.
+
+    Each run creates a positional Continuous space with its own objective and
+    cache configuration. It deep-copies the selected algorithm and any supplied
+    processor from their templates. The backend manages its execution replicas.
+    Supplied backends and migration drivers retain their external resources
+    and receive fresh contexts according to their execution model. Sharing
+    mutable drivers or backends is supported only across sequential runs.
+
+    Within a run, each backend call continues the same population, adaptive
+    state, random streams and runtime caches according to the backend's own
+    execution model. The iteration count per batch stays constant. A new
+    history object is created for every run, including when recording is
+    disabled. After each backend call, even if it raises, the adapter publishes
+    the backend's cumulative records on that run's history object.
 
     The domain requires explicit finite bounds for every variable. The finite
     one-dimensional ``x0`` supplies the dimension for validation and broadcasting
@@ -176,6 +220,23 @@ class ScipyMinimizer(OrchestratorBase):
 
     Distributed backends require ``maxiter`` to be absent or equal to
     ``n_iterations``, with both ``tol`` and ``target_fitness`` set to ``None``.
+    They execute one batch and force stop applies separately to each island.
+    Local execution observes the executing processor's stop request. Parallel
+    execution observes the algorithm directly. Other backend models have no
+    common interface for reporting force stop.
+
+    Native SciPy methods typically invoke callbacks after each iteration. Here
+    the orchestration process invokes the callback once per completed batch
+    with a published solution, including the last batch. A sole parameter named
+    ``intermediate_result`` receives an OptimizeResult by keyword with ``x``
+    and ``fun``. Other signatures receive the full vector positionally. Both
+    forms receive independent solution storage. Return values are ignored.
+    StopIteration from the callback ends the run with its published result.
+
+    At each batch boundary, stopping reasons in priority order are callback
+    interruption, saturation at negative infinity, reaching the fitness target,
+    native force stop, absolute fitness tolerance, and batch budget exhaustion.
+    Only finite fitness values participate in the tolerance comparison.
     """
 
     # Keep the last parameter and its corresponding argument free of trailing commas.
@@ -215,6 +276,8 @@ class ScipyMinimizer(OrchestratorBase):
             tol=tol,
             target_fitness=target_fitness
         )
+        self._execution: _ExecutionState | None = None
+        self._result = None
     # fmt: on
 
     def _resolve_options(self, **options: object) -> _MinimizerConfig:
@@ -332,3 +395,177 @@ class ScipyMinimizer(OrchestratorBase):
                 free_bounds.append((lower_float, upper_float))
         layout = _VariableLayout(tuple(free_indices), tuple(fixed_values), vector_dtype)
         return _Domain(free_bounds, layout)
+
+    @staticmethod
+    def _validate_stopping_criteria(config: _MinimizerConfig) -> float:
+        """Validate both thresholds and return the target used for comparisons."""
+        tol = config.tol
+        if tol is not None and (
+            not isinstance(tol, (Real, Decimal)) or not 0 <= tol < np.inf
+        ):
+            raise ValueError("tol must be a finite, nonnegative real number.")
+
+        target = config.target_fitness
+        if target is None:
+            return -np.inf
+        if not isinstance(target, (Real, Decimal)) or not -np.inf <= target < np.inf:
+            raise ValueError("target_fitness must be finite or negative infinity.")
+        return target
+
+    @staticmethod
+    def _max_batches(config: _MinimizerConfig) -> int:
+        """Resolve the whole-batch budget from the original effective options."""
+        if config.maxiter is not None:
+            return config.maxiter // config.n_iterations
+        if config.tol is None and config.target_fitness is None:
+            return 1
+        message = (
+            "A stopping criterion was supplied without maxiter. "
+            f"Using maxiter={10 * config.n_iterations} (10 batches)."
+        )
+        warnings.warn(message, OptimizeWarning, stacklevel=3)
+        return 10
+
+    def _run(
+        self,
+        fun: Callable[..., float],
+        x0: ArrayLike,
+        args: tuple[object, ...] = (),
+        *,
+        jac: object = None,
+        hess: object = None,
+        hessp: object = None,
+        bounds: Bounds | ArrayLike | None = None,
+        constraints: object = (),
+        callback: Callable[..., object] | None = None,
+        **options: object
+    ) -> _ExecutionState:  # fmt: skip
+        """Start an independent run for a problem with at least one free variable."""
+        self._result = None
+        self._execution = None
+        if hasattr(self, "_history"):
+            del self._history
+
+        config = self._resolve_options(**options)
+        self._warn_unsupported_arguments(constraints, jac, hess, hessp)
+        domain = self._prepare_domain(x0, bounds)
+        target = self._validate_stopping_criteria(config)
+        if not domain.free_bounds:
+            raise NotImplementedError("Backend execution requires a free variable.")
+
+        parameters = signature(callback).parameters if callback is not None else ()
+        intermediate = set(parameters) == {"intermediate_result"}
+        space = Continuous(
+            domain.free_bounds,
+            _ScipyObjective(fun, args, domain.layout),
+            use_cache=config.use_cache,
+            cache_type=config.cache_type,
+            cache_size=config.cache_size
+        )  # fmt: skip
+        self._configure_components(
+            space=space,
+            algorithm=deepcopy(config.algorithm),
+            n_iterations=config.n_iterations,
+            n_particles=config.n_particles,
+            backend=config.backend,
+            processor=deepcopy(config.processor),
+            migration=config.migration,
+            seed=config.seed,
+            fitness_failure_strategy=config.fitness_failure_strategy,
+            history=config.history
+        )  # fmt: skip
+        self._initialize_context()
+        self._configure_history()
+        state = _ExecutionState(domain.layout, self._max_batches(config))
+        self._execution = state
+        self._execute_batches(state, config.tol, target, callback, intermediate)
+        return state
+
+    def _execute_batches(
+        self,
+        state: _ExecutionState,
+        tol: float | None,
+        target: float,
+        callback: Callable[..., object] | None,
+        intermediate: bool
+    ) -> None:  # fmt: skip
+        """Continue one initialized context, publishing even on exceptional exits."""
+        previous_best: float | None = None
+        for _ in range(state.max_batches):
+            try:
+                self._backend.execute()
+            finally:
+                self._result = self._backend.result
+                self._update_history(self._result.history)
+
+            state.batches_completed += 1
+            best = self._result.result
+            current_best: float | None = None
+            if best is not None:
+                fitness = best["fitness"]
+                if not isinstance(fitness, float):
+                    raise TypeError("Optimization result fitness must be a float.")
+                current_best = float(fitness)
+                if callback is not None:
+                    x = self._decode_solution(best["variables"], state.layout)
+                    if self._callback_stopped(callback, intermediate, x, current_best):
+                        state.stop_reason = "callback"
+                        return
+
+            if current_best == -np.inf:
+                state.stop_reason = "saturation"
+            elif current_best is not None and current_best <= target:
+                state.stop_reason = "target_fitness"
+            elif self._force_stopped():
+                state.stop_reason = "force_stop"
+            elif (
+                tol is not None
+                and current_best is not None
+                and previous_best is not None
+                and isfinite(current_best)
+                and isfinite(previous_best)
+                and abs(current_best - previous_best) <= tol
+            ):
+                state.stop_reason = "tol"
+            if state.stop_reason is not None:
+                return
+            previous_best = current_best
+        state.stop_reason = "budget"
+
+    def _force_stopped(self) -> bool:
+        """Read the native stop flag where a backend exposes its global executor."""
+        if isinstance(self._backend, Local):
+            executor = next(iter(self._processor.processors_pool.values()), None)
+            return executor is not None and executor.stopped_after_iteration
+        if isinstance(self._backend, ParallelBackendBase):
+            return self._algorithm.force_stop
+        return False
+
+    def _decode_solution(
+        self, variables: object, layout: _VariableLayout
+    ) -> NDArray[np.float64 | np.object_]:
+        """Decode a published particle and restore its full vector in fresh storage."""
+        if not isinstance(variables, dict):
+            raise TypeError("Optimization result variables must be a dictionary.")
+        free_values = self._space.decode(variables)
+        if not isinstance(free_values, list):
+            raise TypeError("Positional Continuous decoding must return a list.")
+        return layout.reconstruct(free_values)
+
+    @staticmethod
+    def _callback_stopped(
+        callback: Callable[..., object],
+        intermediate: bool,
+        x: NDArray[np.float64 | np.object_],
+        fitness: float
+    ) -> bool:  # fmt: skip
+        """Invoke the selected callback form and catch only its stop request."""
+        result = OptimizeResult(x=x, fun=fitness) if intermediate else None
+        try:
+            if result is None:
+                callback(x)
+            else:
+                callback(intermediate_result=result)
+        except StopIteration:
+            return True
+        return False
