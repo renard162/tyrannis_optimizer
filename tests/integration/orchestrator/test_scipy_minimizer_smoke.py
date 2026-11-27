@@ -264,7 +264,7 @@ def test_positive_tolerance_is_inclusive() -> None:
     assert "tolerance" in result.message.lower()
 
 
-def test_later_batch_keeps_original_adaptive_horizon() -> None:
+def test_adaptive_horizon_extends_across_batches() -> None:
     method = ScipyMinimizer(IntegrationProbeAlgorithm(), 1, 1, seed=BASE_SEED)
     minimize(
         constant_objective,
@@ -277,7 +277,7 @@ def test_later_batch_keeps_original_adaptive_horizon() -> None:
     assert [event["max_iterations"] for event in final["particle"]["trace"]] == [
         1,
         1,
-        1,
+        2,
     ]
 
 
