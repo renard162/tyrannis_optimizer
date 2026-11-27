@@ -114,7 +114,7 @@ class _ScipyObjective:
 
 
 def _finite_real_array(values: ArrayLike, message: str) -> NDArray[np.object_]:
-    """Keep original numeric precision for interval and feasibility comparisons."""
+    """Validate finiteness and retain the real entries for interval comparisons."""
     array = np.array(values, dtype=object)
     for index, value in enumerate(array.flat):
         if isinstance(value, np.generic):
@@ -132,119 +132,396 @@ def _finite_real_array(values: ArrayLike, message: str) -> NDArray[np.object_]:
 
 
 class ScipyMinimizer(OrchestratorBase):
-    """Minimize bounded objectives as a callable method of scipy.optimize.minimize.
+    """
+    Minimize a bounded continuous cost function with `scipy.optimize.minimize`.
 
-    Construction stores the component templates and settings for subsequent
-    sequential calls. Pass the instance as ``method`` to run Tyrannis and
-    receive a SciPy OptimizeResult.
+    Pass a `ScipyMinimizer` instance as the `method` argument to `minimize`.
+    The constructor configures the algorithm and execution settings. Each call
+    to `minimize` supplies the problem, builds its continuous search space
+    internally and returns a :class:`~scipy.optimize.OptimizeResult`.
 
     Parameters
     ----------
     algorithm:
-        Tyrannis algorithm for minimizing the scalar objective.
+        Optimization algorithm used to search for the best solution.
+
     n_iterations:
-        Positive integer iteration count per batch.
+        Number of optimization iterations per batch. Must be an integer
+        greater than or equal to 1. This value remains constant throughout a
+        call to `minimize`, which can execute multiple batches.
+
     n_particles:
-        Positive integer population size, per island for distributed backends.
+        Number of particles in the population. Must be an integer greater than
+        or equal to 1. For distributed backends, this value specifies the
+        number of particles assigned to each island.
+
     backend:
-        Execution backend. The default, ``None``, selects local execution.
+        Backend defining how the optimization process is distributed and
+        executed. It determines how the population, iterations, and associated
+        optimization workload are organized across the available execution
+        resources. Different backends provide different execution models,
+        including local execution in a single process and distributed
+        execution across multiple workers or islands. If ``None``, the
+        optimization is executed locally.
+
     processor:
-        Processor template. The default, ``None``, selects serial processing.
+        Processor defining how the iterative optimization process is executed
+        on each machine involved in the optimization. It determines whether
+        the process is executed serially or with parallel processing within
+        each machine. If ``None``, the iterations are executed serially. When
+        parallel processing is desired, :class:`~tyrannis.processor.joblib.Joblib`
+        is the recommended processor, as it is specifically designed to
+        distribute the processing of the particles across the available
+        execution resources of each machine.
+
     migration:
-        Island migration driver. The default, ``None``, selects isolation.
-        Local execution always uses isolation.
+        Migration strategy defining how solutions are exchanged between
+        islands during the optimization when using a backend that supports
+        island-based optimization. If ``None`` and the selected backend uses
+        a migration-based algorithm, the islands operate independently from
+        one another, without exchanging solutions, and the final result is the
+        best solution found among all islands.
+
+        Local execution always uses isolated islands, including when an
+        explicit ``Local()`` backend is supplied.
+
     seed:
-        Random seed for the components. Defaults to ``None``.
+        Optional random seed used to make the optimization reproducible.
+        Defaults to ``None``.
+
     fitness_failure_strategy:
-        Evaluation failure policy. The default, ``"raise"``, propagates errors.
-        With ``"invalidate"``, Tyrannis assigns infinite fitness on failure.
+        Strategy used when the cost function raises an exception while evaluating
+        a particle. Supported strategies include:
+
+        - ``"raise"``: Propagates the exception and interrupts the optimization.
+        (default)
+        - ``"invalidate"``: Assigns ``inf`` fitness to the failed particle and
+        continues the optimization.
+
+        On a fully fixed domain the same policy applies to the single
+        evaluation. An invalidated evaluation returns an unsuccessful result.
+
     history:
-        History event name, list of event names, or ``"all"``. The default,
-        ``None``, disables recording.
+        History events to record during the optimization. Supported options include:
+
+        - ``None``: Disables history recording. (default)
+        - ``"all"``: Records all available events. Cannot be used in a list.
+        - ``"migration"``: Logs all particles that undergo migration.
+        - ``"pre_iteration"``: Logs all particles before each iteration.
+        - ``"new_particle"``: Logs newly created particles immediately after their
+        fitness is calculated.
+        - ``"error"``: Records fitness evaluation errors.
+        - ``"iteration"``: Logs all particles at each iteration.
+        - ``"status"``: Logs the final state of each iteration, including its worst
+        and best particle and the historical best particle.
+        - ``"best"``: Logs the historical best particle at the end of each
+        iteration.
+
+        A list of event names can also be supplied to record multiple events.
+
     use_cache:
-        Enable the Continuous evaluation cache. Defaults to ``False``.
+        Whether cost-function evaluations should be cached. When
+        ``False``, no cache is created or used. The default is ``False``.
+        When enabled, repeated inputs can reuse a cached fitness.
+
     cache_type:
-        Continuous cache strategy. Defaults to ``"lru"``.
+        Cache strategy to use when caching is enabled. Supported strategies are:
+
+        - ``"lru"``: Least Recently Used cache. (default)
+        - ``"disk"``: Temporary disk-backed runtime cache. Its contents are
+        local to the current runtime and are not preserved through serialization.
+        - ``"lfu"``: Least Frequently Used cache. Requires the optional
+        dependencies for advanced caching.
+        - ``"fifo"``: First In, First Out cache. Requires the optional dependencies
+        for advanced caching.
+        - ``"rr"``: Random Replacement cache. Requires the optional dependencies
+        for advanced caching.
+
+        Install the ``tyrannis[cache]`` extra for the advanced strategies.
+
     cache_size:
-        Maximum number of in-memory cache entries. Defaults to 100,000.
-        The disk cache ignores this setting.
+        Maximum cache size for in-memory caches, expressed as the maximum
+        number of cached records. This parameter has no effect when
+        ``cache_type="disk"``. The default is ``100_000``.
+
     maxiter:
-        Optional total iteration limit. When supplied, it must be an integer
-        at least as large as ``n_iterations``. Only whole batches fit within
-        this limit. For population runs the default is one batch, or ten batches
-        with an ``OptimizeWarning`` if either stopping criterion is enabled.
+        Global iteration budget for a population run. When supplied, it must
+        be an integer greater than or equal to `n_iterations`. The budget
+        schedules only whole batches, up to ``maxiter // n_iterations``. Any
+        remainder is unused. Early termination can reduce the actual number of
+        iterations. The default is ``None``, which schedules one batch if both
+        additional stopping criteria are disabled. Enabling either criterion
+        without specifying `maxiter` schedules ten batches and emits an
+        ``OptimizeWarning``. Distributed backends require ``maxiter=None`` or
+        ``maxiter=n_iterations``.
+
     tol:
-        Finite, nonnegative absolute tolerance between the best fitness values
-        of two consecutive completed batches. Zero requires exact stagnation.
-        The default, ``None``, disables the comparison.
+        Absolute tolerance on the change in best fitness between consecutive
+        batches. Starting with the second batch, stop if both best values are
+        finite and their absolute difference is less than or equal to `tol`.
+        Supply a finite, nonnegative value. Zero requires equal fitness values.
+        The default, ``None``, disables this comparison.
+
     target_fitness:
-        Stop when the published best fitness is at or below this value.
-        Finite values and negative infinity are accepted. The default,
-        ``None``, leaves only saturation at negative infinity active.
+        Stop at the end of any batch whose best fitness is less than or equal
+        to this target. Supply a finite value or negative infinity. Positive
+        infinity and NaN are rejected. The default, ``None``, disables the
+        explicit target. A best fitness of negative infinity always terminates
+        the search. When both `tol` and `target_fitness` are enabled, meeting
+        either criterion ends the optimization.
+
+    Attributes
+    ----------
+    history:
+        Independent optimization history provided by `OrchestratorBase`.
+        The property becomes available after a call has prepared its history.
+        Access raises ``AttributeError`` immediately after construction or if a
+        new call reaches the adapter but fails before preparing a new history.
+        An earlier result keeps its own history in either case.
+
+        ``history.columns`` and ``history.generator`` expose decoded rows.
+        ``history.internal_columns_`` and ``history.internal_generator_``
+        expose encoded variables and internal particle state. The history object
+        provides CSV export and Pickle serialization through ``history.export()``.
+        Load only trusted Pickle files, since deserialization can execute code.
+
+    Arguments supplied by scipy.optimize.minimize
+    ---------------------------------------------
+    fun:
+        Scalar cost function to minimize. It receives a fresh one-dimensional
+        NumPy array containing all variables in their original order, followed
+        by the positional arguments in `args`. Return a real scalar fitness.
+
+    x0:
+        Nonempty one-dimensional vector of finite real values within the
+        inclusive bounds. It determines the original problem dimension for
+        validating and broadcasting the bounds. The algorithm initializes its
+        own population and gives no preference to `x0`.
+
+    args:
+        Additional positional arguments passed as ``fun(x, *args)``.
+        The default is the empty tuple.
+
+    bounds:
+        Required lower and upper bounds for every variable. Supply a sequence
+        of one pair per entry of `x0`, or a :class:`~scipy.optimize.Bounds`
+        object whose lower and upper bounds broadcast to the shape of `x0`.
+        Both endpoints must be defined, finite and real. Reversed intervals
+        and values of `x0` outside their intervals are rejected. The
+        `keep_feasible` flag of a `Bounds` object is silently ignored.
+
+        Equal endpoints fix the variable at that value. Only originally free
+        intervals enter the `Continuous` space. A free interval whose endpoints
+        coincide after conversion to float64 is rejected. Objective inputs,
+        callback vectors and result positions normally use float64. When needed
+        to retain a higher-precision fixed value, reconstruction uses an array
+        with ``dtype=object``. Free variables still use the precision of the
+        continuous space.
+
+    constraints:
+        General constraints are ignored. A forwarded constraint object emits
+        a ``RuntimeWarning`` if it has no length or its length is nonzero.
+        ``None`` and empty collections produce no warning.
+
+    jac, hess, hessp:
+        Gradient, Hessian and Hessian-vector product information is unused.
+        The adapter emits a separate ``RuntimeWarning`` for a truthy forwarded
+        `jac` and for each of `hess` and `hessp` that differs from ``None``.
+        SciPy forwards a callable gradient as supplied. With ``jac=True``,
+        SciPy expects the objective to return a value and gradient and forwards
+        a scalar objective wrapper and a callable derivative. SciPy can
+        normalize a finite-difference gradient selection to ``None`` before
+        dispatch, in which case the adapter issues no gradient warning.
+
+    callback:
+        Optional callable invoked by the orchestration process once per
+        completed batch with a published solution, including the last batch.
+        Native SciPy methods commonly invoke callbacks after each iteration.
+        Here a batch may contain many iterations.
+
+        If the signature has a single parameter named `intermediate_result`,
+        the adapter calls ``callback(intermediate_result=result)``, where
+        `result` is an `OptimizeResult` with the full best position `x` and its
+        fitness `fun`. The parameter must accept a keyword argument. Otherwise,
+        ``callback(xk)`` receives the full best position positionally. Each
+        call receives an independent array including the fixed variables.
+        Return values are ignored. Raise ``StopIteration`` to request a
+        controlled stop. Other exceptions propagate to the caller.
+
+    options:
+        Any public constructor parameter can be overridden for the current
+        optimization through the `options` dictionary of `minimize`. SciPy
+        expands its entries into individual keyword arguments to the method.
+        Options take precedence over constructor arguments, which take
+        precedence over defaults. An explicit ``None`` overrides an earlier
+        value wherever that parameter permits it. If `minimize` receives a
+        `tol` value other than ``None``, SciPy supplies that option only if
+        the dictionary omits it.
+        Unknown solver options are ignored with an ``OptimizeWarning``. Each
+        call validates its effective settings and preserves the base configuration.
+
+    OptimizeResult
+    --------------
+    Every result includes `x`, `fun`, `success`, `status`, `message` and
+    `history`. The availability of `nit` and `nfev` depends on the execution.
+
+    x:
+        Full position corresponding to the published best fitness, including
+        fixed variables. Without a published solution, `x` is ``None``.
+        On a fully fixed domain, `x` contains the only feasible position.
+
+    fun:
+        Fitness corresponding to `x`, or positive infinity when no solution
+        was published. Finite values and negative infinity are valid. Positive
+        infinity and NaN cannot yield a successful result.
+
+    success:
+        ``True`` exactly when `status` is zero.
+
+    status:
+        Integer termination code. A missing or invalid fitness takes precedence
+        over every stopping reason. With a valid fitness, the batch checks, in
+        order, are callback interruption, negative infinity, target attainment,
+        algorithm force stop, tolerance and budget exhaustion.
+
+        - ``0``: Valid fitness on a fully fixed domain, saturation at negative
+          infinity, a reached target, a satisfied tolerance, or normal completion
+          of the planned batches with both additional criteria disabled.
+        - ``1``: The planned batches completed with valid fitness. At least
+          one additional criterion was enabled and none was met.
+        - ``2``: The algorithm requested a detectable force stop.
+        - ``3``: No valid solution was found.
+        - ``99``: The callback requested termination through ``StopIteration``.
+
+    message:
+        Human-readable description of the termination condition.
+
+    history:
+        The `OptimizationHistory` instance of this run, also accessible through
+        the minimizer's `history` property. Even with recording disabled, it
+        retains its configuration and column metadata and contains zero records.
+        Variable columns represent only the free dimensions in their original
+        relative order. The result position includes all original dimensions.
+
+    nit:
+        Conditional iteration count, excluding initialization at iteration zero.
+        Available for known complete batches in local and parallel execution,
+        including stops at a batch boundary. It is omitted when a force stop
+        may have shortened a batch or no exact global count is available, as
+        in distributed execution. A fully fixed domain returns ``nit=0``.
+
+    nfev:
+        Conditional objective evaluation count. A fully fixed domain returns
+        ``nfev=1``. Population runs omit this field. The result provides no
+        derivative or constraint fields.
 
     Notes
     -----
-    Each resolution starts from the constructor settings, independently of any
-    execution state. SciPy passes options as individual keywords. Each supplied
-    option overrides its constructor setting, including an explicit ``None`` for
-    optional parameters. Omitted options retain the constructor value or its
-    default. Unknown names are ignored with one ``OptimizeWarning``. Each
-    configuration owns its history selection and retains component references.
+    The default ``None`` settings for `backend`, `processor` and `migration`
+    select local execution, serial processing and isolated islands.
 
-    Each population run creates a positional Continuous space with its own
-    objective and cache configuration. It deep-copies the selected algorithm
-    and any supplied processor. The backend manages its execution replicas.
-    Supplied backends and migration drivers retain their external resources
-    and receive fresh contexts according to their execution model. Sharing
-    mutable drivers or backends is supported only across sequential runs.
+    Each independent population optimization starts with a new positional
+    `Continuous` space, runtime cache configuration, history and seeded execution
+    context. The algorithm and supplied processor are deep-copied before
+    initialization and must support this operation. Supplied backends and
+    migration drivers are retained by reference and reinitialized according
+    to their execution model. External resources such as a Spark session
+    remain attached to the supplied backend. Use the same minimizer or shared
+    mutable backend and migration components only in sequential calls.
+    Concurrent and reentrant calls with shared state are unsupported. When
+    evaluations cross process boundaries, the objective and its arguments must
+    support the execution model's serialization mechanism.
 
-    Within a run, each backend call continues the same population, adaptive
-    state, random streams and runtime caches according to the backend's own
-    execution model. The iteration count per batch stays constant. A new
-    history object is created for every run, including when recording is
-    disabled. After each backend call, even if it raises, the adapter publishes
-    the backend's cumulative records on that run's history object.
-    The result exposes that same object. Its variable columns represent only
-    free dimensions. Result and callback vectors include all fixed dimensions.
+    Consecutive batches continue the same population, algorithm state and
+    random streams. Runtime caches are local to the evaluating process and
+    their contents are excluded from serialization. After each backend call,
+    the same history object publishes the accumulated records, including any
+    partial results the backend made available before an exception. Publishing
+    the cumulative records preserves earlier entries without duplicating them.
+    A subsequent optimization creates a distinct history. Earlier histories
+    retain their decoding metadata and remain usable after the minimizer is
+    released.
 
-    The domain requires explicit finite bounds for every variable. The finite
-    one-dimensional ``x0`` supplies the dimension for validation and broadcasting
-    and must lie within the inclusive bounds. It does not seed the population.
-    Equal endpoints fix a variable. Only free intervals belong to the continuous
-    space, and an empty list of free intervals represents a fully fixed problem.
-    The ``keep_feasible`` flag of SciPy Bounds is silently ignored. Free intervals
-    must retain distinct endpoints at the precision of the continuous space.
-    Reconstruction normally yields a float64 array. When a fixed value requires
-    higher precision, an object array preserves the original real scalar.
-    When every variable is fixed, the objective is evaluated once at the only
-    feasible position. No batch runs, the callback is never invoked, and the
-    history has the requested event configuration and zero records.
+    Distributed backends support one batch and require both `tol` and
+    `target_fitness` to be ``None``. Each island can stop independently.
+    Local execution observes force stop on the executing processor's algorithm.
+    Parallel execution observes the backend algorithm. A custom backend
+    without a global stop signal may complete a call without exposing an
+    algorithm force stop to the minimizer.
 
-    Nonempty general constraints and supplied derivative information are ignored
-    with separate runtime warnings. Objective adaptation calls the scalar
-    function supplied by SciPy with a fresh full vector and its extra arguments.
-    The function and arguments must support the serialization mechanism of the
-    selected processor and backend when evaluation crosses process boundaries.
+    When all variables are fixed, the adapter evaluates the only feasible
+    position once, without initializing the algorithm, processor, backend or
+    migration driver. It invokes no callback. The history uses the requested
+    event selection and contains zero records. A valid fitness completes the
+    optimization successfully, regardless of the additional stopping criteria.
 
-    Distributed backends require ``maxiter`` to be absent or equal to
-    ``n_iterations``, with both ``tol`` and ``target_fitness`` set to ``None``.
-    They execute one batch and force stop applies separately to each island.
-    Local execution observes the executing processor's stop request. Parallel
-    execution observes the algorithm directly. Other backend models have no
-    common interface for reporting force stop.
+    When ``fitness_failure_strategy="invalidate"`` is used, exceptions
+    raised by the cost function are suppressed during fitness evaluation.
+    Failed evaluations are assigned a fitness of ``inf`` and therefore
+    cannot yield a successful solution, allowing population execution to continue.
+    This strategy should be used with caution, as errors in the cost
+    function may remain unnoticed while the optimization completes
+    normally. In such cases, the problem may only become apparent when the
+    resulting fitness values are inspected.
 
-    Native SciPy methods typically invoke callbacks after each iteration. Here
-    the orchestration process invokes the callback once per completed batch
-    with a published solution, including the last batch. A sole parameter named
-    ``intermediate_result`` receives an OptimizeResult by keyword with ``x``
-    and ``fun``. Other signatures receive the full vector positionally. Both
-    forms receive independent solution storage. Return values are ignored.
-    StopIteration from the callback ends the run with its published result.
+    History recording is disabled by default. Enabling it can substantially
+    increase memory usage, particularly for large populations or long
+    optimizations, since multiple entries can be generated for each
+    particle and iteration. As an example, an optimization with only
+    50 particles and 300 iterations can produce more than 31_000 entries
+    in the history table when all events are recorded.
 
-    At each batch boundary, stopping reasons in priority order are callback
-    interruption, saturation at negative infinity, reaching the fitness target,
-    native force stop, absolute fitness tolerance, and batch budget exhaustion.
-    Only finite fitness values participate in the tolerance comparison.
+    Examples
+    --------
+    >>> from scipy.optimize import minimize
+    >>> from tyrannis.algorithm import PSO
+    >>> from tyrannis.compatibility.scipy import ScipyMinimizer
+    >>>
+    >>> def cost_function(x):
+    ...     return x[0]**2 + x[1]**2
+    >>>
+    >>> method = ScipyMinimizer(algorithm=PSO(), n_iterations=20, n_particles=50)
+    >>> x0 = [0.0, 0.0]
+    >>> bounds = [(-10, 10), (-10, 10)]
+    >>> result = minimize(cost_function, x0=x0, bounds=bounds, method=method)
+    >>> best_position, best_fitness = result.x, result.fun
+
+    With 20 iterations per batch, a budget of 65 schedules at most three
+    batches. For this call, stop early if the fitness tolerance is met and
+    record the best particle at each iteration.
+
+    >>> result = minimize(
+    ...     cost_function, x0=x0, bounds=bounds, method=method,
+    ...     options={"maxiter": 65, "tol": 1e-6, "history": "best"}
+    ... )
+    >>> from tyrannis.core.results import OptimizationHistory
+    >>> history = result.history
+    >>> columns = history.columns
+    >>> first_row = next(history.generator, None)
+    >>> history.export("history.csv")
+    >>> history.export("history.pkl", format="pickle")
+    >>> restored = OptimizationHistory.load("history.pkl")
+
+    Fix the second coordinate at 2 and pass the desired offset through
+    `args`. The callback receives the full best position after the first
+    batch and requests termination before the next batch.
+
+    >>> def shifted_cost(x, offset):
+    ...     return (x[0] - offset)**2 + x[1]**2
+    >>>
+    >>> def stop_after_batch(intermediate_result):
+    ...     raise StopIteration
+    >>>
+    >>> result = minimize(
+    ...     shifted_cost, x0=[0, 2], args=(1.5,), bounds=[(-10, 10), (2, 2)],
+    ...     method=method, callback=stop_after_batch, options={"maxiter": 60}
+    ... )
+    >>> result.x.shape
+    (2,)
+    >>> float(result.x[1])
+    2.0
+    >>> result.status
+    99
     """
 
     # Keep the last parameter and its corresponding argument free of trailing commas.
@@ -448,33 +725,45 @@ class ScipyMinimizer(OrchestratorBase):
         callback: Callable[..., object] | None = None,
         **options: object
     ) -> OptimizeResult:  # fmt: skip
-        """Solve one bounded problem with independent execution state and history.
+        """
+        Solve the bounded problem supplied by `scipy.optimize.minimize`.
 
-        SciPy supplies the scalar objective ``fun``, initial vector ``x0``, extra
-        positional objective arguments ``args``, bounds, and an optional callback.
-        It forwards solver options as individual keyword arguments. Supplied
-        derivatives (``jac``, ``hess``, ``hessp``) and nonempty ``constraints``
-        are ignored with warnings.
+        Parameters
+        ----------
+        fun:
+            Scalar cost function called with the full variable vector and `args`.
+        x0:
+            Nonempty, finite, one-dimensional real vector within the bounds.
+            Its length determines the original dimensionality.
+        args:
+            Extra positional arguments for `fun`. Defaults to an empty tuple.
+        jac, hess, hessp:
+            Forwarded derivative information. A truthy `jac` or a supplied
+            Hessian or Hessian-vector product emits a ``RuntimeWarning``.
+        bounds:
+            Required finite intervals, given as one pair per variable or a
+            broadcastable `Bounds` object. Equal endpoints fix a variable.
+        constraints:
+            Ignored general constraints. A nonempty collection or a constraint
+            without a length emits a ``RuntimeWarning``.
+        callback:
+            Optional batch callback accepting the full position or a sole
+            keyword-compatible parameter named `intermediate_result`.
+            Raise ``StopIteration`` to stop.
+        **options:
+            Individual solver options expanded by SciPy. Recognized arguments
+            override the constructor settings for this call.
 
         Returns
         -------
         OptimizeResult
-            ``x`` is the full best position and ``fun`` its scalar fitness. If
-            no solution was published, they are None and positive infinity.
-            Finite values and negative infinity are valid fitness values.
-            ``history`` is this call's OptimizationHistory, also available when
-            recording is disabled. ``message`` describes the stopping condition.
-            ``success`` is true only for status 0, which requires valid fitness
-            and a completed fixed horizon, a reached target, satisfied tolerance,
-            negative infinity, or a fully fixed domain. Status 1 indicates budget
-            exhaustion with unmet criteria, 2 a force stop, 3 a missing or
-            invalid solution, and 99 a callback interruption.
-
-            ``nit`` counts optimization iterations after initialization. It is
-            omitted when a batch may have been shortened or the backend has no
-            global iteration count, including distributed execution. Population
-            runs omit ``nfev`` because their evaluation count is unavailable.
-            Fully fixed problems return ``nit=0`` and ``nfev=1``.
+            Full best position `x`, fitness `fun`, termination fields `success`,
+            `status` and `message`, and the run's `history`. Without a published
+            solution, `x` is ``None`` and `fun` is positive infinity. The
+            optional `nit` counts optimization iterations after initialization.
+            Only fully fixed domains return `nfev`, with one evaluation and
+            zero iterations. See the class documentation for termination codes
+            and the availability of iteration counts.
         """
         self._result = None
         self._execution = None
@@ -500,7 +789,7 @@ class ScipyMinimizer(OrchestratorBase):
         target: float,
         callback: Callable[..., object] | None
     ) -> _ExecutionState:  # fmt: skip
-        """Initialize and execute batches for a prepared domain with free variables."""
+        """Initialize a fresh population context and continue it across batches."""
         parameters = signature(callback).parameters if callback is not None else ()
         intermediate = set(parameters) == {"intermediate_result"}
         space = Continuous(
@@ -536,7 +825,7 @@ class ScipyMinimizer(OrchestratorBase):
         domain: _Domain,
         config: _MinimizerConfig
     ) -> OptimizeResult:  # fmt: skip
-        """Evaluate the only feasible point and prepare its empty native history."""
+        """Prepare empty history, then evaluate the sole feasible point on a copy."""
         if config.fitness_failure_strategy not in ("raise", "invalidate"):
             raise ValueError(
                 "fitness_failure_strategy must be 'raise' or 'invalidate'."
@@ -568,7 +857,7 @@ class ScipyMinimizer(OrchestratorBase):
     def _population_result(
         self, state: _ExecutionState, config: _MinimizerConfig
     ) -> OptimizeResult:
-        """Decode the official best and report iterations only for complete batches."""
+        """Decode the published best and attach iteration metadata for known executors."""
         if self._result is None or state.stop_reason is None:
             raise RuntimeError("Population execution has not completed.")
         best = self._result.result
