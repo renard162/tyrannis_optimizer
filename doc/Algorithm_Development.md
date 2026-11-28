@@ -1,30 +1,87 @@
 # Algorithm Development
 
-This document defines the implementation contract for optimization algorithms in Tyrannis Optimizer. It describes how to integrate an algorithm into the execution lifecycle while preserving its mathematical formulation, reproducibility, parallel execution, and migration compatibility.
+This guide defines the implementation contract for optimization algorithms in Tyrannis Optimizer. An algorithm must preserve its mathematical formulation while remaining compatible with the framework's particle lifecycle, reproducibility, parallel execution, and migration.
 
-## 1. Architecture and responsibilities
+Use **Part I** as a quick reference when implementing or reviewing an algorithm. Consult **Part II** for the detailed contracts, rationale, and examples.
 
-Implement each algorithm in a dedicated module under `src/tyrannis/algorithm/`, with two classes derived from the abstractions in [`core/algorithm.py`](../src/tyrannis/core/algorithm.py):
+## Contents
 
-```python
-class ExampleParticle(ParticleBase):
-    ...
+**Part I — Quick reference**
 
+- [1. Implementation checklist](#1-implementation-checklist)
+- [2. Method reference](#2-method-reference)
+- [3. Execution lifecycle](#3-execution-lifecycle)
+- [4. Essential invariants](#4-essential-invariants)
 
-class ExampleAlgorithm(AlgorithmBase[ExampleParticle]):
-    ...
-```
+**Part II — Implementation contracts**
 
-A dedicated particle class is required even if no additional particle state is needed.
+- [5. Architecture and state ownership](#5-architecture-and-state-ownership)
+- [6. Initialization and iteration methods](#6-initialization-and-iteration-methods)
+- [7. Fitness evaluation and consolidation](#7-fitness-evaluation-and-consolidation)
+- [8. Randomness and random cache](#8-randomness-and-random-cache)
+- [9. Optional second processing phase](#9-optional-second-processing-phase)
+- [10. Optional forced termination](#10-optional-forced-termination)
+- [11. State persistence and migration](#11-state-persistence-and-migration)
+- [12. Mathematical and numerical requirements](#12-mathematical-and-numerical-requirements)
+- [13. Public API, documentation, and validation](#13-public-api-documentation-and-validation)
 
-- **`ParticleBase`** represents an isolated solution and its individual state, such as position, fitness, velocity, and personal best. A particle must not hold references to other particles, the population, or the algorithm.
-- **`AlgorithmBase`** coordinates interactions between particles and owns population-level state, including leaders, archives, distributions, models, adaptive parameters, and selection rules.
-- **`Space`** owns encoding, decoding, and the interpretation of user-defined variables. Algorithms operate exclusively on continuous encoded coordinates (`dict[str, float]`) and encoded boundaries (`dict[str, tuple[float, float]]`).
-- **Processors and backends** own execution scheduling, worker dispatch, population updates, and, where applicable, migration. The algorithm must not detect, import, or configure execution infrastructure.
+---
 
-An algorithm requiring direct access to discrete or categorical semantics, or inherently sequential updates that must observe previous workers' changes, requires an architectural compatibility assessment before implementation. Do not silently change its mathematical formulation to fit the framework.
+## Part I — Quick reference
 
-## 2. Execution lifecycle
+### 1. Implementation checklist
+
+Follow this sequence when introducing a new algorithm.
+
+- [ ] Define the reference mathematical formulation, including update equations, selection, schedules, stochastic operations, and numerical edge cases.
+- [ ] Assess whether the algorithm fits the continuous encoded domain and population-wide processing model.
+- [ ] Create a dedicated module under `src/tyrannis/algorithm/` containing a concrete particle class and a concrete algorithm class.
+- [ ] Separate particle-specific persistent state from population-level state and transient evaluation state.
+- [ ] Implement all required methods in [the method reference](#2-method-reference), including constructor validation and migration-compatible particle creation.
+- [ ] Route every evaluation through `ParticleBase.update` and consolidate candidates according to the mathematical formulation.
+- [ ] Prepare particle-specific randomness through `create_random_cache` before each processing phase.
+- [ ] Implement the optional second processing phase or forced termination only when the algorithm requires it.
+- [ ] Preserve serializable particle state, handle migration, and finalize all temporary particles before publishing iteration results.
+- [ ] Verify numerical stability, coordinate boundaries, minimization semantics, and iteration numbering.
+- [ ] Document the public constructor, export the algorithm, and update the relevant README entries.
+- [ ] Validate the mathematical and execution contracts with focused tests; pass the project's lint, formatting, and type checks.
+
+### 2. Method reference
+
+The concrete algorithm implements the mathematical operations. The framework controls their execution order, dispatch, and population integration. The required methods are abstract in `AlgorithmBase`.
+
+| Required method | Main responsibility | Must not do |
+| --- | --- | --- |
+| [`__init__`](#61-__init__) | Define and validate public parameters; initialize algorithm-specific state. | Accept framework-managed configuration. |
+| [`create_particle`](#62-create_particle) | Create or reconstruct a particle and register it in `_population`. | Evaluate fitness or discard supplied persistent state. |
+| [`delete_particle`](#63-delete_particle) | Remove a particle and maintain bookkeeping. | Choose a particle implicitly without a defined removal policy. |
+| [`pre_iteration`](#64-pre_iteration) | Prepare shared state, schedules, population changes, and context-dependent constraints. | Evaluate new particles or prepare worker-specific random inputs. |
+| [`create_random_cache`](#65-create_random_cache) | Assign fresh random state for the requested identifiers and processing phase. | Share mutable generator state between particles. |
+| [`initialize_particle`](#66-initialize_particle) | Initialize the specified new particle and evaluate its initial solution if required. | Consolidate the particle, reevaluate a valid arrival solely because it is new, or use `_rng` directly. |
+| [`consolidate_new_particles`](#67-consolidate_new_particles) | Statically consolidate the supplied new particle and establish its initial state. | Access the algorithm, other particles, fitness function, or external state. |
+| [`update_particle`](#68-update_particle) | Compute, evaluate, and return the identified particle's update. | Modify other particles or rely on persistent changes to worker-local algorithm state. |
+| [`post_iteration`](#69-post_iteration) | Finalize selection and population state, remove temporary particles, and update results. | Treat iteration `0` as a regular optimization iteration. |
+
+Optional methods and extensions:
+
+| Component | When to implement or use it |
+| --- | --- |
+| [`inter_iteration`](#9-optional-second-processing-phase) | A second processing phase depends on the results of the first population-wide phase. |
+| [`second_update_particle`](#9-optional-second-processing-phase) | Selected particles need another update after intermediate population-level processing. |
+| [`_force_iteration_stop`](#10-optional-forced-termination) | The algorithm detects an internal stopping condition and must prevent subsequent iterations. |
+| [`ParticleBase.__call__`](#11-state-persistence-and-migration) | Additional particle-specific state must survive migration or reconstruction. |
+
+Framework-provided operations used by the algorithm:
+
+| Operation | Purpose |
+| --- | --- |
+| `initialize_context`, `configure` | Establish execution context, wrapped fitness function, and persistent RNG. |
+| `update_population` | Merge returned particles by identifier and clear all population random caches (framework-managed). |
+| `particle.update` | Evaluate a proposed solution and store its candidate state. |
+| `particle.consolidate` | Accept or reject a candidate and clear its transient state. |
+| `update_solution_state` | Explicitly refresh current best/worst particles and the retained local best after consolidation. |
+
+### 3. Execution lifecycle
 
 The framework initializes the common execution state through `initialize_context`, configures the wrapped fitness function and persistent random generator through `configure`, and creates the initial population through `create_particle`.
 
@@ -87,80 +144,188 @@ Initialize execution context and configure algorithm
     +--------------------+
 ```
 
-Each per-particle phase completes before its results are merged into the population and the next phase begins. `update_population` incorporates returned particles by identifier and clears the random caches. The second update merges only the selected particles, not a replacement population.
+Each particle-processing phase completes before its results are merged and the next phase begins. The second update merges only the selected particles; it does not replace the population.
 
-### 2.1. Iteration numbering
+| Iteration | Executed phases |
+| --- | --- |
+| `0` | Preparation, initialization of new particles, initial consolidation, and finalization. |
+| `1` onward | Preparation, initialization of new particles if present, regular update, optional second update, and finalization. |
+| Continued execution | Resume from the existing iteration state; use the current `_max_iterations` horizon. |
 
-Iteration `0` is exclusively the initial setup. It includes preparation, initialization, initial consolidation, and finalization, but neither regular particle updates nor second updates.
+Iteration `0` is setup, not the first optimization iteration. A force-stop request prevents a new iteration from starting; it does not interrupt the current one. See [iteration numbering](#610-iteration-numbering) and [forced termination](#10-optional-forced-termination) for details.
 
-Actual optimization iterations run from `1` through the scheduled iteration horizon. For a published zero-based schedule `t = 0, ..., T - 1`, the usual mapping is `t = actual_iter - 1`. Derive schedule endpoints from the reference formulation rather than assuming that all schedules use the same convention.
+### 4. Essential invariants
 
-Use `_max_iterations` for the current horizon; the framework may extend it when continuing execution. Do not assume that every call to `fit` starts at iteration `0`.
+| Topic | Rule | Details |
+| --- | --- | --- |
+| State ownership | A particle owns only its individual state; the algorithm owns shared optimization state. | [Architecture](#5-architecture-and-state-ownership) |
+| Domain | Work exclusively with continuous encoded coordinates and boundaries; never decode user variables inside the algorithm. | [Architecture](#5-architecture-and-state-ownership) |
+| Worker isolation | Modify only the identified particle during particle processing. | [Update contract](#68-update_particle) |
+| Fitness | Minimize; `+np.inf` is undefined/worst, `-np.inf` is valid/best, and `NaN` is invalid. | [Numerical requirements](#12-mathematical-and-numerical-requirements) |
+| Evaluation | Use `particle.update`, never call `_fitness_function` directly. | [Evaluation](#7-fitness-evaluation-and-consolidation) |
+| Consolidation | Compare candidates before accepting or rejecting them; preserve the previous state when required. | [Consolidation](#72-candidate-consolidation) |
+| Randomness | Use only the particle's cache in worker methods; never remove cache entries or use `pop` in initialization or update logic. | [Random cache](#8-randomness-and-random-cache) |
+| Boundaries | Every evaluated coordinate must be within the encoded boundaries. | [Numerical requirements](#12-mathematical-and-numerical-requirements) |
+| Migration | Serialize all non-reconstructible persistent particle state; exclude transient candidate and cache state. | [Persistence](#11-state-persistence-and-migration) |
+| Results | Remove temporary particles and call `update_solution_state()` on the appropriate consolidated population. | [Finalization](#69-post_iteration) |
 
-## 3. Required implementation methods
+---
 
-All methods below are abstract requirements of `AlgorithmBase`. The optional second-phase methods are described separately in Section 6.
+## Part II — Implementation contracts
 
-### 3.1. `__init__`
+### 5. Architecture and state ownership
 
-Define the public algorithm parameters and initialize algorithm-specific state. All public configuration parameters must have suitable defaults, allowing `ExampleAlgorithm()` without arguments.
+#### 5.1. Module structure
 
-Validate types, ranges, finiteness, enumerated options, and parameter relationships immediately when possible. Reject booleans for numeric parameters unless they have an explicit meaning. Normalize accepted Python and NumPy numeric types as appropriate. Do not silently replace invalid user-supplied values.
+Implement each algorithm in a dedicated module under `src/tyrannis/algorithm/`. Derive the two concrete classes from the abstractions in [`core/algorithm.py`](../src/tyrannis/core/algorithm.py):
 
-Do not accept framework-managed parameters such as boundaries, cost function, population, iteration count, execution seed, or backend. Initialize dimension-dependent state and resolve automatic parameters only when the necessary execution information is available.
+```python
+class ExampleParticle(ParticleBase):
+    ...
 
-### 3.2. `create_particle(identifier, ...) -> None`
 
-Create a particle and register it in `_population`. Only `identifier` may be required; all remaining arguments must be optional, match the particle constructor's parameter names and types, and use appropriate undefined defaults.
+class ExampleAlgorithm(AlgorithmBase[ExampleParticle]):
+    ...
+```
 
-Use `fitness: np.float64 = FITNESS_UNDEFINED`. Generate missing positions and particle-specific state according to the algorithm, but preserve supplied state when reconstructing a particle, particularly after migration. Random draws made during creation may use the persistent `_rng`.
+A dedicated particle class is required even when the algorithm does not need additional particle-specific state.
 
-Never evaluate fitness here. Creation and evaluation are separate operations.
+#### 5.2. Responsibilities
 
-### 3.3. `delete_particle(identifier) -> None`
+| Component | Owns |
+| --- | --- |
+| `ParticleBase` | An isolated solution: position, fitness, and individual state such as velocity and personal best. |
+| `AlgorithmBase` | Interactions between particles, leaders, archives, distributions, models, adaptive parameters, and selection rules. |
+| `Space` | Encoding, decoding, and the interpretation of user-defined variables. |
+| Processors and backends | Execution scheduling, worker dispatch, integration of returned particles, and migration where applicable. |
 
-Remove the specified particle and maintain any algorithm-specific bookkeeping. If `identifier` is `None`, select a particle only when the algorithm defines a meaningful automatic removal policy; otherwise reject the request explicitly.
+A particle must not hold references to other particles, the population, or the algorithm. The algorithm must not detect, import, or configure execution infrastructure.
 
-### 3.4. `pre_iteration(actual_iter) -> None`
+#### 5.3. Encoded optimization domain
 
-Prepare the algorithm and population for the upcoming particle-processing phases. Typical responsibilities include:
+The algorithm operates exclusively on the framework's continuous internal representation:
 
-- Initialize dimension-dependent structures and validate execution-dependent constraints.
-- Update schedules, leaders, archives, distributions, and selection information.
-- Create or remove particles, including temporary candidates and replacements.
-- Prepare shared reference state that workers will read during particle processing.
+| Representation | Type |
+| --- | --- |
+| Encoded coordinates | `dict[str, float]` |
+| Encoded boundaries | `dict[str, tuple[float, float]]` |
 
-Migration, when enabled, occurs before this method. Account for arriving and departing particles and revalidate population-size constraints where necessary. Incorporate evaluated arrivals into leaders or models when required by the algorithm.
+Treat these values as continuous coordinates regardless of the original search space.
 
-Do not evaluate newly created particles or prepare worker-specific randomness here. The framework detects new particles after this method and invokes the corresponding initialization phase. Population-level random operations performed here may use `_rng` directly.
+An architectural compatibility assessment is required before implementing an algorithm that:
 
-### 3.5. `create_random_cache(particle_ids, initialize) -> None`
+- Requires direct access to discrete or categorical semantics.
+- Requires inherently sequential updates that observe changes made by previous workers.
 
-Prepare the random state for exactly the specified identifiers and the immediately following processing phase. Assign each particle its own `random_cache` dictionary.
+Do not silently change the mathematical formulation to fit the framework.
 
-`initialize=True` indicates initialization; `initialize=False` indicates an update, including the optional second update. Algorithms with two update phases must distinguish them using their own phase state. Leave the cache empty when no randomness is required. See Section 5 for the full randomness contract.
+### 6. Initialization and iteration methods
 
-### 3.6. `initialize_particle(identifier) -> ParticleType`
+The methods in this section are required by `AlgorithmBase`. Optional processing methods are covered in [Section 9](#9-optional-second-processing-phase).
 
-Prepare the identified new particle for participation in the population and return it. Initialize individual state and evaluate its initial solution if its fitness equals `FITNESS_UNDEFINED`:
+#### 6.1. `__init__`
+
+**Purpose:** define the public configuration of the algorithm and initialize algorithm-specific state.
+
+- Give every public configuration parameter a suitable default, so that `ExampleAlgorithm()` is valid.
+- Validate types, ranges, finiteness, enumerated options, and parameter relationships as early as possible.
+- Reject booleans for numeric parameters unless they have an explicit meaning.
+- Normalize accepted Python and NumPy numeric types as appropriate.
+- Initialize dimension-dependent state and resolve automatic parameters only when the required execution information is available.
+
+Do not silently replace invalid user-supplied values. Do not accept framework-managed parameters such as boundaries, fitness function, population, iteration count, execution seed, or backend.
+
+#### 6.2. `create_particle`
+
+**Contract:** `create_particle(identifier, ...) -> None`
+
+Create a particle and register it in `_population`.
+
+| Argument | Requirement |
+| --- | --- |
+| `identifier` | The only required argument. |
+| `variables` and additional particle state | Optional, with appropriate undefined defaults; names and types must match the particle constructor. |
+| `fitness` | Use `fitness: np.float64 = FITNESS_UNDEFINED`. |
+
+Generate missing positions and individual state according to the algorithm. Preserve supplied state when reconstructing a particle, particularly after migration.
+
+Random draws needed for particle creation may use the persistent `_rng`.
+
+**Never evaluate fitness here.** Creation and evaluation are separate operations.
+
+#### 6.3. `delete_particle`
+
+**Contract:** `delete_particle(identifier) -> None`
+
+- Remove the specified particle.
+- Maintain any algorithm-specific bookkeeping.
+- If `identifier` is `None`, select a particle only when the algorithm defines a meaningful automatic removal policy. Otherwise, reject the request explicitly.
+
+#### 6.4. `pre_iteration`
+
+**Contract:** `pre_iteration(actual_iter) -> None`
+
+Prepare the algorithm and population for the upcoming particle-processing phases.
+
+| Responsibility | Typical operations |
+| --- | --- |
+| Context-dependent setup | Initialize dimension-dependent structures and validate execution-dependent constraints. |
+| Shared optimization state | Update schedules, leaders, archives, distributions, and selection information. |
+| Population management | Create or remove particles, temporary candidates, and replacements. |
+| Worker preparation | Establish shared reference state that workers will read. |
+
+Migration, when enabled, occurs before this method. Account for arrivals and departures, revalidate population-size constraints where necessary, and incorporate evaluated arrivals into leaders or models when required.
+
+Population-level random operations may use `_rng` directly.
+
+Do not evaluate newly created particles or prepare worker-specific randomness here. The framework detects new particles after this method and invokes the initialization phase.
+
+#### 6.5. `create_random_cache`
+
+**Contract:** `create_random_cache(particle_ids, initialize) -> None`
+
+Prepare random state for exactly the requested identifiers and the immediately following particle-processing phase. Assign each particle its own `random_cache` dictionary.
+
+| Argument | Meaning |
+| --- | --- |
+| `particle_ids` | Identifiers participating in the next phase. |
+| `initialize=True` | Initialization of new particles. |
+| `initialize=False` | Regular update or optional second update. |
+
+Algorithms with two update phases must distinguish them using their own phase state. Leave the cache empty when no randomness is required.
+
+See [Section 8](#8-randomness-and-random-cache) for the mandatory randomness rules and examples.
+
+#### 6.6. `initialize_particle`
+
+**Contract:** `initialize_particle(identifier) -> ParticleType`
+
+Prepare the specified new particle for participation in the population and return it.
+
+1. Retrieve the particle and initialize any required individual state.
+2. Evaluate its initial solution if its fitness equals `FITNESS_UNDEFINED`.
+3. Return the particle with the state needed for subsequent consolidation.
+
+A minimal evaluation pattern is:
 
 ```python
 particle = self._population[identifier]
 
 if particle.fitness == FITNESS_UNDEFINED:
-    particle.update(
-        variables=particle.variables,
-        fitness_function=self._fitness_function
-    )
+    particle.update(variables=particle.variables, fitness_function=self._fitness_function)
 
 return particle
 ```
 
-A newly received particle with an already evaluated fitness other than `FITNESS_UNDEFINED` must not be evaluated again solely because it is marked as new. Use the particle's random cache for any additional stochastic initialization. Do not consolidate the candidate here.
+A newly received particle with an already evaluated fitness other than `FITNESS_UNDEFINED` must not be evaluated again solely because it is marked as new. `ParticleBase` initializes its candidate fields from the supplied evaluated state, allowing the subsequent initial consolidation to preserve that fitness.
 
-### 3.7. `consolidate_new_particles(particle) -> ParticleType`
+Use the particle's random cache for any additional stochastic initialization. Do not consolidate the candidate here.
 
-Implement this as a `@staticmethod`. It must operate exclusively on the supplied particle without accessing the algorithm, configuration, population, fitness function, RNG, or external state.
+#### 6.7. `consolidate_new_particles`
+
+**Contract:** `consolidate_new_particles(particle) -> ParticleType`
+
+Implement this method as a `@staticmethod`. It must operate exclusively on the supplied particle.
 
 ```python
 @staticmethod
@@ -169,73 +334,109 @@ def consolidate_new_particles(particle: ExampleParticle) -> ExampleParticle:
     return particle
 ```
 
-Also establish any particle-specific state that depends on initial consolidation, such as a personal best. The returned particle must be ready for the current iteration. Do not evaluate fitness here.
+Establish any particle-specific state that depends on initial consolidation, such as a personal best. The returned particle must be ready to participate in the current iteration.
 
-### 3.8. `update_particle(identifier) -> ParticleType`
+Do not access the algorithm, configuration, population, fitness function, RNG, or external state. Do not evaluate fitness here.
+
+#### 6.8. `update_particle`
+
+**Contract:** `update_particle(identifier) -> ParticleType`
 
 Compute the transition from the current particle state to its candidate state, evaluate the candidate when required, and return the processed particle.
 
-Read shared algorithm state and other particles only as reference information. Modify only the identified particle. Changes to other algorithm state made inside a worker are not guaranteed to persist; changes to other particles can introduce race conditions and execution-order dependencies.
+| Permitted | Prohibited or unsafe |
+| --- | --- |
+| Read shared algorithm state and other particles as reference information. | Modify other particles, creating race conditions and execution-order dependencies. |
+| Modify and return the identified particle. | Rely on changes to other algorithm state persisting after worker execution. |
+| Obtain random inputs from the particle's cache. | Access the persistent `_rng` or untracked random sources. |
+| Preserve the previous population state until the appropriate consolidation phase. | Consolidate prematurely when other workers need the previous state. |
 
-Use the particle's random cache for all random operations. Do not prematurely consolidate candidates if other workers must observe the previous population state. Keep persistent worker-produced information in the returned particle.
+Keep persistent worker-produced information in the returned particle.
 
-A particle initialized during a positive-numbered iteration also participates in the regular update phase. If its initialization already performed the evaluation required for that iteration, explicitly skip the redundant update. Do not skip a mathematically distinct evaluation merely because the particle is new.
+**Particles created during optimization:** a particle initialized during a positive-numbered iteration also participates in the regular update phase. Explicitly skip a redundant update if initialization already performed the evaluation required for that iteration. Do not skip a mathematically distinct evaluation merely because the particle is new.
 
-### 3.9. `post_iteration(actual_iter) -> None`
+#### 6.9. `post_iteration`
 
-Finalize the iteration after all particle-processing phases. Implement the algorithm's selection and consolidation policy, update persistent population-level state, and remove temporary particles.
+**Contract:** `post_iteration(actual_iter) -> None`
 
-Handle iteration `0` separately wherever the regular update candidate is required. No regular update has occurred at that point. Also account for particles already consolidated during an intermediate phase or intentionally left unchanged.
+Finalize the iteration after all particle-processing phases.
 
-Call `update_solution_state()` when the population represents the consolidated state that should be reported or retained. This inherited method computes the current best and worst particles and updates `local_best` using a deep copy when a strict improvement occurs (or no previous best exists). It is not called automatically on behalf of the concrete algorithm. Keep the population nonempty when invoking it.
+- Apply the algorithm's selection and consolidation policy.
+- Update persistent population-level state.
+- Account for particles already consolidated during an intermediate phase or intentionally left unchanged.
+- Remove all temporary particles before returning.
+- Call `update_solution_state()` when the population represents the consolidated state that should be reported or retained.
 
-## 4. Fitness evaluation and candidate consolidation
+Handle iteration `0` separately wherever a regular update candidate is required: no regular update has occurred at that point.
 
-Every fitness evaluation initiated by an algorithm must pass through `particle.update(variables=..., fitness_function=self._fitness_function)`. Never call `_fitness_function` directly, even when evaluating temporary particles or several candidates in one phase.
+`update_solution_state()` is inherited but is not called automatically on behalf of the concrete algorithm. It computes the current best and worst particles and updates `local_best` with a deep copy when a strict improvement occurs or when no previous best exists. Keep the population nonempty when invoking it.
 
-`ParticleBase.update` stores the proposed coordinates in `candidate_variables` and the evaluated result in `candidate_fitness`. It does not modify the current `variables` and `fitness`. A subsequent update replaces the previous candidate; preserve intermediate candidates explicitly when the formulation requires comparisons between them.
+#### 6.10. Iteration numbering
 
-For an established particle, `particle.consolidate(consolidate_new=True)` accepts the candidate and `particle.consolidate(consolidate_new=False)` rejects it. Both clear the candidate state. A candidate must exist before consolidation. On initial consolidation, the new-particle flag is cleared and any previously supplied fitness other than `FITNESS_UNDEFINED` is preserved; otherwise the initial candidate becomes the current state.
+Iteration `0` is exclusively the initial setup. It includes preparation, initialization, initial consolidation, and finalization, but neither regular particle updates nor second updates.
 
-Select the policy required by the algorithm: unconditional replacement, strict greedy improvement, elitism, survivor selection, or another mathematically justified rule. Compare fitness before consolidation. Do not treat ties as improvements without justification.
+Actual optimization iterations run from `1` through the scheduled horizon. For a published zero-based schedule `t = 0, ..., T - 1`, the usual mapping is:
 
-The framework handles evaluation failures through its configured failure strategy. Do not bypass this mechanism or conceal implementation errors as successful evaluations.
-
-## 5. Randomness and `random_cache`
-
-### 5.1. Why the cache is required
-
-Particle processing may execute serially, in threads, in separate processes, or on distributed workers. Copying an algorithm to workers may duplicate its RNG state, causing identical or correlated random draws. Sharing a mutable RNG across threads can instead make the assignment of random draws depend on scheduling order. Worker-side changes to an algorithm's RNG may also fail to propagate back to its owner.
-
-`random_cache` separates random-state ownership from particle processing. The execution context that owns the algorithm prepares the random state before dispatch, so the random inputs assigned to a particle do not depend on which worker executes it or when that worker runs.
-
-The persistent `self._rng` is initialized once by the framework during `configure`. It advances throughout the execution. The objective is reproducibility for the same initial seed and execution conditions, without repeating the same random stream at every iteration. This does not imply identical results when migration order, population order, or external cost-function behavior differs.
-
-### 5.2. Preparing and consuming random state
-
-The cache is a temporary `dict[str, Any]` with descriptive, preferably flat keys defined by the concrete algorithm. It is not the cost-function cache and is not persistent particle state.
-
-Prefer pre-materialized scalars, arrays, or selections whenever the number of draws is known and reasonably sized. For example:
-
-```python
-def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
-    for identifier in particle_ids:
-        particle = self._population[identifier]
-        particle.random_cache = (
-            {} if initialize else {"step": self._rng.standard_normal()}
-        )
+```text
+t = actual_iter - 1
 ```
 
-The corresponding update reads `particle.random_cache["step"]`. Prefer storing a selected particle's identifier or index rather than its object.
+Derive schedule endpoints from the reference formulation rather than assuming that every schedule uses this convention.
 
-When draw counts are dynamic or pre-materialization would be excessive, a cache entry may contain an independent `np.random.Generator`. Derive a new generator for each relevant particle and phase from fresh state consumed from `_rng`, for example:
+Use `_max_iterations` for the current horizon. The framework may extend it when continuing execution; do not assume every call to `fit` starts at iteration `0`.
+
+### 7. Fitness evaluation and consolidation
+
+#### 7.1. Evaluation contract
+
+Every fitness evaluation initiated by an algorithm must pass through:
 
 ```python
-entropy = self._rng.integers(0, 2**32, size=4, dtype=np.uint32)
-particle.random_cache = {"random_generator": np.random.default_rng(entropy)}
+particle.update(variables=..., fitness_function=self._fitness_function)
 ```
 
-The consuming method can then draw from `particle.random_cache["random_generator"]`. Advancing that generator's internal state is permitted. It remains an entry in the cache.
+This also applies to temporary particles and to multiple candidate evaluations within one processing phase. Never call `_fitness_function` directly.
+
+`ParticleBase.update` stores proposed coordinates in `candidate_variables` and the evaluated result in `candidate_fitness`. It does not modify the current `variables` and `fitness`.
+
+A subsequent update replaces the previous candidate. Preserve intermediate candidates explicitly when the mathematical formulation requires comparisons between them.
+
+#### 7.2. Candidate consolidation
+
+| Particle state | Operation | Result |
+| --- | --- | --- |
+| Established particle | `consolidate(consolidate_new=True)` | Accept the candidate as the current state. |
+| Established particle | `consolidate(consolidate_new=False)` | Reject the candidate and preserve the current state. |
+| New particle with undefined fitness | Initial consolidation | Promote the initial candidate to the current state and clear the new-particle flag. |
+| New particle with supplied evaluated fitness | Initial consolidation | Preserve the supplied current state and clear the new-particle flag. |
+
+A candidate must exist before consolidation. All of these paths clear the candidate fields after successful consolidation.
+
+Choose the selection policy required by the mathematical formulation: unconditional replacement, strict greedy improvement, elitism, survivor selection, or another justified rule.
+
+Compare fitness **before** consolidation. Do not treat ties as improvements without mathematical justification.
+
+#### 7.3. Evaluation failures
+
+The framework handles evaluation failures using the configured failure strategy. Do not bypass this mechanism or conceal implementation errors as successful evaluations.
+
+### 8. Randomness and random cache
+
+#### 8.1. Why the cache is required
+
+Particle processing may run serially, in threads, in separate processes, or on distributed workers. Random state must be managed independently of the execution infrastructure.
+
+| Direct worker-side randomness problem | Consequence |
+| --- | --- |
+| Copying the algorithm to workers | RNG state may be duplicated, producing identical or correlated draws. |
+| Sharing a mutable RNG across threads | Assignment of random draws may depend on scheduling order. |
+| Advancing an algorithm RNG inside a worker | Changes may fail to propagate to the algorithm's owner. |
+
+`random_cache` separates random-state ownership from particle processing. The execution context that owns the algorithm prepares random state before dispatch, so the assignment of random inputs to a particle does not depend on which worker executes it or when it runs.
+
+The persistent `self._rng` is initialized once by the framework during `configure` and advances throughout execution. It is not reinitialized at each iteration.
+
+The goal is reproducibility for the same initial seed and execution conditions, not identical results when migration order, population order, or external fitness-function behavior differs.
 
 ```text
 Execution seed
@@ -258,85 +459,231 @@ create_random_cache (before each processing phase)
                  (cache cleared)
 ```
 
-The following rules are mandatory:
+#### 8.2. Cache representation and preparation
 
-- Use only cached randomness in `initialize_particle`, `update_particle`, and `second_update_particle`, including in their helpers. Never access `_rng`, global NumPy random state, or an untracked random source there.
-- Never store `_rng` itself in a cache or share mutable generator state between particles. Never recreate generators from the original execution seed in each phase or iteration.
-- Access cache entries by key, not insertion order. Do not remove entries with `pop` or equivalent operations; do not treat the cache as a consumable stack or queue. Particle initialization and update logic must not use `pop` to remove elements from structures, directly or through helpers.
-- Prepare fresh state for each phase. Reuse across phases is valid only when explicitly required by the mathematical formulation. The framework owns cache cleanup.
-- Pass the appropriate controlled random source to stochastic external numerical routines. Assess routines whose randomness cannot be controlled before using them.
+The cache is a temporary `dict[str, Any]` with descriptive, preferably flat keys defined by the concrete algorithm. It is not the cost-function cache and is not persistent particle state.
 
-## 6. Optional second particle-processing phase
+Choose the representation according to the required randomness:
 
-Use this mechanism when a second evaluation phase depends on the results of the first population-wide phase. Multiple evaluations of one particle that do not require an intervening population-wide step can remain within a single update method.
+| Requirement | Preferred representation |
+| --- | --- |
+| Known, reasonably sized number of draws | Pre-materialized scalars, arrays, or selections. |
+| Selection of another particle | Store its identifier or index rather than its object. |
+| Dynamic number of draws or excessive pre-materialization | An independent `np.random.Generator` for the particle and phase. |
+| No random inputs | An empty dictionary. |
 
-In `pre_iteration`, set `self._double_particle_check = True` when `actual_iter == 0`. Then implement:
+**Example: pre-materialized values**
+
+```python
+def create_random_cache(self, particle_ids: list[str], initialize: bool) -> None:
+    for identifier in particle_ids:
+        particle = self._population[identifier]
+        particle.random_cache = (
+            {} if initialize else {"step": self._rng.standard_normal()}
+        )
+```
+
+The corresponding update reads `particle.random_cache["step"]`.
+
+**Example: independent generator**
+
+Derive a new generator for each relevant particle and phase from fresh state consumed from `_rng`:
+
+```python
+entropy = self._rng.integers(0, 2**32, size=4, dtype=np.uint32)
+particle.random_cache = {"random_generator": np.random.default_rng(entropy)}
+```
+
+The consuming method draws from `particle.random_cache["random_generator"]`. Advancing that generator's internal state is permitted; the generator remains an entry in the cache.
+
+#### 8.3. Mandatory randomness rules
+
+| Rule | Requirement |
+| --- | --- |
+| Worker methods | Use only cached randomness in `initialize_particle`, `update_particle`, and `second_update_particle`, including their helpers. Never access `_rng`, global NumPy random state, or untracked random sources there. |
+| Generator ownership | Never store `_rng` itself in a cache, share mutable generator state between particles, or recreate generators from the original execution seed in each phase or iteration. |
+| Access | Retrieve entries by key, not dictionary insertion order. Do not remove entries with `pop` or equivalent operations, or treat the cache as a consumable stack or queue. |
+| Particle operations | Initialization and update logic must not use `pop` to remove elements from structures, directly or through helpers. |
+| Phase lifetime | Prepare fresh state for each phase. Reuse across phases is valid only when explicitly required by the mathematical formulation. The framework owns cache cleanup. |
+| External routines | Pass the appropriate controlled random source to stochastic numerical routines. Assess routines whose randomness cannot be controlled before using them. |
+
+The framework clears the random caches through `update_population` after processing results have been merged.
+
+### 9. Optional second processing phase
+
+Use this mechanism when a second evaluation phase depends on the results of the first population-wide phase. Multiple evaluations of one particle that do not need an intervening population-wide step can remain within a single update method.
+
+#### 9.1. Enabling the phase
+
+In `pre_iteration`, set `self._double_particle_check = True` when `actual_iter == 0`.
+
+Implement the following operations in addition to the regular lifecycle:
 
 | Method | Responsibility |
 | --- | --- |
-| `inter_iteration(actual_iter) -> None` | Consolidate intermediate results as needed, update shared state, select particles for the next phase, and assign `self._double_check_ids` (or `self.double_check_ids`). Do not create or remove particles. |
+| `inter_iteration(actual_iter) -> None` | Consolidate intermediate results as needed, update shared state, select participants, and assign `self._double_check_ids` (or `self.double_check_ids`). Do not create or remove particles. |
 | `create_random_cache(particle_ids, initialize=False)` | Prepare only the selected particles for the second phase, using the state established by `inter_iteration`. |
 | `second_update_particle(identifier) -> ParticleType` | Compute and evaluate the second candidate when needed, then return the particle under the same isolation, evaluation, and randomness rules as `update_particle`. |
 | `post_iteration(actual_iter) -> None` | Finalize the remaining candidates and shared state, accounting for particles that did not participate in the second phase. |
 
-`inter_iteration` runs after the first update results are merged. Set the selection list on every invocation, using an empty list when no second update is needed. The framework skips the entire second particle-processing phase when the list is empty. There is no second phase at iteration `0`.
+#### 9.2. Execution rules
+
+- `inter_iteration` runs after the first update results are merged.
+- Set the selection list on every invocation, using an empty list when no second update is needed.
+- When the list is empty, the framework skips the entire second particle-processing phase, including cache creation and population merging.
+- There is no second phase at iteration `0`.
 
 For a single-phase algorithm, leave `double_particle_check` disabled and retain the inherited implementations of `inter_iteration` and `second_update_particle`.
 
 [`BeeColony`](../src/tyrannis/algorithm/bee_colony.py) demonstrates this contract through its employed-bee and onlooker-bee phases.
 
-## 7. Optional forced termination
+### 10. Optional forced termination
 
-If an algorithm detects an internal stopping condition, such as unrecoverable numerical degeneration, it may request termination by setting `self._force_iteration_stop = True` and issuing a warning explaining the reason whenever available:
+An algorithm may request termination when it detects an internal stopping condition, such as unrecoverable numerical degeneration.
+
+Set `self._force_iteration_stop = True` and emit a warning informing the user of premature termination. Include the reason whenever it is available:
 
 ```python
 self._force_iteration_stop = True
 warnings.warn(
     "Optimization stopped prematurely: numerical degeneration.",
     RuntimeWarning,
-    stacklevel=2
+    stacklevel=2,
 )
 ```
 
-Make the request from an execution stage where algorithm state persists, not from a worker-local update. The framework reads the `force_stop` property before starting each iteration. It does not interrupt a running iteration or skip its remaining lifecycle stages. If the request is raised in `pre_iteration` or `inter_iteration`, ensure that subsequent cache creation, updates, and finalization remain safe and preserve a valid population. Do not rely on an exception as a substitute for this mechanism.
+| Aspect | Contract |
+| --- | --- |
+| Request location | An execution stage where algorithm state persists, not a worker-local update. |
+| Timing | The framework reads `force_stop` before starting each iteration. It does not interrupt a running iteration or skip its remaining stages. |
+| Safe finalization | If requested in `pre_iteration` or `inter_iteration`, ensure subsequent cache creation, updates, and finalization remain safe and preserve a valid population. |
+| Lifetime | Latched for the current execution context. Subsequent calls to `fit`, `run`, or `execute` do not clear it. Only `initialize_context` resets it. |
+| Distributed scope | Stops the affected island, not every island. |
 
-The request is latched for the lifetime of the current execution context. Subsequent calls to `fit`, `run`, or `execute` do not clear it. Only `initialize_context` resets it. In distributed execution it stops the affected island, not every island.
+Do not rely on an exception as a substitute for this mechanism.
 
 [`CMAES`](../src/tyrannis/algorithm/cma_es.py) demonstrates forced termination and safe completion of the current iteration after a numerical failure.
 
-## 8. State persistence and migration
+### 11. State persistence and migration
 
-Override the particle's `__call__` when additional persistent state is required. Return a dictionary whose keys correspond to the particle constructor and `create_particle` arguments. Include all state necessary to reconstruct the solution without losing its mathematical trajectory, such as PSO velocity and personal best. Convert unsupported objects or NumPy arrays to serializable representations.
+#### 11.1. Serialization contract
 
-Exclude transient state such as candidate variables, candidate fitness, evaluation errors, and random caches. Omit additional reconstructible state only through a deliberate, documented migration policy. Historical solutions and archives should hold independent snapshots, not mutable references to particles that will change.
+Override the particle's `__call__` when additional persistent state is required. Return a dictionary whose keys correspond to the particle constructor and `create_particle` arguments.
 
-The population may change in composition and size through migration or algorithm-specific creation and deletion. `_n_particles` is refreshed after processor migration control; `len(_population)` reflects the current dictionary, potentially including temporary particles. Use the count appropriate to the mathematics.
+| State category | Serialization policy |
+| --- | --- |
+| Core solution state | Include identifier, variables, and fitness. |
+| Additional non-reconstructible state | Include all state necessary to reconstruct the solution without losing its mathematical trajectory, such as PSO velocity and personal best. |
+| Reconstructible state | Omit only through a deliberate, documented migration policy. |
+| Transient state | Exclude candidate variables, candidate fitness, evaluation errors, and random caches. |
 
-Temporary particles must have collision-free identifiers, preferably incorporating the algorithm identifier and their purpose. They must follow the normal creation, initialization, evaluation, and removal contract. Remove all temporary particles before `post_iteration` returns, so they cannot enter persistent results or migrate to another island.
+Convert unsupported objects or NumPy arrays to serializable representations. Historical solutions and archives should hold independent snapshots rather than mutable references to particles that will change.
 
-## 9. Mathematical and numerical requirements
+#### 11.2. Population changes
 
-- **Minimization:** Lower fitness is always better. `FITNESS_UNDEFINED` equals `+np.inf`, the worst fitness. `-np.inf` is valid and represents the best possible fitness. Use equality with `FITNESS_UNDEFINED`, not `np.isinf`, to detect undefined fitness. `NaN` is invalid.
-- **Extreme values:** Handle infinite and tied fitness, zero denominators, zero total weights, overflow, and degenerate distributions explicitly. Avoid indeterminate arithmetic such as `inf - inf` and unintended `NaN` propagation.
-- **Boundaries:** Ensure every evaluated coordinate is within `_boundaries`. `Space` does not repair out-of-bounds candidates. Clipping, reflection, resampling, or other boundary handling must be consistent with the algorithm.
-- **Vectorization:** Use one stable variable order, for example `tuple(self._boundaries)`, when converting between dictionaries and arrays. Maintain coordinate alignment and prefer `zip(..., strict=True)` where applicable.
-- **Selection:** Do not introduce accidental selection pressure from dictionary insertion order. Where the formulation does not prescribe tie-breaking, an unbiased strategy may randomize candidates before a stable sort using the controlled RNG.
-- **Numerical primitives:** Prefer appropriate SciPy implementations, followed by NumPy, Python's `math`, and finally manual implementations. NumPy remains the natural choice for elementary and vectorized operations. Choose methods, tolerances, and regularizations based on mathematical and numerical justification. Avoid arbitrary epsilon adjustments and unnecessary dependencies.
-- **Mathematical fidelity:** Define equations, operation order, random distributions, schedules, selection, replacement, and degeneracy handling before implementation. Keep the optimization logic native to Tyrannis rather than delegating the complete algorithm to an external optimizer.
+Migration and algorithm-specific creation or deletion may change both the composition and size of the population.
 
-## 10. Public API, documentation, and validation
+| Count | Meaning |
+| --- | --- |
+| `_n_particles` | Count refreshed after processor migration control. |
+| `len(_population)` | Current dictionary size, potentially including temporary particles. |
 
-Use concrete generic types, clear private helper signatures, explicit representations for complex internal models, and the project's Ruff conventions. Do not add trailing commas after the last argument in new Python signatures or calls. Expose read-only properties for relevant public configuration rather than exposing private execution state unnecessarily. Use `TypeError` for invalid types, `ValueError` for invalid values, and `RuntimeError` for violated execution invariants, where appropriate.
+Use the count appropriate to the mathematical operation. Revalidate constraints that depend on population size after relevant changes.
 
-The public constructor docstring must describe the optimization algorithm rather than internal framework mechanics. Follow the existing NumPy-style structure:
+#### 11.3. Temporary particles
 
-- **Introduction:** Full name, acronym, and search strategy.
-- **Parameters:** Every public argument, its type, default, meaning, and constraints. Defaults must be justified by the reference formulation or established literature; document automatic resolution rules.
-- **Notes:** Mathematical formulation, equations, schedules, selection, variants and their defaults, limitations, and relevant departures from the cited formulations. Explain differences without discussing internal execution machinery.
-- **References:** At least three academic references. Begin with the foundational publication, followed by a complementary formulation or analysis. Cite the sources of selectable mathematical variants and include at least one relevant real-world application. Prefer peer-reviewed articles or established academic books with full DOI links; provide publication links when a DOI is unavailable.
+Temporary candidates must follow the same lifecycle as ordinary particles:
 
-Export the new algorithm in `tyrannis.algorithm`, update `__all__` and the README's Public API and applicable roadmap entries.
+1. Assign collision-free identifiers, preferably incorporating the algorithm identifier and the candidate's purpose.
+2. Create and initialize them through the normal lifecycle.
+3. Evaluate and consolidate them under the usual particle contract.
+4. Remove them before `post_iteration` returns.
 
-Validate distinct mathematical and execution contracts with focused tests, including initialization, candidate selection, reproducibility, boundary cases, migration, and optional phases when applicable. Mathematical expected results must be derived independently from the implementation. Avoid redundant cases added only for coverage. Run the relevant tests and verify Ruff linting, formatting, and basedpyright diagnostics for new or modified test code.
+Temporary particles must not enter persistent results or migrate to another island.
+
+### 12. Mathematical and numerical requirements
+
+#### 12.1. Fitness semantics
+
+Tyrannis minimizes fitness: lower values are better.
+
+| Fitness value | Interpretation |
+| --- | --- |
+| Finite value | Valid fitness, compared by minimization. |
+| `FITNESS_UNDEFINED` (`+np.inf`) | Undefined or worst fitness. |
+| `-np.inf` | Valid; best possible fitness. |
+| `NaN` | Invalid. |
+
+Use equality with `FITNESS_UNDEFINED`, not `np.isinf`, to detect undefined fitness.
+
+#### 12.2. Numerical stability and boundaries
+
+| Concern | Implementation requirement |
+| --- | --- |
+| Extreme and tied fitness | Handle infinities, ties, zero denominators, zero total weights, overflow, and degenerate distributions explicitly. Avoid indeterminate arithmetic such as `inf - inf` and unintended `NaN` propagation. |
+| Boundaries | Ensure every evaluated coordinate is within `_boundaries`. `Space` does not repair out-of-bounds candidates. Use clipping, reflection, resampling, or another boundary-handling strategy consistent with the algorithm. |
+| Vectorization | Use a stable variable order, for example `tuple(self._boundaries)`, when converting between dictionaries and arrays. Maintain coordinate alignment; prefer `zip(..., strict=True)` where applicable. |
+| Selection | Avoid accidental selection pressure from dictionary insertion order. Where the formulation does not prescribe tie-breaking, an unbiased strategy may randomize candidates before a stable sort using the controlled RNG. |
+| Numerical primitives | Prefer appropriate SciPy implementations, then NumPy, Python's `math`, and finally manual implementations. NumPy remains the natural choice for elementary and vectorized operations. |
+
+Choose methods, tolerances, and regularizations based on mathematical and numerical justification. Avoid arbitrary epsilon adjustments and unnecessary dependencies.
+
+#### 12.3. Mathematical fidelity
+
+Before implementation, define:
+
+- Equations and order of operations.
+- Random distributions and iteration schedules.
+- Selection and replacement policies.
+- Handling of degeneracies and numerical edge cases.
+
+Keep optimization logic native to Tyrannis rather than delegating the complete algorithm to an external optimizer.
+
+### 13. Public API, documentation, and validation
+
+#### 13.1. Implementation conventions
+
+Use concrete generic types, clear private helper signatures, explicit representations for complex internal models, and the project's Ruff conventions. Avoid unnecessary trailing commas in new Python signatures or calls; follow the project's formatter where it requires them.
+
+Expose relevant public configuration through read-only properties rather than exposing private execution state unnecessarily.
+
+| Exception | Appropriate use |
+| --- | --- |
+| `TypeError` | Invalid types. |
+| `ValueError` | Invalid values. |
+| `RuntimeError` | Violated execution invariants. |
+
+#### 13.2. Public constructor docstring
+
+Follow the existing NumPy-style structure. The docstring must describe the optimization algorithm rather than internal framework mechanics.
+
+| Section | Required content |
+| --- | --- |
+| Introduction | Full name, acronym, and search strategy. |
+| Parameters | Every public argument, its type, default, meaning, and constraints. Explain automatic resolution rules. |
+| Notes | Mathematical formulation, equations, schedules, selection, variants and their defaults, limitations, and relevant departures from cited formulations. |
+| References | At least three academic references: foundational publication first, complementary formulation or analysis, and at least one relevant real-world application. Cite sources of selectable mathematical variants. |
+
+Justify default values through the reference formulation or established literature. Explain differences from cited formulations without discussing internal execution machinery. Prefer peer-reviewed articles or established academic books with full DOI links; provide publication links when no DOI is available.
+
+#### 13.3. Public API integration
+
+- Export the algorithm in [`tyrannis.algorithm`](../src/tyrannis/algorithm/__init__.py) and update `__all__`.
+- Update the [README](../README.md)'s Public API and applicable roadmap entries.
+
+#### 13.4. Validation
+
+Validate distinct mathematical and execution contracts with focused tests. Select cases that establish meaningful properties rather than adding redundant cases only for coverage.
+
+| Contract | What to verify |
+| --- | --- |
+| Initialization and selection | Correct initial state and mathematically justified candidate acceptance or rejection. |
+| Mathematics | Expected values derived independently from the implementation under test. |
+| Reproducibility | Correct use of controlled random state under equivalent execution conditions. |
+| Boundary and numerical cases | Valid evaluated coordinates, extreme values, and algorithm-specific degeneracies. |
+| Execution lifecycle and migration | Correct state persistence, reconstruction, and compatibility with supported execution models. |
+| Optional processing phases | Correct second-update and forced-termination behavior, when applicable. |
+
+Run the relevant tests and verify Ruff linting, formatting, and basedpyright diagnostics for new or modified test code, following the [CI/CD guide](CI-CD.md).
 
 An algorithm is complete only when its mathematical behavior, particle lifecycle, state persistence, numerical stability, public API, and compatibility with the supported execution models are coherent.
