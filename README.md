@@ -30,6 +30,8 @@ Tyrannis is a Python framework for solving optimization problems with population
   - [Basic installation](#basic-installation)
   - [Optional features](#optional-features)
 - [Public API](#public-api)
+  - [Orchestrators](#orchestrators)
+    - [Compatibility orchestrators](#compatibility-orchestrators)
   - [Algorithms](#algorithms)
   - [Spaces](#spaces)
   - [Processors](#processors)
@@ -43,6 +45,7 @@ Tyrannis is a Python framework for solving optimization problems with population
     - [Caching](#caching)
   - [Optimization history](#optimization-history)
   - [Parallel processing with processors](#parallel-processing-with-processors)
+  - [Optimization with SciPy](#optimization-with-scipy)
   - [Spark backends](#spark-backends)
     - [Distributed optimization](#distributed-optimization)
     - [Spark Parallel optimization](#spark-parallel-optimization)
@@ -51,10 +54,6 @@ Tyrannis is a Python framework for solving optimization problems with population
     - [MPI Parallel optimization](#mpi-parallel-optimization)
   - [Migration](#migration)
 - [Roadmap](#roadmap)
-    - [Algorithms](#algorithms-1)
-    - [Spaces](#spaces-1)
-    - [Backends](#backends-1)
-    - [Compatibility](#compatibility)
 - [Bibliography](#bibliography)
 - [License](#license)
 
@@ -99,7 +98,26 @@ Official Databricks support targets Databricks Runtime LTS ML environments.
 
 The core optimization requires three components: an **optimizer**, a **search space**, and an **optimization algorithm**. The processor, backend, and migration components are optional and can be added to control how the optimization is executed, parallelized, distributed, and coordinated.
 
-`Optimizer` is the main interface for configuring and running optimizations. It uses `OrchestratorBase` for shared component setup and exposes an `OptimizationHistory` object through `optimizer.history` for reading, working with, and exporting recorded events.
+### Orchestrators
+
+`tyrannis`
+
+Orchestrators provide the interfaces for creating and configuring optimizer objects, combining the components required to run an optimization.
+
+| Import | Description |
+| --- | --- |
+| `Optimizer` | Main interface for configuring and running optimizations in Tyrannis. |
+| `OptimizationHistory` | History object for reading, filtering, and exporting recorded optimization events independently of the optimizer. |
+
+#### Compatibility orchestrators
+
+`tyrannis.compatibility` provides specialized orchestrators for integrating Tyrannis into other scientific packages through their optimization interfaces.
+
+| Import | Description |
+| --- | --- |
+| `scipy.ScipyMinimizer` | Integrates Tyrannis algorithms with `scipy.optimize.minimize` for bounded continuous optimization. |
+
+<br>
 
 ### Algorithms
 
@@ -121,6 +139,7 @@ Algorithms are population-based metaheuristics used to search for a minimum with
 | `CMAES`     | Covariance Matrix Adaptation Evolution Strategy for continuous optimization. \[[14](#ref-14), [15](#ref-15)\] | Evolutionary Algorithm |
 | `EGNA` | Estimation of Gaussian Networks Algorithm, a multivariate continuous Estimation of Distribution Algorithm that learns and samples Gaussian Bayesian networks. \[[16](#ref-16), [17](#ref-17)\] | Estimation of Distribution Algorithm |
 
+<br>
 
 ### Spaces
 
@@ -139,6 +158,7 @@ Spaces define the search domain, including the variables, their bounds or availa
 | `Sequence` | Variable-length ordered sequences selected from a finite set of choices, with repetition allowed and categorical or ordinal decoding. |
 | `Mixed` | Composition of multiple spaces, allowing heterogeneous variable types in the same optimization problem. |
 
+<br>
 
 ### Processors
 
@@ -154,6 +174,7 @@ Processors define how the optimization loop is executed within each machine or e
 
 When no processor is provided, `Optimizer` uses its internal serial processor. This keeps the default execution sequential while allowing parallel particle evaluation to be enabled explicitly.
 
+<br>
 
 ### Backends
 
@@ -170,6 +191,7 @@ Backends define how optimization execution is organized across machines and, for
 
 When no backend is provided, `Optimizer` uses the local backend and executes the optimization on a single machine.
 
+<br>
 
 ### Migrations
 
@@ -416,6 +438,39 @@ optimizer.fit()
 
 ---
 
+### Optimization with SciPy
+
+`ScipyMinimizer` allows Tyrannis algorithms to be used as custom methods in `scipy.optimize.minimize`. This example minimizes a two-variable quadratic function using `PSO` within finite bounds. The algorithm initializes its own population rather than using `x0` as a preferred starting position.
+
+```python
+from scipy.optimize import minimize
+from tyrannis.algorithm import PSO
+from tyrannis.compatibility.scipy import ScipyMinimizer
+
+
+def cost_function(x):
+    return x[0] ** 2 + x[1] ** 2
+
+
+method = ScipyMinimizer(
+    algorithm=PSO(),
+    n_iterations=100,
+    n_particles=50,
+)
+
+result = minimize(
+    cost_function,
+    x0=[0.0, 0.0],
+    bounds=[(-10, 10), (-10, 10)],
+    method=method,
+)
+
+print(result.x)
+print(result.fun)
+```
+
+---
+
 ### Spark backends
 
 Spark backends support both independent optimization islands and parallel processing of a single population. The following examples use an active `SparkSession` assigned to `spark`.
@@ -545,22 +600,22 @@ optimizer.fit()
 
 The following features are planned for upcoming releases:
 
-#### Algorithms
+#### Algorithms <!-- omit in toc -->
 
 * Age-Layered Population Structure
 * Invasive Weed Optimization
 * More Estimation of Distribution Algorithms (EDAs)
 
-#### Spaces
+#### Spaces <!-- omit in toc -->
 
 * Graph-Constrained Search Spaces
 
-#### Backends
+#### Backends <!-- omit in toc -->
 
 * Ray
 * Dask
 
-#### Compatibility
+#### Compatibility <!-- omit in toc -->
 
 * SysIdentPy - CustomMetaMSS integration
 
@@ -568,39 +623,39 @@ The following features are planned for upcoming releases:
 
 ## Bibliography
 
-<a name="ref-1"></a>[1] Kennedy, J. and Eberhart, R. (1995) 'Particle swarm optimization', *Proceedings of ICNN'95 - International Conference on Neural Networks*, pp. 1942–1948. https://doi.org/10.1109/ICNN.1995.488968
+<a id="ref-1" name="ref-1"></a>[1] Kennedy, J. and Eberhart, R. (1995) 'Particle swarm optimization', *Proceedings of ICNN'95 - International Conference on Neural Networks*, pp. 1942–1948. https://doi.org/10.1109/ICNN.1995.488968
 
-<a name="ref-2"></a>[2] Clerc, M. and Kennedy, J. (2002) 'The particle swarm - explosion, stability, and convergence in a multidimensional complex space', *IEEE Transactions on Evolutionary Computation*, 6(1), pp. 58–73. https://doi.org/10.1109/4235.985692
+<a id="ref-2" name="ref-2"></a>[2] Clerc, M. and Kennedy, J. (2002) 'The particle swarm - explosion, stability, and convergence in a multidimensional complex space', *IEEE Transactions on Evolutionary Computation*, 6(1), pp. 58–73. https://doi.org/10.1109/4235.985692
 
-<a name="ref-3"></a>[3] Rashedi, E., Nezamabadi-pour, H. and Saryazdi, S. (2009) 'GSA: A gravitational search algorithm', *Information Sciences*, 179(13), pp. 2232–2248. https://doi.org/10.1016/j.ins.2009.03.004
+<a id="ref-3" name="ref-3"></a>[3] Rashedi, E., Nezamabadi-pour, H. and Saryazdi, S. (2009) 'GSA: A gravitational search algorithm', *Information Sciences*, 179(13), pp. 2232–2248. https://doi.org/10.1016/j.ins.2009.03.004
 
-<a name="ref-4"></a>[4] Mirjalili, S. and Hashim, S.Z.M. (2010) 'A new hybrid PSOGSA algorithm for function optimization', *Proceedings of the International Conference on Computer and Information Application (ICCIA 2010)*, pp. 374–377. https://doi.org/10.1109/ICCIA.2010.6141614
+<a id="ref-4" name="ref-4"></a>[4] Mirjalili, S. and Hashim, S.Z.M. (2010) 'A new hybrid PSOGSA algorithm for function optimization', *Proceedings of the International Conference on Computer and Information Application (ICCIA 2010)*, pp. 374–377. https://doi.org/10.1109/ICCIA.2010.6141614
 
-<a name="ref-5"></a>[5] Socha, K. and Dorigo, M. (2008) 'Ant colony optimization for continuous domains', *European Journal of Operational Research*, 185(3), pp. 1155–1173. https://doi.org/10.1016/j.ejor.2006.06.046
+<a id="ref-5" name="ref-5"></a>[5] Socha, K. and Dorigo, M. (2008) 'Ant colony optimization for continuous domains', *European Journal of Operational Research*, 185(3), pp. 1155–1173. https://doi.org/10.1016/j.ejor.2006.06.046
 
-<a name="ref-6"></a>[6] Karaboga, D. and Basturk, B. (2007) 'A powerful and efficient algorithm for numerical function optimization: Artificial Bee Colony (ABC) algorithm', *Journal of Global Optimization*, 39(3), pp. 459–471. https://doi.org/10.1007/s10898-007-9149-x
+<a id="ref-6" name="ref-6"></a>[6] Karaboga, D. and Basturk, B. (2007) 'A powerful and efficient algorithm for numerical function optimization: Artificial Bee Colony (ABC) algorithm', *Journal of Global Optimization*, 39(3), pp. 459–471. https://doi.org/10.1007/s10898-007-9149-x
 
-<a name="ref-7"></a>[7] Mirjalili, S., Mirjalili, S.M. and Lewis, A. (2014) 'Grey Wolf Optimizer', *Advances in Engineering Software*, 69, pp. 46–61. https://doi.org/10.1016/j.advengsoft.2013.12.007
+<a id="ref-7" name="ref-7"></a>[7] Mirjalili, S., Mirjalili, S.M. and Lewis, A. (2014) 'Grey Wolf Optimizer', *Advances in Engineering Software*, 69, pp. 46–61. https://doi.org/10.1016/j.advengsoft.2013.12.007
 
-<a name="ref-8"></a>[8] Long, W., Jiao, J., Liang, X. and Tang, M. (2018) 'An exploration-enhanced grey wolf optimizer to solve high-dimensional numerical optimization', *Engineering Applications of Artificial Intelligence*, 68, pp. 63–80. https://doi.org/10.1016/j.engappai.2017.10.024
+<a id="ref-8" name="ref-8"></a>[8] Long, W., Jiao, J., Liang, X. and Tang, M. (2018) 'An exploration-enhanced grey wolf optimizer to solve high-dimensional numerical optimization', *Engineering Applications of Artificial Intelligence*, 68, pp. 63–80. https://doi.org/10.1016/j.engappai.2017.10.024
 
-<a name="ref-9"></a>[9] Mirjalili, S. and Lewis, A. (2016) 'The Whale Optimization Algorithm', *Advances in Engineering Software*, 95, pp. 51–67. https://doi.org/10.1016/j.advengsoft.2016.01.008
+<a id="ref-9" name="ref-9"></a>[9] Mirjalili, S. and Lewis, A. (2016) 'The Whale Optimization Algorithm', *Advances in Engineering Software*, 95, pp. 51–67. https://doi.org/10.1016/j.advengsoft.2016.01.008
 
-<a name="ref-10"></a>[10] Zhong, M. and Long, W. (2017) 'Whale optimization algorithm with nonlinear control parameter', *MATEC Web of Conferences*, 139, 00157. https://doi.org/10.1051/matecconf/201713900157
+<a id="ref-10" name="ref-10"></a>[10] Zhong, M. and Long, W. (2017) 'Whale optimization algorithm with nonlinear control parameter', *MATEC Web of Conferences*, 139, 00157. https://doi.org/10.1051/matecconf/201713900157
 
-<a name="ref-11"></a>[11] Eshelman, L.J. and Schaffer, J.D. (1993) 'Real-coded genetic algorithms and interval-schemata', *Foundations of Genetic Algorithms*, 2, pp. 187–202. https://doi.org/10.1016/B978-0-08-094832-4.50018-0
+<a id="ref-11" name="ref-11"></a>[11] Eshelman, L.J. and Schaffer, J.D. (1993) 'Real-coded genetic algorithms and interval-schemata', *Foundations of Genetic Algorithms*, 2, pp. 187–202. https://doi.org/10.1016/B978-0-08-094832-4.50018-0
 
-<a name="ref-12"></a>[12] Deb, K. and Deb, D. (2014) 'Analysing mutation schemes for real-parameter genetic algorithms', *International Journal of Artificial Intelligence and Soft Computing*, 4(1), pp. 1–28. https://doi.org/10.1504/IJAISC.2014.059280
+<a id="ref-12" name="ref-12"></a>[12] Deb, K. and Deb, D. (2014) 'Analysing mutation schemes for real-parameter genetic algorithms', *International Journal of Artificial Intelligence and Soft Computing*, 4(1), pp. 1–28. https://doi.org/10.1504/IJAISC.2014.059280
 
-<a name="ref-13"></a>[13] Storn, R. and Price, K. (1997) 'Differential Evolution - a simple and efficient heuristic for global optimization over continuous spaces', *Journal of Global Optimization*, 11, pp. 341–359. https://doi.org/10.1023/A:1008202821328
+<a id="ref-13" name="ref-13"></a>[13] Storn, R. and Price, K. (1997) 'Differential Evolution - a simple and efficient heuristic for global optimization over continuous spaces', *Journal of Global Optimization*, 11, pp. 341–359. https://doi.org/10.1023/A:1008202821328
 
-<a name="ref-14"></a>[14] Hansen, N. and Ostermeier, A. (2001) 'Completely derandomized self-adaptation in evolution strategies', *Evolutionary Computation*, 9(2), pp. 159–195. https://doi.org/10.1162/106365601750190398
+<a id="ref-14" name="ref-14"></a>[14] Hansen, N. and Ostermeier, A. (2001) 'Completely derandomized self-adaptation in evolution strategies', *Evolutionary Computation*, 9(2), pp. 159–195. https://doi.org/10.1162/106365601750190398
 
-<a name="ref-15"></a>[15] Hansen, N. (2006) 'The CMA Evolution Strategy: A comparing review', in *Towards a New Evolutionary Computation*, pp. 75–102. https://doi.org/10.1007/3-540-32494-1_4
+<a id="ref-15" name="ref-15"></a>[15] Hansen, N. (2006) 'The CMA Evolution Strategy: A comparing review', in *Towards a New Evolutionary Computation*, pp. 75–102. https://doi.org/10.1007/3-540-32494-1_4
 
-<a name="ref-16"></a>[16] Bengoetxea, E., Miquélez, T., Larrañaga, P. and Lozano, J.A. (2002) 'Experimental results in function optimization with EDAs in continuous domain', in *Estimation of Distribution Algorithms: A New Tool for Evolutionary Computation*, pp. 181–194. https://doi.org/10.1007/978-1-4615-1539-5_8
+<a id="ref-16" name="ref-16"></a>[16] Bengoetxea, E., Miquélez, T., Larrañaga, P. and Lozano, J.A. (2002) 'Experimental results in function optimization with EDAs in continuous domain', in *Estimation of Distribution Algorithms: A New Tool for Evolutionary Computation*, pp. 181–194. https://doi.org/10.1007/978-1-4615-1539-5_8
 
-<a name="ref-17"></a>[17] Geiger, D. and Heckerman, D. (1994) 'Learning Gaussian networks', *Uncertainty Proceedings 1994*, pp. 235–243. https://doi.org/10.1016/B978-1-55860-332-5.50035-3
+<a id="ref-17" name="ref-17"></a>[17] Geiger, D. and Heckerman, D. (1994) 'Learning Gaussian networks', *Uncertainty Proceedings 1994*, pp. 235–243. https://doi.org/10.1016/B978-1-55860-332-5.50035-3
 
 <br>
 
